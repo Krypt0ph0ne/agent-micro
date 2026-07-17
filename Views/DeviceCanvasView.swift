@@ -1,0 +1,189 @@
+import SwiftUI
+
+struct DeviceCanvasView: View {
+    let profile: MacropadProfile
+    @Binding var selectedControl: HardwareControl
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                Text("Hardware")
+                    .font(.headline)
+                ContextInfoButton(
+                    title: "Virtuelles CodexPad",
+                    message: "Klicke eine der sechs Tasten. Beim Drehrad sind Links-Drehen, Drücken und Rechts-Drehen drei getrennt auswählbare Aktionen."
+                )
+                Spacer()
+                Text("3 × 2 + Drehrad")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(alignment: .center, spacing: 10) {
+                VStack(spacing: 8) {
+                    ForEach(0..<2, id: \.self) { row in
+                        HStack(spacing: 7) {
+                            ForEach(0..<3, id: \.self) { column in
+                                if let control = HardwareControl.buttons.first(where: { $0.keyPosition?.row == row && $0.keyPosition?.column == column }) {
+                                    KeyControlView(
+                                        control: control,
+                                        action: profile.action(for: control),
+                                        isSelected: selectedControl == control
+                                    ) { selectedControl = control }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                EncoderControlView(
+                    profile: profile,
+                    selectedControl: $selectedControl
+                )
+            }
+            .padding(10)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.black.opacity(0.88), Color(nsColor: .darkGray).opacity(0.78)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.16), radius: 8, y: 5)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                Text("CODEXPAD")
+                    .font(.system(size: 7, weight: .bold, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundStyle(.white.opacity(0.28))
+                    .padding(8)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Virtuelles CodexPad mit sechs Tasten und drei Drehrad-Aktionen")
+    }
+}
+
+struct KeyControlView: View {
+    let control: HardwareControl
+    let action: KeyboardAction
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 3) {
+                    Text(control.title.replacingOccurrences(of: "Taste ", with: ""))
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    Spacer(minLength: 0)
+                    Image(systemName: action.icon)
+                        .font(.system(size: 9, weight: .medium))
+                }
+                Spacer(minLength: 0)
+                Text(action.label)
+                    .font(.system(size: 9, weight: .semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .foregroundStyle(isSelected ? Color.primary : Color.white.opacity(0.9))
+            .padding(7)
+            .frame(width: 64, height: 68, alignment: .topLeading)
+            .background(keyMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.12), lineWidth: isSelected ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.3), radius: 2, y: 2)
+        .accessibilityLabel("\(control.title): \(action.label)")
+        .accessibilityHint("Auswählen und rechts neu belegen")
+    }
+
+    private var keyMaterial: some ShapeStyle {
+        isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.22)) : AnyShapeStyle(Color.white.opacity(0.10))
+    }
+}
+
+struct EncoderControlView: View {
+    let profile: MacropadProfile
+    @Binding var selectedControl: HardwareControl
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                EncoderGestureButton(
+                    control: .encoderLeft,
+                    action: profile.action(for: .encoderLeft),
+                    selected: selectedControl == .encoderLeft
+                ) { selectedControl = .encoderLeft }
+                EncoderGestureButton(
+                    control: .encoderRight,
+                    action: profile.action(for: .encoderRight),
+                    selected: selectedControl == .encoderRight
+                ) { selectedControl = .encoderRight }
+            }
+
+            Button { selectedControl = .encoderPress } label: {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [.white.opacity(0.26), .black.opacity(0.38)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    Circle()
+                        .strokeBorder(selectedControl == .encoderPress ? Color.accentColor : .white.opacity(0.26), lineWidth: selectedControl == .encoderPress ? 2.5 : 1)
+                    VStack(spacing: 2) {
+                        Image(systemName: "dial.medium")
+                            .font(.system(size: 16))
+                        Text(profile.action(for: .encoderPress).label)
+                            .font(.system(size: 8, weight: .semibold))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                    }
+                    .foregroundStyle(.white.opacity(0.9))
+                    .frame(width: 56)
+                }
+                .frame(width: 70, height: 70)
+            }
+            .buttonStyle(.plain)
+            .shadow(color: .black.opacity(0.28), radius: 3, y: 3)
+            .accessibilityLabel("Drehrad drücken: \(profile.action(for: .encoderPress).label)")
+        }
+        .frame(width: 78)
+    }
+}
+
+private struct EncoderGestureButton: View {
+    let control: HardwareControl
+    let action: KeyboardAction
+    let selected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            Image(systemName: control == .encoderLeft ? "arrow.counterclockwise" : "arrow.clockwise")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(selected ? Color.accentColor : .white.opacity(0.75))
+                .frame(width: 34, height: 30)
+                .background(selected ? Color.accentColor.opacity(0.20) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(selected ? Color.accentColor.opacity(0.8) : .white.opacity(0.08))
+                }
+        }
+        .buttonStyle(.plain)
+        .help("\(control.title): \(action.label)")
+        .accessibilityLabel("\(control.title): \(action.label)")
+    }
+}

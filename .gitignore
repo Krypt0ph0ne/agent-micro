@@ -1,0 +1,4 @@
+.build/
+dist/
+Support/ch57x-keyboard-tool
+*.xcuserstate
