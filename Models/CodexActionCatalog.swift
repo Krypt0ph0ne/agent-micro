@@ -1,0 +1,82 @@
+import Foundation
+
+enum CodexActionExecution: String, Codable, Hashable {
+    case keyboardShortcut
+    case configurableShortcut
+    case deepLink
+    case unavailable
+
+    var title: String {
+        switch self {
+        case .keyboardShortcut: "Direkter Shortcut"
+        case .configurableShortcut: "In Codex konfigurierbar"
+        case .deepLink: "Codex Deep Link"
+        case .unavailable: "Nicht stabil verfügbar"
+        }
+    }
+}
+
+struct CodexActionDefinition: Codable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var description: String
+    var category: String
+    var icon: String
+    var shortcut: String?
+    var deviceMacro: String?
+    var modifiers: [String]
+    var execution: CodexActionExecution
+    var codexCommandID: String?
+    var deepLink: String?
+    var compatibleWith: String
+    var availabilityNote: String?
+
+    var isDirectlyAssignable: Bool { execution == .keyboardShortcut && deviceMacro != nil }
+}
+
+struct CodexActionCatalogDocument: Codable {
+    var schemaVersion: Int
+    var source: String
+    var verifiedAgainst: String
+    var actions: [CodexActionDefinition]
+}
+
+struct CodexActionCatalog {
+    let document: CodexActionCatalogDocument
+
+    init(bundle: Bundle = .module) {
+        guard
+            let url = bundle.url(forResource: "CodexActions", withExtension: "json"),
+            let data = try? Data(contentsOf: url),
+            let document = try? JSONDecoder().decode(CodexActionCatalogDocument.self, from: data)
+        else {
+            self.document = CodexActionCatalogDocument(schemaVersion: 0, source: "Unavailable", verifiedAgainst: "Unavailable", actions: [])
+            return
+        }
+        self.document = document
+    }
+
+    var actions: [CodexActionDefinition] { document.actions }
+    var categories: [String] { Array(Set(actions.map(\.category))).sorted() }
+
+    func action(id: String) -> CodexActionDefinition? {
+        actions.first(where: { $0.id == id })
+    }
+
+    func keyboardAction(id: String) -> KeyboardAction? {
+        guard let action = action(id: id), action.isDirectlyAssignable else { return nil }
+        return KeyboardAction(
+            kind: .codexShortcut,
+            label: action.title,
+            icon: action.icon,
+            deviceMacro: action.deviceMacro,
+            codexActionID: action.id,
+            deepLink: action.deepLink
+        )
+    }
+
+    func deferredAction(id: String) -> KeyboardAction? {
+        guard let action = action(id: id), action.execution == .deepLink, let deepLink = action.deepLink else { return nil }
+        return KeyboardAction(kind: .codexDeepLink, label: action.title, icon: action.icon, codexActionID: action.id, deepLink: deepLink)
+    }
+}

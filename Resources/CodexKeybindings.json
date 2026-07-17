@@ -1,0 +1,14 @@
+[
+  {
+    "command": "composer.cycleReasoningEffort",
+    "key": "F20"
+  },
+  {
+    "command": "composer.decreaseReasoningEffort",
+    "key": "F18"
+  },
+  {
+    "command": "composer.increaseReasoningEffort",
+    "key": "F19"
+  }
+]
