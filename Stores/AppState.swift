@@ -10,6 +10,7 @@ final class AppState {
     let device: DeviceService
     let inputMonitor: HIDInputMonitor
     let reasoningAutomation: CodexReasoningAutomationService
+    let padEvents: CodexPadEventService
 
     init() {
         let catalog = CodexActionCatalog()
@@ -20,9 +21,11 @@ final class AppState {
         self.device = DeviceService(diagnostics: diagnostics)
         self.inputMonitor = HIDInputMonitor()
         self.reasoningAutomation = CodexReasoningAutomationService()
+        self.padEvents = CodexPadEventService()
     }
 
     func refreshDevice() {
         device.refresh()
+        padEvents.refresh(enabled: device.currentDevice?.isCodexPadFirmware == true)
     }
 }

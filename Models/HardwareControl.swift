@@ -20,6 +20,15 @@ enum HardwareControl: String, CaseIterable, Codable, Identifiable, Hashable {
         }
     }
 
+    var shortTitle: String {
+        switch self {
+        case .encoderLeft: "Links drehen"
+        case .encoderPress: "Drehrad drücken"
+        case .encoderRight: "Rechts drehen"
+        default: title
+        }
+    }
+
     var icon: String {
         switch self {
         case .key1, .key2, .key3, .key4, .key5, .key6: "keyboard"

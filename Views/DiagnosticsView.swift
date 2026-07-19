@@ -19,6 +19,7 @@ struct DiagnosticsView: View {
                 }
 
                 DeviceDiagnosticsCard(appState: appState)
+                CodexPadProtocolCard(appState: appState)
                 InputMonitorCard(appState: appState)
                 LEDDiagnosticsCard(appState: appState)
 
@@ -63,6 +64,32 @@ struct DiagnosticsView: View {
 
     private func color(for level: DiagnosticEntry.Level) -> Color {
         switch level { case .info: .blue; case .success: .green; case .warning: .orange; case .error: .red }
+    }
+}
+
+private struct CodexPadProtocolCard: View {
+    let appState: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("CodexPad-Protokoll", systemImage: "externaldrive.connected.to.line.below")
+                    .font(.headline)
+                Spacer()
+                Button("Status abfragen") { appState.padEvents.requestStatus() }
+            }
+            Text(appState.padEvents.status).font(.caption).foregroundStyle(.secondary)
+            if let firmware = appState.padEvents.firmwareStatus {
+                LabeledContent("Firmware", value: firmware.version)
+                LabeledContent("Fähigkeiten", value: String(format: "0x%02X", firmware.capabilities))
+                LabeledContent("Gedrückte Controls", value: String(format: "0x%03X", firmware.pressedMask))
+            }
+            if let event = appState.padEvents.events.first {
+                LabeledContent("Letztes physisches Ereignis", value: "Control \(event.control + 1) · \(String(describing: event.phase)) · #\(event.sequence)")
+            }
+        }
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
