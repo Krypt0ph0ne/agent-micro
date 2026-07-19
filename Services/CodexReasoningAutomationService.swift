@@ -38,10 +38,24 @@ enum CodexEncoderCommand {
 
 }
 
-/// The encoder deliberately has only three independent actions: rotate left
-/// and right use direct Codex reasoning keybindings, while repeated presses
-/// open and close the model picker. No hold state, picker navigation, or UI
-/// coordinates are used.
+private enum CodexDismissibleArea: String {
+    case modelPicker
+    case settings
+    case sideChat
+
+    var title: String {
+        switch self {
+        case .modelPicker: "Model Picker"
+        case .settings: "Settings"
+        case .sideChat: "Side Chat"
+        }
+    }
+
+}
+
+/// The hardware uses private function-key triggers. F13–F15 toggle
+/// dismissible Codex areas; F22–F24 remain reserved for the encoder's
+/// reasoning controls. No UI coordinates or picker navigation are used.
 @MainActor
 @Observable
 final class CodexReasoningAutomationService {
@@ -50,7 +64,7 @@ final class CodexReasoningAutomationService {
     private static let migrationKey = "CodexPad.simpleEncoderV5"
     private var hidManager: IOHIDManager?
     private var inputDebouncer = HIDInputDebouncer()
-    private var modelPickerOpenedByEncoder = false
+    private var openDismissibleArea: CodexDismissibleArea?
 
     private(set) var status = "Deaktiviert"
     private(set) var lastInput = "Noch kein Drehrad-Signal empfangen"
@@ -117,11 +131,35 @@ final class CodexReasoningAutomationService {
     }
 
     func toggleModelPicker() {
-        if modelPickerOpenedByEncoder {
-            modelPickerOpenedByEncoder = false
-            _ = perform(.closePicker)
-        } else if perform(.openPicker) {
-            modelPickerOpenedByEncoder = true
+        toggle(.modelPicker)
+    }
+
+    private func toggle(_ area: CodexDismissibleArea) {
+        guard let codex = readyCodexApplication() else { return }
+        codex.activate(options: [.activateAllWindows])
+
+        if openDismissibleArea == area {
+            openDismissibleArea = nil
+            status = "Schließen: \(area.title)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                Self.postKey(UInt16(kVK_Escape))
+                self?.status = "\(area.title) geschlossen."
+            }
+            return
+        }
+
+        openDismissibleArea = area
+        status = "Öffnen: \(area.title)"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            switch area {
+            case .modelPicker:
+                Self.openModelPickerShortcut()
+            case .settings:
+                Self.postKey(UInt16(kVK_ANSI_Comma), flags: [.maskCommand])
+            case .sideChat:
+                break
+            }
+            self?.status = "\(area.title) offen: erneut drücken zum Schließen."
         }
     }
 
@@ -148,7 +186,7 @@ final class CodexReasoningAutomationService {
 
     private func updateMonitoring() {
         stopMonitoring()
-        modelPickerOpenedByEncoder = false
+        openDismissibleArea = nil
         guard isEnabled else {
             status = "Deaktiviert"
             return
@@ -162,13 +200,16 @@ final class CodexReasoningAutomationService {
         status = "Bereit: Drehen = Aufwand · Drücken = Model Picker."
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        let matching: [String: Any] = [
-            kIOHIDVendorIDKey as String: 0x1189,
-            kIOHIDProductIDKey as String: 0x8890,
-            kIOHIDPrimaryUsagePageKey as String: 0x01,
-            kIOHIDPrimaryUsageKey as String: 0x06
-        ]
-        IOHIDManagerSetDeviceMatching(manager, matching as CFDictionary)
+        let keyboardIdentity: (Int, Int) -> [String: Any] = { vendorID, productID in
+            [
+                kIOHIDVendorIDKey as String: vendorID,
+                kIOHIDProductIDKey as String: productID,
+                kIOHIDPrimaryUsagePageKey as String: 0x01,
+                kIOHIDPrimaryUsageKey as String: 0x06
+            ]
+        }
+        let matching = [keyboardIdentity(0x1189, 0x8890), keyboardIdentity(0x4249, 0x4287)]
+        IOHIDManagerSetDeviceMatchingMultiple(manager, matching as CFArray)
         IOHIDManagerRegisterInputValueCallback(manager, Self.inputCallback, Unmanaged.passUnretained(self).toOpaque())
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -188,7 +229,7 @@ final class CodexReasoningAutomationService {
     }
 
     private func handleHIDValue(usagePage: Int, usage: Int, value: Int) {
-        guard usagePage == 0x07, (0x71...0x73).contains(usage) else { return }
+        guard usagePage == 0x07, [0x68, 0x69, 0x6A, 0x71, 0x72, 0x73].contains(usage) else { return }
 
         guard value != 0 else { return }
         let now = ProcessInfo.processInfo.systemUptime
@@ -196,6 +237,12 @@ final class CodexReasoningAutomationService {
         recordInput(usage: usage, value: value)
 
         switch usage {
+        case 0x68: // F13: Settings
+            toggle(.settings)
+        case 0x69: // F14: Model Picker
+            toggle(.modelPicker)
+        case 0x6A: // F15: Side Chat (configured in Codex)
+            toggle(.sideChat)
         case 0x71: // F22: rotate left
             perform(.decreaseEffort)
         case 0x72: // F23: press

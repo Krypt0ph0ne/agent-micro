@@ -1,5 +1,9 @@
 [
   {
+    "command": "globalDictationHold",
+    "key": "Command+F17"
+  },
+  {
     "command": "composer.cycleReasoningEffort",
     "key": "F20"
   },
