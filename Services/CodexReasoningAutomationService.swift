@@ -38,6 +38,10 @@ enum CodexEncoderCommand {
 
 }
 
+enum CodexModelListStep {
+    case next, previous
+}
+
 private enum CodexDismissibleArea: String {
     case modelPicker
     case settings
@@ -62,9 +66,14 @@ final class CodexReasoningAutomationService {
     private let logger = Logger(subsystem: "com.codexpad.app", category: "encoder")
     private static let preferenceKey = "CodexPad.encoderAutomationEnabled"
     private static let migrationKey = "CodexPad.simpleEncoderV5"
+    private static let modelListNavigationKey = "CodexPad.encoderModelListNavigation"
     private var hidManager: IOHIDManager?
     private var inputDebouncer = HIDInputDebouncer()
     private var openDismissibleArea: CodexDismissibleArea?
+    /// True once rotation has driven the open Model Picker into its "Modell"
+    /// submenu, so further rotation moves the highlighted model instead of
+    /// re-opening the menu, and a press confirms instead of just toggling.
+    private var isNavigatingModelList = false
 
     private(set) var status = "Deaktiviert"
     private(set) var lastInput = "Noch kein Drehrad-Signal empfangen"
@@ -76,6 +85,15 @@ final class CodexReasoningAutomationService {
             updateMonitoring()
         }
     }
+    /// Alternate encoder behaviour: instead of sending the direct F18/F19
+    /// reasoning-effort shortcuts, rotation opens the Model Picker and drives
+    /// its "Modell" submenu with arrow keys; pressing confirms the highlight.
+    var useModelListNavigation: Bool {
+        didSet {
+            UserDefaults.standard.set(useModelListNavigation, forKey: Self.modelListNavigationKey)
+            isNavigatingModelList = false
+        }
+    }
 
     init() {
         self.hasAccessibilityPermission = AXIsProcessTrusted()
@@ -85,6 +103,7 @@ final class CodexReasoningAutomationService {
             UserDefaults.standard.set(true, forKey: Self.migrationKey)
         }
         self.isEnabled = UserDefaults.standard.bool(forKey: Self.preferenceKey)
+        self.useModelListNavigation = UserDefaults.standard.bool(forKey: Self.modelListNavigationKey)
         updateMonitoring()
     }
 
@@ -131,7 +150,56 @@ final class CodexReasoningAutomationService {
     }
 
     func toggleModelPicker() {
+        if useModelListNavigation, isNavigatingModelList {
+            confirmModelSelection()
+            return
+        }
         toggle(.modelPicker)
+    }
+
+    /// Rotation entry point for the alternate encoder mode: opens the Model
+    /// Picker (and drills into its "Modell" submenu) on the first turn, then
+    /// moves the highlight up/down on every subsequent turn.
+    func navigateModelList(_ step: CodexModelListStep) {
+        guard let codex = readyCodexApplication() else { return }
+        codex.activate(options: [.activateAllWindows])
+
+        guard openDismissibleArea == .modelPicker, isNavigatingModelList else {
+            openDismissibleArea = .modelPicker
+            status = "Modellliste öffnen …"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                Self.openModelPickerShortcut()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                    // "Modell" is the top entry of the menu; Down highlights it,
+                    // Right expands into its submenu of models.
+                    Self.postKey(UInt16(kVK_DownArrow))
+                    Self.postKey(UInt16(kVK_RightArrow))
+                    self?.isNavigatingModelList = true
+                    self?.status = "Modellliste offen: Drehen wählt, Drücken übernimmt."
+                }
+            }
+            return
+        }
+
+        let keyCode = step == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
+        status = step == .next ? "Nächstes Modell" : "Vorheriges Modell"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            Self.postKey(keyCode)
+            self?.status = "Modellliste: Drehen wählt, Drücken übernimmt."
+        }
+    }
+
+    /// Confirms the currently highlighted model and closes the picker.
+    func confirmModelSelection() {
+        guard let codex = readyCodexApplication() else { return }
+        codex.activate(options: [.activateAllWindows])
+        status = "Modell übernehmen …"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            Self.postKey(UInt16(kVK_Return))
+            self?.isNavigatingModelList = false
+            self?.openDismissibleArea = nil
+            self?.status = "Modell übernommen."
+        }
     }
 
     private func toggle(_ area: CodexDismissibleArea) {
@@ -140,6 +208,7 @@ final class CodexReasoningAutomationService {
 
         if openDismissibleArea == area {
             openDismissibleArea = nil
+            isNavigatingModelList = false
             status = "Schließen: \(area.title)"
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
                 Self.postKey(UInt16(kVK_Escape))
@@ -187,6 +256,7 @@ final class CodexReasoningAutomationService {
     private func updateMonitoring() {
         stopMonitoring()
         openDismissibleArea = nil
+        isNavigatingModelList = false
         guard isEnabled else {
             status = "Deaktiviert"
             return
@@ -197,7 +267,9 @@ final class CodexReasoningAutomationService {
             return
         }
 
-        status = "Bereit: Drehen = Aufwand · Drücken = Model Picker."
+        status = useModelListNavigation
+            ? "Bereit: Drehen = Modellliste navigieren · Drücken = übernehmen."
+            : "Bereit: Drehen = Aufwand · Drücken = Model Picker."
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let keyboardIdentity: (Int, Int) -> [String: Any] = { vendorID, productID in
@@ -244,11 +316,19 @@ final class CodexReasoningAutomationService {
         case 0x6A: // F15: Side Chat (configured in Codex)
             toggle(.sideChat)
         case 0x71: // F22: rotate left
-            perform(.decreaseEffort)
+            if useModelListNavigation {
+                navigateModelList(.previous)
+            } else {
+                perform(.decreaseEffort)
+            }
         case 0x72: // F23: press
             toggleModelPicker()
         case 0x73: // F24: rotate right
-            perform(.increaseEffort)
+            if useModelListNavigation {
+                navigateModelList(.next)
+            } else {
+                perform(.increaseEffort)
+            }
         default:
             break
         }
