@@ -607,14 +607,19 @@ enum ProfileFactory {
         return profile
     }
 
+    /// F22/F23/F24 are private triggers with no built-in Codex meaning, so the
+    /// firmware never bypasses CodexPad here: every rotate and press edge
+    /// reaches `CodexReasoningAutomationService`, which then decides whether
+    /// to emit the direct F18/F19 reasoning shortcuts or (in model-list
+    /// navigation mode) arrow-key menu navigation.
     static func reasoningTriggerAction(for control: HardwareControl) -> KeyboardAction {
         switch control {
         case .encoderLeft:
-            KeyboardAction(kind: .singleKey, label: "Aufwand −", icon: "minus.circle", deviceMacro: "f18", codexActionID: "encoder-effort-decrease")
+            KeyboardAction(kind: .singleKey, label: "Aufwand −", icon: "minus.circle", deviceMacro: "f22", codexActionID: "encoder-effort-decrease")
         case .encoderPress:
             KeyboardAction(kind: .singleKey, label: "Modellwahl umschalten", icon: "cube", deviceMacro: "f23", codexActionID: "encoder-model-modifier")
         case .encoderRight:
-            KeyboardAction(kind: .singleKey, label: "Aufwand +", icon: "plus.circle", deviceMacro: "f19", codexActionID: "encoder-effort-increase")
+            KeyboardAction(kind: .singleKey, label: "Aufwand +", icon: "plus.circle", deviceMacro: "f24", codexActionID: "encoder-effort-increase")
         case .key1, .key2, .key3, .key4, .key5, .key6:
             .disabled
         }

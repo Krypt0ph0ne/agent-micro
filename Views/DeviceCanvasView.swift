@@ -126,18 +126,15 @@ struct EncoderControlView: View {
     @Binding var selectedControl: HardwareControl
 
     var body: some View {
+        // All three encoder controls are edited as a single group (they share
+        // one tap-vs-hold behaviour), so any of the three highlights and
+        // selects the whole trio.
+        let isSelected = HardwareControl.encoderActions.contains(selectedControl)
+
         VStack(spacing: 6) {
             HStack(spacing: 4) {
-                EncoderGestureButton(
-                    control: .encoderLeft,
-                    action: profile.action(for: .encoderLeft),
-                    selected: selectedControl == .encoderLeft
-                ) { selectedControl = .encoderLeft }
-                EncoderGestureButton(
-                    control: .encoderRight,
-                    action: profile.action(for: .encoderRight),
-                    selected: selectedControl == .encoderRight
-                ) { selectedControl = .encoderRight }
+                EncoderGestureButton(control: .encoderLeft, selected: isSelected) { selectedControl = .encoderLeft }
+                EncoderGestureButton(control: .encoderRight, selected: isSelected) { selectedControl = .encoderRight }
             }
 
             Button { selectedControl = .encoderPress } label: {
@@ -151,11 +148,11 @@ struct EncoderControlView: View {
                             )
                         )
                     Circle()
-                        .strokeBorder(selectedControl == .encoderPress ? Color.accentColor : .white.opacity(0.26), lineWidth: selectedControl == .encoderPress ? 2.5 : 1)
+                        .strokeBorder(isSelected ? Color.accentColor : .white.opacity(0.26), lineWidth: isSelected ? 2.5 : 1)
                     VStack(spacing: 2) {
                         Image(systemName: "dial.medium")
                             .font(.system(size: 16))
-                        Text(profile.action(for: .encoderPress).label)
+                        Text("Drehrad")
                             .font(.system(size: 8, weight: .semibold))
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
@@ -167,7 +164,7 @@ struct EncoderControlView: View {
             }
             .buttonStyle(.plain)
             .shadow(color: .black.opacity(0.28), radius: 3, y: 3)
-            .accessibilityLabel("Drehrad drücken: \(profile.action(for: .encoderPress).label)")
+            .accessibilityLabel("Drehrad: Aufwand & Modellwahl")
         }
         .frame(width: 86)
     }
@@ -175,7 +172,6 @@ struct EncoderControlView: View {
 
 private struct EncoderGestureButton: View {
     let control: HardwareControl
-    let action: KeyboardAction
     let selected: Bool
     let select: () -> Void
 
@@ -192,7 +188,7 @@ private struct EncoderGestureButton: View {
                 }
         }
         .buttonStyle(.plain)
-        .help("\(control.title): \(action.label)")
-        .accessibilityLabel("\(control.title): \(action.label)")
+        .help(control.title)
+        .accessibilityLabel(control.title)
     }
 }

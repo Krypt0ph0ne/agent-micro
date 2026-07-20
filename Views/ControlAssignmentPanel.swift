@@ -33,6 +33,14 @@ struct ControlAssignmentPanel: View {
     }
 
     var body: some View {
+        if HardwareControl.encoderActions.contains(control) {
+            EncoderAssignmentSection(appState: appState)
+        } else {
+            keyAssignmentBody
+        }
+    }
+
+    private var keyAssignmentBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: control.icon)
@@ -109,19 +117,13 @@ struct ControlAssignmentPanel: View {
                 CodexAgentAssignmentView(appState: appState, control: control)
             }
 
-            if HardwareControl.buttons.contains(control) && !isShowingActionPicker {
+            if !isShowingActionPicker {
                 TapHoldSection(appState: appState, control: control)
             }
 
-            if HardwareControl.encoderActions.contains(control) {
-                Label("Direkt vom Pad gesendet", systemImage: "cable.connector")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else {
-                Label("Klick links, Auswahl rechts.", systemImage: "cursorarrow.click")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
+            Label("Klick links, Auswahl rechts.", systemImage: "cursorarrow.click")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -144,15 +146,7 @@ struct ControlAssignmentPanel: View {
     private var actionPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                if HardwareControl.buttons.contains(control) {
-                    Button("Agent", systemImage: "terminal.fill") { chooseAgent() }
-                }
-                if HardwareControl.encoderActions.contains(control) {
-                    Button("Drehrad", systemImage: "dial.medium") {
-                        appState.profiles.updateAction(ProfileFactory.reasoningTriggerAction(for: control), for: control)
-                        isShowingActionPicker = false
-                    }
-                }
+                Button("Agent", systemImage: "terminal.fill") { chooseAgent() }
                 Button("Text", systemImage: "paperplane.fill") {
                     isPresentingTextSubmission = true
                     isShowingActionPicker = false
@@ -267,18 +261,12 @@ struct ControlAssignmentPanel: View {
     }
 
     private var infoMessage: String {
-        if HardwareControl.encoderActions.contains(control) {
-            if control == .encoderPress {
-                return "Der Encoder-Druck wird von CodexPad als Umschalter verarbeitet: einmal öffnet die Modellwahl, der nächste Druck schließt sie mit Escape. Nur diese Encoder-Aktion benötigt die laufende CodexPad-App."
-            }
-            return "Diese Drehrad-Geste wird direkt vom Pad gesendet. Links und rechts nutzen F18/F19 für den Reasoning-Aufwand."
-        }
-        return "Wähle links eine Taste und danach eine Aktion. Ein Codex Agent wird lokal einem Thread oder Subagenten zugeordnet; dessen Live-Status steuert die LED. Die app-only Belegung muss einmal auf das Pad übertragen werden."
+        "Wähle links eine Taste und danach eine Aktion. Ein Codex Agent wird lokal einem Thread oder Subagenten zugeordnet; dessen Live-Status steuert die LED. Die app-only Belegung muss einmal auf das Pad übertragen werden."
     }
 
 }
 
-private struct TextSubmissionSheet: View {
+struct TextSubmissionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = "Yeet"
 
