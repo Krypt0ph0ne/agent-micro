@@ -6,13 +6,16 @@ final class HIDProbe {
 
     func run(seconds: TimeInterval) -> Int32 {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        let matching: [String: Any] = [
-            kIOHIDVendorIDKey as String: 0x1189,
-            kIOHIDProductIDKey as String: 0x8890,
-            kIOHIDPrimaryUsagePageKey as String: 0x01,
-            kIOHIDPrimaryUsageKey as String: 0x06
-        ]
-        IOHIDManagerSetDeviceMatching(manager, matching as CFDictionary)
+        let keyboardIdentity: (Int, Int) -> [String: Any] = { vendorID, productID in
+            [
+                kIOHIDVendorIDKey as String: vendorID,
+                kIOHIDProductIDKey as String: productID,
+                kIOHIDPrimaryUsagePageKey as String: 0x01,
+                kIOHIDPrimaryUsageKey as String: 0x06
+            ]
+        }
+        let matching = [keyboardIdentity(0x1189, 0x8890), keyboardIdentity(0x4249, 0x4287)]
+        IOHIDManagerSetDeviceMatchingMultiple(manager, matching as CFArray)
         IOHIDManagerRegisterInputValueCallback(manager, Self.callback, Unmanaged.passUnretained(self).toOpaque())
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -22,7 +25,7 @@ final class HIDProbe {
         }
 
         self.manager = manager
-        print("Monitoring 1189:8890 keyboard HID for \(Int(seconds)) seconds. Press pad keys and turn/press the encoder now.")
+        print("Monitoring CodexPad keyboard HID for \(Int(seconds)) seconds. Press pad keys and turn/press the encoder now.")
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
         IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))

@@ -1,0 +1,416 @@
+import Foundation
+import Observation
+import OSLog
+
+/// Read-only observer for Codex lifecycle and elicitation events. In particular,
+/// server-initiated approval and user-input requests are intentionally never answered.
+@MainActor
+@Observable
+final class CodexEventBridge: @unchecked Sendable {
+    private enum RequestPurpose {
+        case initialize
+        case listThreads
+        case readThread(String)
+        case readLatestTurn(String)
+    }
+
+    private let logger = Logger(subsystem: "com.codexpad.app", category: "codex-bridge")
+    private var process: Process?
+    private var input: FileHandle?
+    private var outputBuffer = Data()
+    private var nextRequestID = 1
+    private var pendingRequests: [Int: RequestPurpose] = [:]
+    private var reconnectTask: Task<Void, Never>?
+    private var statusSyncTask: Task<Void, Never>?
+    private var reconnectAttempt = 0
+    private var isStopping = false
+    private var trackedThreadIDs: Set<String> = []
+    private var statusReadsInFlight: Set<String> = []
+    private var pendingElicitations: [String: Set<String>] = [:]
+    private var threadListAccumulator: [CodexThreadDescriptor] = []
+
+    private(set) var connectionState: CodexBridgeConnectionState = .disconnected
+    private(set) var lastError: String?
+
+    var onThreads: (([CodexThreadDescriptor]) -> Void)?
+    var onStatus: ((String, CodexAgentStatus) -> Void)?
+
+    func start() {
+        guard process == nil else { return }
+        isStopping = false
+        reconnectTask?.cancel()
+        connect()
+    }
+
+    func stop() {
+        isStopping = true
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        statusSyncTask?.cancel()
+        statusSyncTask = nil
+        statusReadsInFlight.removeAll()
+        process?.terminationHandler = nil
+        process?.terminate()
+        process = nil
+        input = nil
+        connectionState = .disconnected
+    }
+
+    func reconnectNow() {
+        stop()
+        isStopping = false
+        reconnectAttempt = 0
+        connect()
+    }
+
+    func track(threadIDs: Set<String>) {
+        trackedThreadIDs = threadIDs
+        statusReadsInFlight.formIntersection(threadIDs)
+        guard connectionState.isConnected else { return }
+        synchronizeTrackedThreads()
+    }
+
+    func refreshThreads() {
+        guard connectionState.isConnected else {
+            start()
+            return
+        }
+        requestThreadList()
+        synchronizeTrackedThreads()
+    }
+
+    private func connect() {
+        connectionState = reconnectAttempt == 0 ? .connecting : .reconnecting(attempt: reconnectAttempt)
+        lastError = nil
+
+        guard let executable = Self.codexExecutable() else {
+            fail("Codex CLI wurde nicht gefunden. Installiere oder starte die Codex-App.")
+            return
+        }
+
+        let process = Process()
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.executableURL = executable
+        process.arguments = ["app-server", "--stdio"]
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            Task { @MainActor [weak self] in self?.consume(data) }
+        }
+        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard let message = String(data: data, encoding: .utf8), !message.isEmpty else { return }
+            Task { @MainActor [weak self] in
+                self?.logger.debug("app-server: \(message, privacy: .public)")
+            }
+        }
+        process.terminationHandler = { [weak self] process in
+            Task { @MainActor [weak self] in self?.processDidTerminate(code: process.terminationStatus) }
+        }
+
+        do {
+            try process.run()
+            self.process = process
+            input = stdinPipe.fileHandleForWriting
+            outputBuffer.removeAll(keepingCapacity: true)
+            pendingRequests.removeAll()
+            statusReadsInFlight.removeAll()
+            sendInitialize()
+        } catch {
+            fail("Codex App Server konnte nicht gestartet werden: \(error.localizedDescription)")
+        }
+    }
+
+    private func sendInitialize() {
+        sendRequest(method: "initialize", params: [
+            "clientInfo": ["name": "codexpad", "title": "CodexPad", "version": "1.0"],
+            "capabilities": [
+                "experimentalApi": true,
+                "requestAttestation": false,
+                "mcpServerOpenaiFormElicitation": false
+            ]
+        ], purpose: .initialize)
+    }
+
+    private func requestThreadList(cursor: String? = nil) {
+        if cursor == nil { threadListAccumulator.removeAll(keepingCapacity: true) }
+        var params: [String: Any] = [
+            "limit": 100,
+            "sortKey": "recency_at",
+            "sortDirection": "desc",
+            "sourceKinds": [
+                "cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview",
+                "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"
+            ]
+        ]
+        if let cursor { params["cursor"] = cursor }
+        sendRequest(method: "thread/list", params: params, purpose: .listThreads)
+    }
+
+    private func synchronizeTrackedThreads() {
+        for threadID in trackedThreadIDs where !statusReadsInFlight.contains(threadID) {
+            statusReadsInFlight.insert(threadID)
+            sendRequest(
+                method: "thread/read",
+                params: ["threadId": threadID, "includeTurns": true],
+                purpose: .readThread(threadID)
+            )
+        }
+    }
+
+    private func startStatusSynchronization() {
+        statusSyncTask?.cancel()
+        statusSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                self?.synchronizeLatestTurns()
+            }
+        }
+    }
+
+    private func synchronizeLatestTurns() {
+        for threadID in trackedThreadIDs where !statusReadsInFlight.contains(threadID) {
+            statusReadsInFlight.insert(threadID)
+            sendRequest(
+                method: "thread/turns/list",
+                params: [
+                    "threadId": threadID,
+                    "limit": 1,
+                    "sortDirection": "desc",
+                    "itemsView": "summary"
+                ],
+                purpose: .readLatestTurn(threadID)
+            )
+        }
+    }
+
+    private func sendRequest(method: String, params: [String: Any], purpose: RequestPurpose) {
+        let id = nextRequestID
+        nextRequestID += 1
+        pendingRequests[id] = purpose
+        writeJSON(["id": id, "method": method, "params": params])
+    }
+
+    private func writeJSON(_ object: [String: Any]) {
+        guard JSONSerialization.isValidJSONObject(object),
+              var data = try? JSONSerialization.data(withJSONObject: object) else { return }
+        data.append(0x0A)
+        do {
+            try input?.write(contentsOf: data)
+        } catch {
+            fail("Schreiben zum Codex App Server fehlgeschlagen: \(error.localizedDescription)")
+        }
+    }
+
+    private func consume(_ data: Data) {
+        outputBuffer.append(data)
+        while let newline = outputBuffer.firstIndex(of: 0x0A) {
+            let line = outputBuffer[..<newline]
+            outputBuffer.removeSubrange(...newline)
+            guard !line.isEmpty,
+                  let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
+            handle(object)
+        }
+    }
+
+    private func handle(_ message: [String: Any]) {
+        if let id = Self.integerID(message["id"]), let purpose = pendingRequests.removeValue(forKey: id) {
+            handleResponse(message, purpose: purpose)
+            return
+        }
+        guard let method = message["method"] as? String else { return }
+        let params = message["params"] as? [String: Any] ?? [:]
+        handleEvent(method: method, params: params, requestID: message["id"])
+    }
+
+    private func handleResponse(_ message: [String: Any], purpose: RequestPurpose) {
+        if case .readThread(let threadID) = purpose {
+            statusReadsInFlight.remove(threadID)
+        } else if case .readLatestTurn(let threadID) = purpose {
+            statusReadsInFlight.remove(threadID)
+        }
+        if let error = message["error"] as? [String: Any] {
+            let detail = error["message"] as? String ?? "Unbekannter App-Server-Fehler"
+            lastError = detail
+            logger.error("App-server request failed: \(detail, privacy: .public)")
+            return
+        }
+        let result = message["result"] as? [String: Any] ?? [:]
+        switch purpose {
+        case .initialize:
+            let version = result["userAgent"] as? String ?? "Codex App Server"
+            reconnectAttempt = 0
+            connectionState = .connected(serverVersion: version)
+            logger.info("Connected to \(version, privacy: .public)")
+            writeJSON(["method": "initialized"])
+            requestThreadList()
+            synchronizeTrackedThreads()
+            startStatusSynchronization()
+        case .listThreads:
+            let data = result["data"] as? [[String: Any]] ?? []
+            threadListAccumulator.append(contentsOf: data.compactMap(parseThread))
+            if let cursor = result["nextCursor"] as? String, !cursor.isEmpty {
+                requestThreadList(cursor: cursor)
+            } else {
+                logger.info("Loaded \(self.threadListAccumulator.count, privacy: .public) Codex threads and subagents")
+                onThreads?(threadListAccumulator)
+            }
+        case .readThread(let threadID):
+            guard let thread = result["thread"] as? [String: Any] else { return }
+            if let descriptor = parseThread(thread) { onThreads?([descriptor]) }
+            if let status = synchronizedStatus(from: thread) {
+                rememberAttentionSnapshot(status, threadID: threadID)
+                onStatus?(threadID, status)
+            }
+        case .readLatestTurn(let threadID):
+            if pendingElicitations[threadID]?.isEmpty == false {
+                onStatus?(threadID, .needsAttention)
+                return
+            }
+            let latestTurn = (result["data"] as? [[String: Any]])?.first
+            onStatus?(threadID, StatusMapper.synchronizedStatus(
+                threadType: nil,
+                latestTurnStatus: latestTurn?["status"] as? String,
+                latestTurnHasCompletionTimestamp: latestTurn?["completedAt"] is NSNumber
+            ))
+        }
+    }
+
+    private func handleEvent(method: String, params: [String: Any], requestID: Any?) {
+        switch method {
+        case "thread/started":
+            if let thread = params["thread"] as? [String: Any], let descriptor = parseThread(thread) {
+                onThreads?([descriptor])
+                onStatus?(descriptor.id, descriptor.status)
+            }
+        case "thread/status/changed":
+            guard let threadID = params["threadId"] as? String,
+                  let status = params["status"] as? [String: Any] else { return }
+            let mapped = StatusMapper.threadStatus(
+                type: status["type"] as? String,
+                activeFlags: status["activeFlags"] as? [String] ?? []
+            )
+            rememberAttentionSnapshot(mapped, threadID: threadID)
+            onStatus?(threadID, mapped)
+        case "turn/started":
+            if let threadID = params["threadId"] as? String {
+                pendingElicitations[threadID] = nil
+                onStatus?(threadID, .running)
+            }
+        case "turn/completed":
+            guard let threadID = params["threadId"] as? String,
+                  let turn = params["turn"] as? [String: Any],
+                  let status = StatusMapper.turnStatus(turn["status"] as? String) else { return }
+            pendingElicitations[threadID] = nil
+            onStatus?(threadID, status)
+        case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval",
+             "applyPatchApproval", "execCommandApproval", "item/tool/requestUserInput", "mcpServer/elicitation/request":
+            guard let threadID = params["threadId"] as? String else { return }
+            let opaqueID = requestID.map(String.init(describing:)) ?? UUID().uuidString
+            pendingElicitations[threadID, default: []].insert(opaqueID)
+            onStatus?(threadID, .needsAttention)
+            logger.notice("Observed read-only elicitation for thread \(threadID, privacy: .public); no response will be sent")
+        case "serverRequest/resolved":
+            guard let threadID = params["threadId"] as? String else { return }
+            let opaqueID = params["requestId"].map(String.init(describing:))
+            if let opaqueID { pendingElicitations[threadID]?.remove(opaqueID) }
+            if pendingElicitations[threadID]?.isEmpty != false { onStatus?(threadID, .running) }
+        case "error":
+            lastError = params["message"] as? String ?? "Codex App Server meldet einen Fehler."
+        default:
+            break
+        }
+    }
+
+    private func parseThread(_ object: [String: Any]) -> CodexThreadDescriptor? {
+        guard let id = object["id"] as? String else { return nil }
+        let statusObject = object["status"] as? [String: Any] ?? [:]
+        return CodexThreadDescriptor(
+            id: id,
+            title: object["name"] as? String ?? "",
+            preview: object["preview"] as? String ?? "",
+            cwd: object["cwd"] as? String ?? "",
+            parentThreadID: object["parentThreadId"] as? String,
+            agentNickname: object["agentNickname"] as? String,
+            agentRole: object["agentRole"] as? String,
+            updatedAt: Date(timeIntervalSince1970: (object["updatedAt"] as? NSNumber)?.doubleValue ?? 0),
+            status: StatusMapper.threadStatus(
+                type: statusObject["type"] as? String,
+                activeFlags: statusObject["activeFlags"] as? [String] ?? []
+            )
+        )
+    }
+
+    private func synchronizedStatus(from thread: [String: Any]) -> CodexAgentStatus? {
+        let status = thread["status"] as? [String: Any] ?? [:]
+        let turns = thread["turns"] as? [[String: Any]] ?? []
+        let latestTurn = turns.last
+        return StatusMapper.synchronizedStatus(
+            threadType: status["type"] as? String,
+            activeFlags: status["activeFlags"] as? [String] ?? [],
+            latestTurnStatus: latestTurn?["status"] as? String,
+            latestTurnHasCompletionTimestamp: latestTurn?["completedAt"] is NSNumber
+        )
+    }
+
+    private func rememberAttentionSnapshot(_ status: CodexAgentStatus, threadID: String) {
+        let marker = "thread-status-active-flag"
+        if status == .needsAttention {
+            pendingElicitations[threadID, default: []].insert(marker)
+        } else {
+            pendingElicitations[threadID]?.remove(marker)
+        }
+    }
+
+    private func processDidTerminate(code: Int32) {
+        statusSyncTask?.cancel()
+        statusSyncTask = nil
+        statusReadsInFlight.removeAll()
+        process = nil
+        input = nil
+        guard !isStopping else { return }
+        scheduleReconnect(reason: "Codex App Server wurde beendet (Code \(code)).")
+    }
+
+    private func fail(_ message: String) {
+        lastError = message
+        connectionState = .failed(message)
+        logger.error("\(message, privacy: .public)")
+        if process != nil { process?.terminate() } else { scheduleReconnect(reason: message) }
+    }
+
+    private func scheduleReconnect(reason: String) {
+        guard reconnectTask == nil, !isStopping else { return }
+        reconnectAttempt += 1
+        connectionState = .reconnecting(attempt: reconnectAttempt)
+        lastError = reason
+        let seconds = min(30, 1 << min(reconnectAttempt - 1, 5))
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.reconnectTask = nil
+            self?.connect()
+        }
+    }
+
+    private static func integerID(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        return (value as? NSNumber)?.intValue
+    }
+
+    private static func codexExecutable() -> URL? {
+        let candidates = [
+            "/Applications/Codex.app/Contents/Resources/codex",
+            "/usr/local/bin/codex",
+            "/opt/homebrew/bin/codex"
+        ]
+        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }).map(URL.init(fileURLWithPath:))
+    }
+}

@@ -33,10 +33,18 @@ enum ProfileFileCodec {
 @Observable
 final class ProfileStore {
     private static let selectedProfileDefaultsKey = "CodexPad.selectedProfileID"
+    private static let keyboardLayoutDefaultsKey = "CodexPad.keyboardLayout"
     private let persistenceURL: URL
     private let catalog: CodexActionCatalog
 
     private(set) var profiles: [MacropadProfile]
+    var keyboardLayout: KeyboardLayout {
+        didSet {
+            guard keyboardLayout != oldValue else { return }
+            UserDefaults.standard.set(keyboardLayout.rawValue, forKey: Self.keyboardLayoutDefaultsKey)
+            hasUnsyncedChanges = true
+        }
+    }
     var selectedProfileID: UUID {
         didSet {
             UserDefaults.standard.set(selectedProfileID.uuidString, forKey: Self.selectedProfileDefaultsKey)
@@ -48,12 +56,15 @@ final class ProfileStore {
 
     init(catalog: CodexActionCatalog, persistenceURL: URL? = nil) {
         self.catalog = catalog
+        self.keyboardLayout = UserDefaults.standard.string(forKey: Self.keyboardLayoutDefaultsKey)
+            .flatMap(KeyboardLayout.init(rawValue:)) ?? .automatic
         let baseDirectory = persistenceURL?.deletingLastPathComponent() ?? Self.applicationSupportDirectory()
         self.persistenceURL = persistenceURL ?? baseDirectory.appendingPathComponent("Profiles.json")
         let loaded = Self.load(from: self.persistenceURL)
         let seed = loaded ?? [ProfileFactory.codex(catalog: catalog), ProfileFactory.macOS(), ProfileFactory.safe()]
         let builtIns = Self.ensureBuiltInProfiles(in: seed, catalog: catalog)
-        let initial = Self.migrateLegacyCodexReasoningBindings(in: builtIns)
+        let encoderMigrated = Self.migrateLegacyCodexReasoningBindings(in: builtIns)
+        let initial = Self.migrateLegacyDictationBindings(in: encoderMigrated, catalog: catalog)
         self.profiles = initial
         let codexID = initial.first(where: { $0.name == "Codex" })?.id
         self.selectedProfileID = codexID ?? initial.first?.id ?? UUID()
@@ -75,6 +86,20 @@ final class ProfileStore {
     func updateAction(_ action: KeyboardAction, for control: HardwareControl) {
         var profile = selectedProfile
         profile.setAction(action, for: control)
+        replace(profile)
+    }
+
+    func ledBinding(for control: HardwareControl) -> Binding<KeyLEDConfiguration> {
+        Binding(
+            get: { self.selectedProfile.led.setting(for: control) },
+            set: { self.updateLED($0) }
+        )
+    }
+
+    func updateLED(_ setting: KeyLEDConfiguration) {
+        var profile = selectedProfile
+        profile.led.setSetting(setting)
+        profile.updatedAt = .now
         replace(profile)
     }
 
@@ -234,12 +259,40 @@ final class ProfileStore {
             let isPowerDialDefault = left.deviceMacro == "f22"
                 && press.deviceMacro == "ctrl-shift-m"
                 && right.deviceMacro == "f24"
-            guard isNavigationDefault || isLegacyReasoningDefault || isDirectReasoningDefault || isPowerDialDefault else { return profile }
+            let isPrivateTriggerDefault = left.deviceMacro == "f22"
+                && press.deviceMacro == "f23"
+                && right.deviceMacro == "f24"
+            let isCurrentDirectDefault = left.codexActionID == "encoder-effort-decrease"
+                && left.deviceMacro == "f18"
+                && press.codexActionID == "encoder-model-modifier"
+                && press.deviceMacro == "ctrl-shift-m"
+                && right.codexActionID == "encoder-effort-increase"
+                && right.deviceMacro == "f19"
+            guard isNavigationDefault || isLegacyReasoningDefault || isDirectReasoningDefault || isPowerDialDefault || isPrivateTriggerDefault || isCurrentDirectDefault else { return profile }
             var migrated = profile
             migrated.setAction(ProfileFactory.reasoningTriggerAction(for: .encoderLeft), for: .encoderLeft)
             migrated.setAction(ProfileFactory.reasoningTriggerAction(for: .encoderPress), for: .encoderPress)
             migrated.setAction(ProfileFactory.reasoningTriggerAction(for: .encoderRight), for: .encoderRight)
             return migrated
+        }
+    }
+
+    /// Moves only the former built-in composer shortcut to Codex's dedicated
+    /// global dictation toggle. Custom actions are never rewritten.
+    private static func migrateLegacyDictationBindings(in profiles: [MacropadProfile], catalog: CodexActionCatalog) -> [MacropadProfile] {
+        guard let globalDictation = catalog.keyboardAction(id: "dictation") else { return profiles }
+        return profiles.map { profile in
+            guard profile.isBuiltIn else { return profile }
+            var migrated = profile
+            var changed = false
+            for control in HardwareControl.buttons {
+                let action = migrated.action(for: control)
+                guard action.codexActionID == "dictation",
+                      ["ctrl-shift-d", "f17", "cmd-f17"].contains(action.deviceMacro ?? "") else { continue }
+                migrated.setAction(globalDictation, for: control)
+                changed = true
+            }
+            return changed ? migrated : profile
         }
     }
 }

@@ -116,7 +116,10 @@ struct ControlInspectorView: View {
     }
 
     private func testAction() {
-        let result = appState.device.validate(profile: appState.profiles.selectedProfile)
+        let result = appState.device.validate(
+            profile: appState.profiles.selectedProfile,
+            keyboardLayout: appState.profiles.keyboardLayout
+        )
         testMessage = result?.succeeded == true ? "Geräteausdruck ist valide." : "Validierung fehlgeschlagen – Details in Diagnose."
     }
 }

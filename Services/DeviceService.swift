@@ -8,6 +8,8 @@ final class DeviceService {
     private let logger = Logger(subsystem: "com.codexpad.app", category: "device")
     private let detector: DeviceDetector
     private let processClient: CH57xProcessClient
+    private let codexPadClient: CodexPadHIDClient
+    private let codexPadEncoder = CodexPadPacketEncoder()
     private let encoder = CH57xConfigurationEncoder()
     private let diagnostics: DiagnosticsStore
 
@@ -18,10 +20,11 @@ final class DeviceService {
     private(set) var detectedDevices: [ConnectedDevice] = []
     var selectedDiagnosticDeviceID: String?
 
-    init(diagnostics: DiagnosticsStore, detector: DeviceDetector = DeviceDetector(), processClient: CH57xProcessClient = CH57xProcessClient()) {
+    init(diagnostics: DiagnosticsStore, detector: DeviceDetector = DeviceDetector(), processClient: CH57xProcessClient = CH57xProcessClient(), codexPadClient: CodexPadHIDClient = CodexPadHIDClient()) {
         self.diagnostics = diagnostics
         self.detector = detector
         self.processClient = processClient
+        self.codexPadClient = codexPadClient
     }
 
     var currentDevice: ConnectedDevice? {
@@ -59,7 +62,18 @@ final class DeviceService {
     }
 
     @discardableResult
-    func validate(profile: MacropadProfile) -> ProcessResult? {
+    func validate(profile: MacropadProfile, keyboardLayout: KeyboardLayout = .usANSI) -> ProcessResult? {
+        if currentDevice?.isCodexPadFirmware == true {
+            do {
+                let packets = try codexPadEncoder.packets(profile: profile, layout: keyboardLayout)
+                let result = ProcessResult(exitCode: 0, stdout: "\(packets.count) lokale HID-Pakete sind gültig.", stderr: "", timedOut: false, launchError: nil)
+                diagnostics.record(result, title: "CH552-Profil validieren")
+                return result
+            } catch {
+                diagnostics.append(.error, "Lokale CH552-Validierung fehlgeschlagen", detail: error.localizedDescription)
+                return nil
+            }
+        }
         do {
             let configuration = try encoder.encode(profile: profile)
             lastGeneratedConfiguration = configuration
@@ -74,7 +88,7 @@ final class DeviceService {
     }
 
     @discardableResult
-    func upload(profile: MacropadProfile) -> ProcessResult? {
+    func upload(profile: MacropadProfile, keyboardLayout: KeyboardLayout = .usANSI) -> ProcessResult? {
         guard state.isSupportedConnection else {
             diagnostics.append(.error, "Upload blockiert", detail: "Kein unterstütztes CH57x-Gerät verbunden.")
             return nil
@@ -86,10 +100,27 @@ final class DeviceService {
         isBusy = true
         defer { isBusy = false }
 
-        let validation = validate(profile: profile)
+        let validation = validate(profile: profile, keyboardLayout: keyboardLayout)
         guard validation?.succeeded == true else {
             diagnostics.append(.error, "Upload nicht ausgeführt", detail: "Die Konfiguration muss zuerst erfolgreich validieren.")
             return validation
+        }
+
+        if currentDevice?.isCodexPadFirmware == true {
+            do {
+                let packets = try codexPadEncoder.packets(profile: profile, layout: keyboardLayout)
+                    + [codexPadEncoder.allOffPacket()]
+                let result = codexPadClient.send(packets)
+                diagnostics.record(result, title: "Profil und RGB live an CH552 übertragen")
+                if result.succeeded {
+                    lastSuccessfulUpload = .now
+                    diagnostics.append(.success, "CH552-Profil aktiv", detail: "Neun Eingabebelegungen wurden übertragen; die sechs LEDs bleiben im Idle ausgeschaltet.")
+                }
+                return result
+            } catch {
+                diagnostics.append(.error, "CH552-Upload fehlgeschlagen", detail: error.localizedDescription)
+                return nil
+            }
         }
 
         let target = CH57xDeviceTarget.ch57x8890
@@ -118,6 +149,25 @@ final class DeviceService {
         }
         let result = processClient.setConfirmedLEDMode(mode, target: .ch57x8890)
         diagnostics.record(result, title: "LED-Modus \(mode) setzen")
+        return result
+    }
+
+    @discardableResult
+    func applyLED(_ setting: KeyLEDConfiguration) -> ProcessResult? {
+        guard currentDevice?.isCodexPadFirmware == true else {
+            diagnostics.append(.error, "RGB nicht übertragen", detail: "Keine eigene CH552-CodexPad-Firmware verbunden.")
+            return nil
+        }
+        let result = codexPadClient.send([codexPadEncoder.ledPacket(setting: setting)])
+        diagnostics.record(result, title: "\(setting.control.title) RGB anwenden")
+        return result
+    }
+
+    @discardableResult
+    func turnOffCustomLEDs() -> ProcessResult? {
+        guard currentDevice?.isCodexPadFirmware == true else { return nil }
+        let result = codexPadClient.send([codexPadEncoder.allOffPacket()])
+        diagnostics.record(result, title: "Alle CH552-LEDs ausschalten")
         return result
     }
 }

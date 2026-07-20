@@ -62,7 +62,7 @@ struct CodexCatalogView: View {
         case .keyboardShortcut:
             appState.profiles.assignCodexAction(id: action.id, to: selectedControl)
         case .configurableShortcut:
-            break
+            appState.profiles.assignCodexAction(id: action.id, to: selectedControl)
         case .deepLink:
             guard let deferred = appState.catalog.deferredAction(id: action.id) else { return }
             appState.profiles.updateAction(deferred, for: selectedControl)
@@ -113,7 +113,7 @@ private struct ActionCatalogCard: View {
                 Button(buttonTitle, action: assign)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(action.execution == .unavailable || action.execution == .configurableShortcut)
+                    .disabled(action.execution == .unavailable || !action.isDirectlyAssignable && action.execution != .deepLink)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 176, alignment: .topLeading)
@@ -125,7 +125,7 @@ private struct ActionCatalogCard: View {
     private var buttonTitle: String {
         switch action.execution {
         case .deepLink: "Zuweisen*"
-        case .configurableShortcut: "In Codex belegen"
+        case .configurableShortcut: action.isDirectlyAssignable ? "Zuweisen*" : "In Codex belegen"
         default: "Zuweisen"
         }
     }
@@ -133,7 +133,10 @@ private struct ActionCatalogCard: View {
     private var helpText: String {
         switch action.execution {
         case .deepLink: "*Deep Links benötigen einen lokalen Listener und sind nicht direkt uploadbar."
-        case .configurableShortcut: "Für diese reale Codex-Aktion ist in 26.715.21425 keine Standardtaste eingebunden. Lege sie zuerst unter Settings > Keyboard Shortcuts fest und verwende anschließend denselben freien Shortcut im Pad."
+        case .configurableShortcut:
+            action.isDirectlyAssignable
+                ? "*Der Pad-Trigger muss in Codex unter Settings > Keyboard Shortcuts einmalig derselben Aktion zugewiesen werden. Der zweite Tastendruck schließt den geöffneten Bereich."
+                : "Für diese reale Codex-Aktion ist in 26.715.21425 keine Standardtaste eingebunden. Lege sie zuerst unter Settings > Keyboard Shortcuts fest und verwende anschließend denselben freien Shortcut im Pad."
         default: ""
         }
     }

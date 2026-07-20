@@ -7,12 +7,88 @@ struct ControlBinding: Codable, Hashable, Identifiable {
     var id: HardwareControl { control }
 }
 
+enum LEDEffect: UInt8, Codable, CaseIterable, Identifiable, Hashable {
+    case off = 0
+    case steady = 1
+    case blink = 2
+    case pulse = 3
+
+    var id: UInt8 { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: "Aus"
+        case .steady: "Dauerlicht"
+        case .blink: "Blinken"
+        case .pulse: "Pulsieren"
+        }
+    }
+}
+
+struct KeyLEDConfiguration: Codable, Hashable, Identifiable {
+    var control: HardwareControl
+    var effect: LEDEffect
+    var red: UInt8
+    var green: UInt8
+    var blue: UInt8
+    var brightness: UInt8
+    var periodMilliseconds: Int
+
+    var id: HardwareControl { control }
+
+    static func steadyWhite(for control: HardwareControl) -> KeyLEDConfiguration {
+        KeyLEDConfiguration(
+            control: control,
+            effect: .steady,
+            red: 255,
+            green: 255,
+            blue: 255,
+            brightness: 96,
+            periodMilliseconds: 1_000
+        )
+    }
+}
+
 struct LEDConfiguration: Codable, Hashable {
-    /// Only mode 1 is confirmed for the connected 0x8890 family.
+    /// Legacy CH57x fields remain decodable for existing saved profiles.
     var enabled: Bool
     var mode: Int
+    var keys: [KeyLEDConfiguration]
 
-    static let confirmedSteady = LEDConfiguration(enabled: true, mode: 1)
+    static let confirmedSteady = LEDConfiguration(
+        enabled: true,
+        mode: 1,
+        keys: HardwareControl.buttons.map(KeyLEDConfiguration.steadyWhite)
+    )
+
+    func setting(for control: HardwareControl) -> KeyLEDConfiguration {
+        keys.first(where: { $0.control == control }) ?? .steadyWhite(for: control)
+    }
+
+    mutating func setSetting(_ setting: KeyLEDConfiguration) {
+        guard HardwareControl.buttons.contains(setting.control) else { return }
+        if let index = keys.firstIndex(where: { $0.control == setting.control }) {
+            keys[index] = setting
+        } else {
+            keys.append(setting)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case enabled, mode, keys }
+
+    init(enabled: Bool, mode: Int, keys: [KeyLEDConfiguration]) {
+        self.enabled = enabled
+        self.mode = mode
+        self.keys = keys
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        mode = try container.decodeIfPresent(Int.self, forKey: .mode) ?? 1
+        keys = try container.decodeIfPresent([KeyLEDConfiguration].self, forKey: .keys)
+            ?? HardwareControl.buttons.map(KeyLEDConfiguration.steadyWhite)
+    }
 }
 
 struct MacropadProfile: Codable, Hashable, Identifiable {
@@ -118,11 +194,11 @@ enum ProfileFactory {
     static func reasoningTriggerAction(for control: HardwareControl) -> KeyboardAction {
         switch control {
         case .encoderLeft:
-            KeyboardAction(kind: .singleKey, label: "Aufwand −", icon: "minus.circle", deviceMacro: "f22", codexActionID: "encoder-effort-decrease")
+            KeyboardAction(kind: .singleKey, label: "Aufwand −", icon: "minus.circle", deviceMacro: "f18", codexActionID: "encoder-effort-decrease")
         case .encoderPress:
-            KeyboardAction(kind: .singleKey, label: "Halten: Modellwahl", icon: "cube", deviceMacro: "f23", codexActionID: "encoder-model-modifier")
+            KeyboardAction(kind: .singleKey, label: "Modellwahl umschalten", icon: "cube", deviceMacro: "f23", codexActionID: "encoder-model-modifier")
         case .encoderRight:
-            KeyboardAction(kind: .singleKey, label: "Aufwand +", icon: "plus.circle", deviceMacro: "f24", codexActionID: "encoder-effort-increase")
+            KeyboardAction(kind: .singleKey, label: "Aufwand +", icon: "plus.circle", deviceMacro: "f19", codexActionID: "encoder-effort-increase")
         case .key1, .key2, .key3, .key4, .key5, .key6:
             .disabled
         }

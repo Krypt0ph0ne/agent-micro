@@ -41,7 +41,7 @@ struct DeviceDetector {
             device: nil,
             candidates: candidates,
             rawIORegistry: result.stdout,
-            error: "Kein CH57x-HID-Gerät gefunden. Sichtbare USB-Kennungen: \(summary.isEmpty ? "keine" : summary)."
+            error: "Kein unterstütztes CodexPad gefunden. Sichtbare USB-Kennungen: \(summary.isEmpty ? "keine" : summary)."
         )
     }
 
@@ -78,7 +78,11 @@ struct DeviceDetector {
         let support: ConnectedDevice.Support
         let capabilities: DeviceCapabilities
         let summary: String
-        if vendorID == 0x1189 && productID == 0x8890 {
+        if vendorID == 0x4249 && productID == 0x4287 {
+            support = .supported
+            capabilities = .codexPadCH552
+            summary = "Eigene CH552-CodexPad-Firmware erkannt. Sechs Tasten, Encoder und sechs einzeln steuerbare RGB-LEDs sind firmwarebestätigt."
+        } else if vendorID == 0x1189 && productID == 0x8890 {
             support = .supported
             capabilities = .ch57x8890
             summary = "CH57x-2 erkannt. Das Boot-HID-Keyboard und das separate Konfigurationsinterface werden vom MIT-Helper für 0x1189:0x8890 unterstützt."
@@ -97,7 +101,7 @@ struct DeviceDetector {
         }
 
         return ConnectedDevice(
-            name: string(named: "USB Product Name", in: section) ?? string(named: "kUSBProductString", in: section) ?? (vendorID == 0x1189 ? "CH57x Makropad" : "USB-Gerät"),
+            name: string(named: "USB Product Name", in: section) ?? string(named: "kUSBProductString", in: section) ?? ([0x1189, 0x4249].contains(vendorID) ? "CodexPad" : "USB-Gerät"),
             vendorID: vendorID,
             productID: productID,
             locationID: locationID,
