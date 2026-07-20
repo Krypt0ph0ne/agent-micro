@@ -20,7 +20,7 @@ final class CodexPadLEDFeedbackService {
     private var statusFlashTasks: [HardwareControl: Task<Void, Never>] = [:]
     /// When set (persistent layer mode), the whole-pad idle base uses this
     /// layer colour so the active harness stays visible behind agent statuses.
-    private var persistentLayerColor: (red: UInt8, green: UInt8, blue: UInt8)?
+    private var persistentLayerColor: (color: RGBColor, brightness: UInt8)?
 
     init(send: @escaping ([[UInt8]]) -> Void) {
         self.send = send
@@ -71,15 +71,14 @@ final class CodexPadLEDFeedbackService {
     }
 
     /// Whole-pad cue after a harness layer switch. Pulses all six LEDs in the
-    /// layer colour once and then either restores idle (pulseOnce) or keeps the
-    /// colour as the idle base (persistent).
-    func indicateLayerSwitch(layer: HarnessLayer, mode: LayerSwitchLightMode, profile: MacropadProfile) {
+    /// configured layer colour and brightness once and then either restores idle
+    /// (pulseOnce) or keeps the colour as the idle base (persistent).
+    func indicateLayerSwitch(color: RGBColor, brightness: UInt8, mode: LayerSwitchLightMode, profile: MacropadProfile) {
         activeProfile = profile
         animationTask?.cancel()
-        let colour = layer.switchColor
         let period = 700
-        send(encoder.allLEDs(effect: .pulse, red: colour.red, green: colour.green, blue: colour.blue, brightness: 255, periodMilliseconds: period))
-        persistentLayerColor = mode == .persistent ? colour : nil
+        send(encoder.allLEDs(effect: .pulse, red: color.red, green: color.green, blue: color.blue, brightness: brightness, periodMilliseconds: period))
+        persistentLayerColor = mode == .persistent ? (color, brightness) : nil
         animationTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .milliseconds(period))
@@ -97,8 +96,8 @@ final class CodexPadLEDFeedbackService {
 
     /// The idle appearance for a control, honouring a persistent layer colour.
     private func idleConfiguration(for control: HardwareControl, profile: MacropadProfile) -> KeyLEDConfiguration {
-        if let colour = persistentLayerColor {
-            return KeyLEDConfiguration(control: control, effect: .steady, red: colour.red, green: colour.green, blue: colour.blue, brightness: 130, periodMilliseconds: 1_000)
+        if let layer = persistentLayerColor {
+            return KeyLEDConfiguration(control: control, effect: .steady, red: layer.color.red, green: layer.color.green, blue: layer.color.blue, brightness: layer.brightness, periodMilliseconds: 1_000)
         }
         return profile.idleLighting.keyConfiguration(for: control)
     }

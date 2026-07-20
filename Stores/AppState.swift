@@ -90,7 +90,28 @@ final class AppState {
                 profiles.markSynchronized()
             }
         }
-        ledFeedback.indicateLayerSwitch(layer: layer, mode: profiles.layerSwitchLightMode, profile: profile)
+        ledFeedback.indicateLayerSwitch(
+            color: profiles.layerColor(for: layer),
+            brightness: profiles.layerSwitchBrightness,
+            mode: profiles.layerSwitchLightMode,
+            profile: profile
+        )
+    }
+
+    /// Re-applies the layer-switch key mapping to the pad. Called when the user
+    /// enables the feature or changes the switch keys so those keys become
+    /// app-only (and therefore stop leaking their own macros) right away.
+    func applyLayerSwitchConfiguration() {
+        guard device.state.isSupportedConnection else { return }
+        let profile = profiles.selectedProfile
+        let result = device.upload(
+            profile: profile,
+            keyboardLayout: profiles.keyboardLayout,
+            appOnlyControls: profiles.appOnlySwitchControls(in: profile)
+        )
+        if result?.succeeded == true {
+            profiles.markSynchronized()
+        }
     }
 
     func refreshDevice() {

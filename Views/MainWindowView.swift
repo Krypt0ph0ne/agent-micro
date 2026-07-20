@@ -89,26 +89,26 @@ struct MainWindowView: View {
     }
 
     private var layerSwitcher: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 3) {
             ForEach(HarnessLayer.allCases) { layer in
                 let isActive = appState.profiles.activeLayer == layer
                 Button {
                     appState.switchToLayer(layer)
                 } label: {
-                    Label(layer.title, systemImage: layer.icon)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                    Image(systemName: layer.icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 34, height: 24)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                .background(isActive ? Color.accentColor.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .foregroundStyle(isActive ? Color.white : Color.secondary)
+                .background(isActive ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .help(layer.title)
             }
         }
-        .padding(2)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .help("Coding-Harness umschalten (Codex / Claude Code)")
+        .padding(3)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .help("Coding-Harness umschalten")
     }
 
     private var actionBar: some View {

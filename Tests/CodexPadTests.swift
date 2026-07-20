@@ -749,8 +749,14 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(HarnessLayer(profileName: "Codex"), .codex)
         XCTAssertNil(HarnessLayer(profileName: "macOS"))
         XCTAssertEqual(HarnessLayer.codex.other, .claude)
-        XCTAssertEqual(HarnessLayer.claude.switchColor.red, 224) // deep orange
-        XCTAssertEqual(HarnessLayer.codex.switchColor.blue, 168) // dark blue
+        XCTAssertEqual(HarnessLayer.claude.defaultSwitchColor.red, 224) // deep orange
+        XCTAssertEqual(HarnessLayer.codex.defaultSwitchColor.blue, 168) // dark blue
+    }
+
+    func testRGBColorPacking() {
+        // Qualify to avoid Carbon's own RGBColor imported into this test file.
+        let color = CodexPad.RGBColor(red: 224, green: 82, blue: 8)
+        XCTAssertEqual(CodexPad.RGBColor(packed: color.packed), color)
     }
 
     func testSwitchKeysUploadAppOnlyWhenPassed() throws {
@@ -766,28 +772,49 @@ final class CodexPadTests: XCTestCase {
     }
 
     @MainActor
-    func testAppOnlySwitchControlsExcludesDictationAndRespectsToggle() {
+    func testAppOnlySwitchControlsCoverAllSwitchKeysWhenEnabled() {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-layer-\(UUID().uuidString)")
         let url = directory.appendingPathComponent("Profiles.json")
         let store = ProfileStore(catalog: CodexActionCatalog(), persistenceURL: url)
         store.layerSwitchKeys = [.key4, .key6]
 
-        // Disabled: nothing is app-only.
+        // Disabled: nothing is app-only, so the pad keeps its normal bindings.
         store.layerSwitchEnabled = false
         XCTAssertTrue(store.appOnlySwitchControls(in: store.selectedProfile).isEmpty)
 
+        // Enabled: BOTH switch keys are app-only, even Codex' dictation key4, so
+        // the chord never leaks a keystroke.
         store.layerSwitchEnabled = true
-        // Codex layer: key4 is dictation (a real hold) and must stay on firmware.
         XCTAssertTrue(store.selectLayer(.codex))
-        let codexClean = store.appOnlySwitchControls(in: store.selectedProfile)
-        XCTAssertFalse(codexClean.contains(.key4))
-        XCTAssertTrue(codexClean.contains(.key6))
+        XCTAssertEqual(store.appOnlySwitchControls(in: store.selectedProfile), [.key4, .key6])
+    }
 
-        // Claude layer: both switch keys are plain shortcuts, so both are clean.
-        XCTAssertTrue(store.selectLayer(.claude))
-        XCTAssertEqual(store.activeLayer, .claude)
-        let claudeClean = store.appOnlySwitchControls(in: store.selectedProfile)
-        XCTAssertEqual(claudeClean, [.key4, .key6])
+    @MainActor
+    func testHoldingBothKeysSwitchesLayerWithoutTapping() async {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-chord-\(UUID().uuidString)")
+        let url = directory.appendingPathComponent("Profiles.json")
+        let store = ProfileStore(catalog: CodexActionCatalog(), persistenceURL: url)
+        store.layerSwitchEnabled = true
+        store.layerSwitchKeys = [.key4, .key6]
+        store.selectLayer(.codex)
+
+        var switches: [HarnessLayer] = []
+        let service = HarnessLayerService(store: store)
+        service.onSwitch = { switches.append($0) }
+
+        func event(_ control: HardwareControl, _ phase: CodexPadPhysicalEvent.Phase) -> CodexPadPhysicalEvent {
+            CodexPadPhysicalEvent(sequence: 0, control: control.reportedControlIndex, phase: phase)
+        }
+
+        service.handle(event(.key4, .pressed))
+        service.handle(event(.key6, .pressed))
+        // Hold past the chord threshold, then keep holding a little longer.
+        try? await Task.sleep(for: .milliseconds(HarnessLayerService.chordHoldMilliseconds + 200))
+        service.handle(event(.key4, .released))
+        service.handle(event(.key6, .released))
+
+        // The chord fired exactly once; the release of a chord attempt taps nothing.
+        XCTAssertEqual(switches, [.claude])
     }
 
     @MainActor

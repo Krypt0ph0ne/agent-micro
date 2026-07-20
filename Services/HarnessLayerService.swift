@@ -17,7 +17,10 @@ final class HarnessLayerService {
     var onSwitch: (HarnessLayer) -> Void = { _ in }
 
     private var pressedKeys: Set<HardwareControl> = []
-    private var consumedByChord: Set<HardwareControl> = []
+    /// Keys whose current press must NOT emit a tap on release, because the two
+    /// switch keys were held together at some point during that press (a chord
+    /// attempt) — whether or not it completed, and no matter how long it is held.
+    private var suppressedKeys: Set<HardwareControl> = []
     private var chordTimer: Timer?
 
     private(set) var lastSwitchDescription = "Noch kein Layer-Wechsel"
@@ -42,9 +45,10 @@ final class HarnessLayerService {
 
     private func press(_ control: HardwareControl) {
         pressedKeys.insert(control)
-        consumedByChord.remove(control)
-        // Both switch keys are down: arm the chord.
+        // Both switch keys are down together: this is a chord attempt. Neither
+        // key may tap on release from now on, and arm the switch timer.
         if Set(store.layerSwitchKeys).isSubset(of: pressedKeys) {
+            suppressedKeys.formUnion(store.layerSwitchKeys)
             chordTimer?.invalidate()
             chordTimer = Timer.scheduledTimer(withTimeInterval: Double(Self.chordHoldMilliseconds) / 1_000, repeats: false) { [weak self] _ in
                 Task { @MainActor in self?.fireSwitch() }
@@ -56,23 +60,22 @@ final class HarnessLayerService {
         chordTimer = nil
         // Only switch while both keys are still physically held.
         guard Set(store.layerSwitchKeys).isSubset(of: pressedKeys) else { return }
-        consumedByChord.formUnion(store.layerSwitchKeys)
         let target = (store.activeLayer ?? .codex).other
         lastSwitchDescription = "Gewechselt zu \(target.title)"
         onSwitch(target)
     }
 
     private func release(_ control: HardwareControl) {
-        // A release before the threshold breaks the pending chord.
+        // Releasing either key ends any pending switch. Holding longer than the
+        // threshold simply fired once already; a later release does nothing.
         chordTimer?.invalidate()
         chordTimer = nil
         pressedKeys.remove(control)
-        defer { consumedByChord.remove(control) }
-        // The chord already switched on this press, so don't also tap.
-        guard !consumedByChord.contains(control) else { return }
-        // Only clean (app-only) switch keys are re-emitted by the app; a switch
-        // key left on real firmware already sent its own macro.
-        guard store.appOnlySwitchControls(in: store.selectedProfile).contains(control) else { return }
+        let wasChordAttempt = suppressedKeys.contains(control)
+        suppressedKeys.remove(control)
+        guard !wasChordAttempt else { return }
+        // A genuine solo tap: re-emit the key's own action ourselves, since the
+        // switch keys are uploaded in app-only mode and send nothing themselves.
         let action = store.selectedProfile.action(for: control)
         guard action.isEnabled else { return }
         KeystrokeSynthesizer.post(macro: action.deviceMacro)
