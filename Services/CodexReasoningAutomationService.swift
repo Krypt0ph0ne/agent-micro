@@ -198,15 +198,20 @@ final class CodexReasoningAutomationService {
 
     /// Fires the instant the hold threshold is crossed: opens the Model
     /// Picker and drills straight into its "Modell" submenu with no further
-    /// press/release cycle needed. The menu opens with "Erweitert" (the last
-    /// entry) highlighted, so three Up presses reach the first entry
-    /// ("Modell") before Right expands its model list.
+    /// press/release cycle needed.
     ///
-    /// Sending all of these back-to-back with no gap landed one entry short
-    /// every time (3 or 4 presses made no difference), which means rapid
-    /// identical key events were being coalesced/dropped rather than each
-    /// one moving the highlight — so every key here is spaced out via
-    /// `postKeysSequentially` instead of fired in one burst.
+    /// The menu's starting highlight is not fixed: the first-ever open
+    /// starts on "Erweitert", but once the menu has been driven into a
+    /// submenu and closed, it re-opens next time already highlighting
+    /// wherever it was left — so a fixed "press Up N times" count that
+    /// worked once landed one entry off the next time. Confirmed by hand:
+    /// Up from "Modell" (the first entry) wraps to "Erweitert" (the last),
+    /// but Up pressed again while already on "Erweitert" does nothing
+    /// (it's a dead end in that direction) — while Down from "Erweitert"
+    /// reliably moves on. That dead end is exploited here as a fixed anchor:
+    /// six Up presses are more than enough to land on "Erweitert" and stay
+    /// there regardless of the starting position, then one Down reaches
+    /// "Modell" and Right expands its model list.
     private func fireEncoderHold() {
         encoderHoldFired = true
         guard !isModelListOpen else { return }
@@ -217,7 +222,8 @@ final class CodexReasoningAutomationService {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             Self.openModelPickerShortcut()
             let upArrow = UInt16(kVK_UpArrow)
-            Self.postKeysSequentially([upArrow, upArrow, upArrow, UInt16(kVK_RightArrow)], startingAfter: 0.08, interval: 0.08)
+            let sequence = Array(repeating: upArrow, count: 6) + [UInt16(kVK_DownArrow), UInt16(kVK_RightArrow)]
+            Self.postKeysSequentially(sequence, startingAfter: 0.08, interval: 0.07)
         }
     }
 
