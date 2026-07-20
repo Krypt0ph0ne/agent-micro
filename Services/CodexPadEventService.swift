@@ -64,7 +64,10 @@ final class CodexPadEventService: @unchecked Sendable {
         self.reportBuffer = buffer
         status = "Protokoll v2 verbunden"
         requestStatus()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        // Physical key edges arrive as their own unsolicited reports, so this
+        // poll only refreshes the firmware/pressed-mask fallback. 150 ms keeps
+        // the synchronous SetReport off the main thread's hot path.
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
             self?.requestStatus()
         }
     }
@@ -127,18 +130,23 @@ final class CodexPadEventService: @unchecked Sendable {
         guard bytes.count == 32, bytes[0] == 0x43, bytes[1] == 0x50,
               bytes[0..<31].reduce(0, ^) == bytes[31] else { return }
         if bytes[3] == 0x80 {
-            let firmwareStatus = CodexPadFirmwareStatus(
+            let newStatus = CodexPadFirmwareStatus(
                 version: "\(bytes[4]).\(bytes[5]).\(bytes[6])",
                 capabilities: bytes[7],
                 pressedMask: UInt16(bytes[10]) | UInt16(bytes[11]) << 8
             )
-            self.firmwareStatus = firmwareStatus
-            status = "Firmware \(firmwareStatus.version) · Protokoll v\(bytes[2])"
-            if lastLoggedPressedMask != firmwareStatus.pressedMask {
-                lastLoggedPressedMask = firmwareStatus.pressedMask
-                logger.info("Pressed mask changed: 0x\(String(firmwareStatus.pressedMask, radix: 16), privacy: .public)")
+            // The firmware streams status faster than we poll. Identical reports
+            // must be dropped here: otherwise the LED pipeline (and every failed
+            // LED write, which reopens Raw HID) runs on every frame and pegs the
+            // CPU. Only a real change is propagated.
+            guard newStatus != firmwareStatus else { return }
+            firmwareStatus = newStatus
+            status = "Firmware \(newStatus.version) · Protokoll v\(bytes[2])"
+            if lastLoggedPressedMask != newStatus.pressedMask {
+                lastLoggedPressedMask = newStatus.pressedMask
+                logger.info("Pressed mask changed: 0x\(String(newStatus.pressedMask, radix: 16), privacy: .public)")
             }
-            onFirmwareStatus?(firmwareStatus)
+            onFirmwareStatus?(newStatus)
         } else if bytes[3] == 0x81, let phase = CodexPadPhysicalEvent.Phase(rawValue: bytes[6]) {
             let event = CodexPadPhysicalEvent(sequence: bytes[4], control: bytes[5], phase: phase)
             logger.info("Physical event control=\(event.control, privacy: .public) phase=\(event.phase.rawValue, privacy: .public)")
