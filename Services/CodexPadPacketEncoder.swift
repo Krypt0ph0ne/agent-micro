@@ -20,13 +20,13 @@ enum CodexPadPacketError: LocalizedError, Equatable {
 struct CodexPadPacketEncoder {
     static let packetSize = 32
 
-    func packets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI, appOnlyControls: Set<HardwareControl> = []) throws -> [[UInt8]] {
+    func packets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI) throws -> [[UInt8]] {
         try HardwareControl.allCases.map { control -> [UInt8] in
             let binding = profile.binding(for: control)
-            // App-only controls are driven by CodexPad: the firmware only reports
-            // the physical edges while the app decides what to emit. Used by both
-            // tap-vs-hold and the clean layer-switch chord keys.
-            if binding.isTapHold || appOnlyControls.contains(control) {
+            // Tap-vs-hold controls are driven by CodexPad: the firmware only
+            // reports the physical edges while the app synthesizes the resolved
+            // tap or hold action, so nothing is bound on the device itself.
+            if binding.isTapHold {
                 return appOnlyPacket(control: control)
             }
             return try bindingPacket(action: binding.action, control: control, layout: layout)
@@ -45,8 +45,8 @@ struct CodexPadPacketEncoder {
 
     /// Full transfer sequence. Idle packets deliberately come last so the
     /// board enters the configured resting state as soon as upload completes.
-    func uploadPackets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI, appOnlyControls: Set<HardwareControl> = []) throws -> [[UInt8]] {
-        try packets(profile: profile, layout: layout, appOnlyControls: appOnlyControls)
+    func uploadPackets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI) throws -> [[UInt8]] {
+        try packets(profile: profile, layout: layout)
             + HardwareControl.buttons.map {
                 ledPacket(setting: profile.idleLighting.keyConfiguration(for: $0))
             }

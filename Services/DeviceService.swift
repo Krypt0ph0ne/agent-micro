@@ -62,10 +62,10 @@ final class DeviceService {
     }
 
     @discardableResult
-    func validate(profile: MacropadProfile, keyboardLayout: KeyboardLayout = .usANSI, appOnlyControls: Set<HardwareControl> = []) -> ProcessResult? {
+    func validate(profile: MacropadProfile, keyboardLayout: KeyboardLayout = .usANSI) -> ProcessResult? {
         if currentDevice?.isCodexPadFirmware == true {
             do {
-                let packets = try codexPadEncoder.uploadPackets(profile: profile, layout: keyboardLayout, appOnlyControls: appOnlyControls)
+                let packets = try codexPadEncoder.uploadPackets(profile: profile, layout: keyboardLayout)
                 let result = ProcessResult(exitCode: 0, stdout: "\(packets.count) lokale HID-Pakete sind gültig.", stderr: "", timedOut: false, launchError: nil)
                 diagnostics.record(result, title: "CH552-Profil validieren")
                 return result
@@ -88,7 +88,7 @@ final class DeviceService {
     }
 
     @discardableResult
-    func upload(profile: MacropadProfile, keyboardLayout: KeyboardLayout = .usANSI, appOnlyControls: Set<HardwareControl> = []) -> ProcessResult? {
+    func upload(profile: MacropadProfile, keyboardLayout: KeyboardLayout = .usANSI) -> ProcessResult? {
         guard state.isSupportedConnection else {
             diagnostics.append(.error, "Upload blockiert", detail: "Kein unterstütztes CH57x-Gerät verbunden.")
             return nil
@@ -100,7 +100,7 @@ final class DeviceService {
         isBusy = true
         defer { isBusy = false }
 
-        let validation = validate(profile: profile, keyboardLayout: keyboardLayout, appOnlyControls: appOnlyControls)
+        let validation = validate(profile: profile, keyboardLayout: keyboardLayout)
         guard validation?.succeeded == true else {
             diagnostics.append(.error, "Upload nicht ausgeführt", detail: "Die Konfiguration muss zuerst erfolgreich validieren.")
             return validation
@@ -108,7 +108,7 @@ final class DeviceService {
 
         if currentDevice?.isCodexPadFirmware == true {
             do {
-                let packets = try codexPadEncoder.uploadPackets(profile: profile, layout: keyboardLayout, appOnlyControls: appOnlyControls)
+                let packets = try codexPadEncoder.uploadPackets(profile: profile, layout: keyboardLayout)
                 let result = codexPadClient.send(packets)
                 diagnostics.record(result, title: "Profil und RGB live an CH552 übertragen")
                 if result.succeeded {
