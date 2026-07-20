@@ -41,6 +41,7 @@ final class AppState {
                 guard let self else { return }
                 self.ledFeedback.handle(event, profile: self.profiles.selectedProfile)
                 self.tapHold.handle(event)
+                self.reasoningAutomation.handlePhysicalEvent(event)
                 if event.phase == .pressed || event.phase == .triggered,
                    let control = HardwareControl(reportedControlIndex: event.control),
                    self.profiles.selectedProfile.action(for: control).kind == .codexAgent {
