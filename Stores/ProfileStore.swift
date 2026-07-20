@@ -37,6 +37,9 @@ final class ProfileStore {
     private static let layerSwitchEnabledKey = "CodexPad.layerSwitchEnabled"
     private static let layerSwitchKeysKey = "CodexPad.layerSwitchKeys"
     private static let layerSwitchLightModeKey = "CodexPad.layerSwitchLightMode"
+    private static let layerSwitchBrightnessKey = "CodexPad.layerSwitchBrightness"
+    private static let layerColorCodexKey = "CodexPad.layerColor.codex"
+    private static let layerColorClaudeKey = "CodexPad.layerColor.claude"
     private let persistenceURL: URL
     private let catalog: CodexActionCatalog
 
@@ -70,6 +73,24 @@ final class ProfileStore {
     var layerSwitchLightMode: LayerSwitchLightMode {
         didSet { UserDefaults.standard.set(layerSwitchLightMode.rawValue, forKey: Self.layerSwitchLightModeKey) }
     }
+    /// Brightness of the whole-pad cue (0…255).
+    var layerSwitchBrightness: UInt8 {
+        didSet { UserDefaults.standard.set(Int(layerSwitchBrightness), forKey: Self.layerSwitchBrightnessKey) }
+    }
+    var layerColorCodex: RGBColor {
+        didSet { UserDefaults.standard.set(layerColorCodex.packed, forKey: Self.layerColorCodexKey) }
+    }
+    var layerColorClaude: RGBColor {
+        didSet { UserDefaults.standard.set(layerColorClaude.packed, forKey: Self.layerColorClaudeKey) }
+    }
+
+    func layerColor(for layer: HarnessLayer) -> RGBColor {
+        layer == .claude ? layerColorClaude : layerColorCodex
+    }
+
+    func setLayerColor(_ color: RGBColor, for layer: HarnessLayer) {
+        if layer == .claude { layerColorClaude = color } else { layerColorCodex = color }
+    }
 
     init(catalog: CodexActionCatalog, persistenceURL: URL? = nil) {
         self.catalog = catalog
@@ -83,6 +104,11 @@ final class ProfileStore {
         self.layerSwitchKeys = (storedKeys?.count == 2 ? storedKeys : nil) ?? [.key4, .key6]
         self.layerSwitchLightMode = defaults.string(forKey: Self.layerSwitchLightModeKey)
             .flatMap(LayerSwitchLightMode.init(rawValue:)) ?? .persistent
+        self.layerSwitchBrightness = UInt8(clamping: (defaults.object(forKey: Self.layerSwitchBrightnessKey) as? Int) ?? 255)
+        self.layerColorCodex = (defaults.object(forKey: Self.layerColorCodexKey) as? Int)
+            .map(RGBColor.init(packed:)) ?? HarnessLayer.codex.defaultSwitchColor
+        self.layerColorClaude = (defaults.object(forKey: Self.layerColorClaudeKey) as? Int)
+            .map(RGBColor.init(packed:)) ?? HarnessLayer.claude.defaultSwitchColor
         let baseDirectory = persistenceURL?.deletingLastPathComponent() ?? Self.applicationSupportDirectory()
         self.persistenceURL = persistenceURL ?? baseDirectory.appendingPathComponent("Profiles.json")
         let loaded = Self.load(from: self.persistenceURL)
@@ -198,15 +224,13 @@ final class ProfileStore {
         return true
     }
 
-    /// Switch keys that should be uploaded in the firmware's app-only mode so
-    /// the chord stays clean: only keys whose action the app can re-emit itself
-    /// (a plain, synthesizable shortcut — never the real dictation hold).
+    /// Switch keys are always uploaded in the firmware's app-only mode while the
+    /// feature is on, so holding the chord never leaks the keys' own macros (not
+    /// even dictation). The app re-emits a plain single-key tap itself; a switch
+    /// key bound to a non-synthesizable action simply does nothing on a tap.
     func appOnlySwitchControls(in profile: MacropadProfile) -> Set<HardwareControl> {
         guard layerSwitchEnabled else { return [] }
-        return Set(layerSwitchKeys.filter { control in
-            let action = profile.action(for: control)
-            return action.codexActionID != "dictation" && KeystrokeSynthesizer.canSynthesize(action.deviceMacro)
-        })
+        return Set(layerSwitchKeys)
     }
 
     func newProfile() {

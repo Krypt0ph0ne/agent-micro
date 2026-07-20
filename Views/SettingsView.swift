@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     let appState: AppState
     @State private var resultText: String?
-    @State private var ledTestMessage: String?
     @State private var showDiagnostics = false
 
     var body: some View {
@@ -114,7 +113,27 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("Umschalt-Tasten mit einfachem Shortcut werden app-vermittelt: kurzer Tipp = normale Aktion, beide halten = umschalten. Braucht die CH552-Firmware und Bedienungshilfen. Codex' Diktat-Taste bleibt als echter Halte-Trigger unverändert.")
+                ColorPicker("Codex-Farbe", selection: layerColorBinding(.codex), supportsOpacity: false)
+                ColorPicker("Claude-Farbe", selection: layerColorBinding(.claude), supportsOpacity: false)
+
+                HStack {
+                    Text("Helligkeit")
+                    Slider(
+                        value: Binding(
+                            get: { Double(profiles.layerSwitchBrightness) },
+                            set: { profiles.layerSwitchBrightness = UInt8(clamping: Int($0)) }
+                        ),
+                        in: 20...255,
+                        step: 1
+                    )
+                    Text("\(Int(Double(profiles.layerSwitchBrightness) / 255 * 100)) %")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40, alignment: .trailing)
+                }
+                .disabled(!profiles.layerSwitchEnabled)
+
+                Text("Die Umschalt-Tasten senden beim einzelnen Tippen ihre normale Aktion; beim Halten beider schalten sie nur um und lösen selbst nichts aus. Echte Halte-Aktionen wie Diktat funktionieren auf einer Umschalt-Taste nicht. Braucht die CH552-Firmware und Bedienungshilfen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -128,25 +147,6 @@ struct SettingsView: View {
                     Button("Gerät erneut suchen") { appState.refreshDevice() }
                     Spacer()
                     Button("Diagnose öffnen") { showDiagnostics = true }
-                }
-            }
-
-            Section("Hersteller-LED") {
-                Text("Beim 0x1189:0x8890 stehen drei firmwareseitige, globale LED-Muster zur Verfügung.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack {
-                    Button("Aus") { setLEDMode(0) }
-                    Button("Pattern 1") { setLEDMode(1) }
-                    Button("Pattern 2") { setLEDMode(2) }
-                }
-                .disabled(!appState.device.state.isSupportedConnection || appState.device.isBusy)
-
-                if let ledTestMessage {
-                    Text(ledTestMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -175,6 +175,8 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .controlSize(.small)
         .frame(width: 460, height: 560)
+        .onChange(of: profiles.layerSwitchEnabled) { _, _ in appState.applyLayerSwitchConfiguration() }
+        .onChange(of: profiles.layerSwitchKeys) { _, _ in appState.applyLayerSwitchConfiguration() }
         .sheet(isPresented: $showDiagnostics) {
             DiagnosticsView(appState: appState)
                 .frame(minWidth: 720, minHeight: 520)
@@ -219,11 +221,26 @@ struct SettingsView: View {
         }
     }
 
-    private func setLEDMode(_ mode: Int) {
-        let result = appState.device.setLEDMode(mode)
-        ledTestMessage = result?.succeeded == true
-            ? "LED-Pattern \(mode) wurde auf dem Pad gesetzt."
-            : "LED-Pattern \(mode) konnte nicht gesetzt werden – Details stehen in Diagnose."
+    /// Bridges a stored layer colour to SwiftUI's ColorPicker.
+    private func layerColorBinding(_ layer: HarnessLayer) -> Binding<Color> {
+        Binding(
+            get: {
+                let c = appState.profiles.layerColor(for: layer)
+                return Color(.sRGB, red: Double(c.red) / 255, green: Double(c.green) / 255, blue: Double(c.blue) / 255)
+            },
+            set: { newColor in
+                appState.profiles.setLayerColor(Self.rgb(from: newColor), for: layer)
+            }
+        )
+    }
+
+    private static func rgb(from color: Color) -> RGBColor {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? .white
+        return RGBColor(
+            red: UInt8(clamping: Int((ns.redComponent * 255).rounded())),
+            green: UInt8(clamping: Int((ns.greenComponent * 255).rounded())),
+            blue: UInt8(clamping: Int((ns.blueComponent * 255).rounded()))
+        )
     }
 }
 
