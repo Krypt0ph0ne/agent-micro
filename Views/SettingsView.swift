@@ -53,6 +53,16 @@ struct SettingsView: View {
                     }
                 }
 
+                Toggle(isOn: $automation.useModelListNavigation) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Drehen navigiert die Modellliste")
+                        Text("Statt Aufwand ±: Drehen öffnet den Model Picker und wählt per Pfeiltasten, Drücken übernimmt")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!automation.isEnabled)
+
                 HStack(spacing: 8) {
                     PermissionStatus(
                         title: "Input Monitoring",
@@ -64,15 +74,27 @@ struct SettingsView: View {
                     )
                 }
 
-                HStack {
-                    Button("− testen") { automation.perform(.decreaseEffort) }
-                        .frame(maxWidth: .infinity)
-                    Button("Picker") { automation.toggleModelPicker() }
-                        .frame(maxWidth: .infinity)
-                    Button("+ testen") { automation.perform(.increaseEffort) }
-                        .frame(maxWidth: .infinity)
+                if automation.useModelListNavigation {
+                    HStack {
+                        Button("◀ Modell") { automation.navigateModelList(.previous) }
+                            .frame(maxWidth: .infinity)
+                        Button("Übernehmen") { automation.confirmModelSelection() }
+                            .frame(maxWidth: .infinity)
+                        Button("Modell ▶") { automation.navigateModelList(.next) }
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(!automation.isEnabled)
+                } else {
+                    HStack {
+                        Button("− testen") { automation.perform(.decreaseEffort) }
+                            .frame(maxWidth: .infinity)
+                        Button("Picker") { automation.toggleModelPicker() }
+                            .frame(maxWidth: .infinity)
+                        Button("+ testen") { automation.perform(.increaseEffort) }
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(!automation.isEnabled)
                 }
-                .disabled(!automation.isEnabled)
 
                 if !automation.hasInputMonitoringPermission || !automation.hasAccessibilityPermission {
                     Button("Berechtigungen anfordern") { automation.requestPermissions() }
