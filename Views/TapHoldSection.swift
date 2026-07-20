@@ -7,6 +7,8 @@ struct TapHoldSection: View {
     let control: HardwareControl
     @State private var isChoosingHold = false
     @State private var holdSearch = ""
+    @State private var isPresentingHoldTextSubmission = false
+    @State private var isPresentingHoldWizard = false
 
     private var binding: ControlBinding {
         appState.profiles.selectedProfile.binding(for: control)
@@ -63,6 +65,15 @@ struct TapHoldSection: View {
             isChoosingHold = false
             holdSearch = ""
         }
+        .sheet(isPresented: $isPresentingHoldTextSubmission) {
+            TextSubmissionSheet { text in
+                guard let textAction = KeyboardAction.textSubmission(text) else { return }
+                appState.profiles.setHoldAction(textAction, thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds, for: control)
+            }
+        }
+        .sheet(isPresented: $isPresentingHoldWizard) {
+            CodexAssignmentWizardView(appState: appState, control: control, slot: .hold)
+        }
     }
 
     @ViewBuilder
@@ -109,6 +120,19 @@ struct TapHoldSection: View {
 
     private var holdPicker: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button("Text", systemImage: "paperplane.fill") {
+                    isPresentingHoldTextSubmission = true
+                    isChoosingHold = false
+                }
+                Button("Assistent", systemImage: "wand.and.stars") {
+                    isPresentingHoldWizard = true
+                    isChoosingHold = false
+                }
+                .help("Konfigurierbare Codex-Aktion mit eigenem Trigger als Halten-Aktion einrichten")
+            }
+            .controlSize(.small)
+
             TextField("Halten-Aktion durchsuchen", text: $holdSearch)
                 .textFieldStyle(.roundedBorder)
                 .controlSize(.small)

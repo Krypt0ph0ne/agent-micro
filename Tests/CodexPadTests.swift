@@ -17,26 +17,26 @@ final class CodexPadTests: XCTestCase {
 
     func testReasoningTriggerProfileUsesConfirmedLocalShortcuts() {
         let profile = ProfileFactory.codexReasoningTriggers(catalog: CodexActionCatalog())
-        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f18")
+        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f22")
         XCTAssertEqual(profile.action(for: .encoderPress).deviceMacro, "f23")
-        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f19")
+        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f24")
         XCTAssertEqual(profile.action(for: .encoderLeft).codexActionID, "encoder-effort-decrease")
     }
 
     func testCodexProfileUsesReasoningTriggersByDefault() {
         let profile = ProfileFactory.codex(catalog: CodexActionCatalog())
-        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f18")
+        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f22")
         XCTAssertEqual(profile.action(for: .encoderPress).deviceMacro, "f23")
-        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f19")
+        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f24")
         XCTAssertEqual(profile.action(for: .encoderRight).codexActionID, "encoder-effort-increase")
     }
 
     func testCodexProfileGeneratesReasoningFunctionKeys() throws {
         let profile = ProfileFactory.codex(catalog: CodexActionCatalog())
         let yaml = try CH57xConfigurationEncoder().encode(profile: profile)
-        XCTAssertTrue(yaml.contains("ccw: 'f18'"))
+        XCTAssertTrue(yaml.contains("ccw: 'f22'"))
         XCTAssertTrue(yaml.contains("press: 'f23'"))
-        XCTAssertTrue(yaml.contains("cw: 'f19'"))
+        XCTAssertTrue(yaml.contains("cw: 'f24'"))
     }
 
     func testEncoderAutomationUsesDirectCodexShortcuts() {
@@ -627,6 +627,37 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(restored.selectedProfile.reaction(for: .agentFailed).red, 99)
         XCTAssertEqual(restored.selectedProfile.idleLighting.effect, .pulse)
         XCTAssertEqual(restored.selectedProfile.idleLighting.brightness, 155)
+    }
+
+    @MainActor
+    func testProfileStoreMigratesStaleF18F19EncoderDefaultToPrivateTriggers() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-profile-store-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+
+        // Simulate a profile persisted before the F22/F24 fix: the direct
+        // F18/F19 shortcuts bypass CodexReasoningAutomationService entirely,
+        // so this state must always be migrated forward on load.
+        var stale = ProfileFactory.codex(catalog: catalog)
+        stale.setAction(
+            KeyboardAction(kind: .singleKey, label: "Aufwand −", icon: "minus.circle", deviceMacro: "f18", codexActionID: "encoder-effort-decrease"),
+            for: .encoderLeft
+        )
+        stale.setAction(
+            KeyboardAction(kind: .singleKey, label: "Modellwahl umschalten", icon: "cube", deviceMacro: "f23", codexActionID: "encoder-model-modifier"),
+            for: .encoderPress
+        )
+        stale.setAction(
+            KeyboardAction(kind: .singleKey, label: "Aufwand +", icon: "plus.circle", deviceMacro: "f19", codexActionID: "encoder-effort-increase"),
+            for: .encoderRight
+        )
+        try ProfileFileCodec.encode([stale]).write(to: url)
+
+        let store = ProfileStore(catalog: catalog, persistenceURL: url)
+        XCTAssertEqual(store.selectedProfile.action(for: .encoderLeft).deviceMacro, "f22")
+        XCTAssertEqual(store.selectedProfile.action(for: .encoderPress).deviceMacro, "f23")
+        XCTAssertEqual(store.selectedProfile.action(for: .encoderRight).deviceMacro, "f24")
     }
 
     func testFlashReactionUsesSupportedFirmwareEffect() {

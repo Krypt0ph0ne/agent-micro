@@ -7,7 +7,6 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var profiles = appState.profiles
-        @Bindable var automation = appState.reasoningAutomation
 
         Form {
             Section("Profil") {
@@ -39,46 +38,6 @@ struct SettingsView: View {
                 .labelsHidden()
 
                 Text(profiles.keyboardLayout.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Codex Reasoning · Drehrad") {
-                Toggle(isOn: $automation.isEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Drehradsteuerung aktiv")
-                        Text("Drehen sendet F18/F19, Druck schaltet die Modellwahl")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    PermissionStatus(
-                        title: "Input Monitoring",
-                        isGranted: automation.hasInputMonitoringPermission
-                    )
-                    PermissionStatus(
-                        title: "Accessibility",
-                        isGranted: automation.hasAccessibilityPermission
-                    )
-                }
-
-                HStack {
-                    Button("− testen") { automation.perform(.decreaseEffort) }
-                        .frame(maxWidth: .infinity)
-                    Button("Picker") { automation.toggleModelPicker() }
-                        .frame(maxWidth: .infinity)
-                    Button("+ testen") { automation.perform(.increaseEffort) }
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(!automation.isEnabled)
-
-                if !automation.hasInputMonitoringPermission || !automation.hasAccessibilityPermission {
-                    Button("Berechtigungen anfordern") { automation.requestPermissions() }
-                }
-
-                Text(automation.status)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -145,23 +104,4 @@ struct SettingsView: View {
         }
     }
 
-}
-
-private struct PermissionStatus: View {
-    let title: String
-    let isGranted: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            Text(isGranted ? "Erteilt" : "Fehlt")
-                .foregroundStyle(isGranted ? Color.green : Color.orange)
-        }
-        .font(.caption)
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, minHeight: 28)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
-    }
 }

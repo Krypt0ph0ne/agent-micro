@@ -8,6 +8,7 @@ struct CodexAssignmentWizardView: View {
     @Environment(\.dismiss) private var dismiss
     let appState: AppState
     let control: HardwareControl
+    var slot: ActionSlot = .tap
 
     @State private var selected: CodexActionDefinition?
     @State private var trigger = ""
@@ -48,7 +49,7 @@ struct CodexAssignmentWizardView: View {
                 Text("Codex-Aktion einrichten")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Label(control.shortTitle, systemImage: control.icon)
+                Label("\(control.shortTitle)\(slot == .hold ? " · Halten" : "")", systemImage: control.icon)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -147,8 +148,8 @@ struct CodexAssignmentWizardView: View {
                 Spacer()
                 Button("Abbrechen") { dismiss() }
                 Button("Zuweisen") {
-                    appState.codexThreads.removeAssignment(for: control)
-                    appState.profiles.assignConfigurableCodexAction(action, trigger: trigger, to: control)
+                    if slot == .tap { appState.codexThreads.removeAssignment(for: control) }
+                    appState.profiles.assignConfigurableCodexAction(action, trigger: trigger, to: control, slot: slot)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -212,7 +213,8 @@ struct CodexAssignmentWizardView: View {
     /// If this control is already bound to the same action, keep its trigger so
     /// re-running the wizard is idempotent.
     private func currentTrigger(for actionID: String) -> String? {
-        let action = appState.profiles.selectedProfile.action(for: control)
-        return action.codexActionID == actionID ? action.deviceMacro : nil
+        let binding = appState.profiles.selectedProfile.binding(for: control)
+        let action = slot == .tap ? binding.action : binding.holdAction
+        return action?.codexActionID == actionID ? action?.deviceMacro : nil
     }
 }
