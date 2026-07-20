@@ -9,10 +9,9 @@ struct CodexPadApp: App {
     var body: some Scene {
         WindowGroup("CodexPad", id: "main") {
             MainWindowView(appState: appState)
-                .frame(minWidth: 800, minHeight: 500)
+                .frame(width: 440)
         }
-        .defaultSize(width: 820, height: 520)
-        .windowResizability(.contentMinSize)
+        .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Gerät erneut suchen") { appState.refreshDevice() }

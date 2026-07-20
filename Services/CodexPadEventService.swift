@@ -90,18 +90,37 @@ final class CodexPadEventService: @unchecked Sendable {
     }
 
     func sendLEDs(_ packets: [[UInt8]]) {
-        guard let device else {
-            logger.error("LED packets dropped: Raw HID is not connected")
+        let validPackets = packets.filter { $0.count == CodexPadPacketEncoder.packetSize }
+        guard validPackets.count == packets.count else {
+            logger.error("LED packet rejected: invalid packet size")
             return
         }
-        for var packet in packets where packet.count == CodexPadPacketEncoder.packetSize {
+        if let device, sendLEDs(validPackets, to: device) {
+            return
+        }
+
+        // The long-lived event interface can disappear briefly during USB
+        // reconnects. Reopen Raw HID for this batch instead of dropping the
+        // visual state transition.
+        let fallbackResult = CodexPadHIDClient().send(validPackets)
+        if !fallbackResult.succeeded {
+            logger.error("LED fallback failed: \(fallbackResult.failureDescription, privacy: .public)")
+        } else {
+            logger.info("LED batch recovered through a fresh Raw HID connection")
+        }
+    }
+
+    private func sendLEDs(_ packets: [[UInt8]], to device: IOHIDDevice) -> Bool {
+        for var packet in packets {
             let result = packet.withUnsafeMutableBufferPointer {
                 IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, 0, $0.baseAddress!, $0.count)
             }
             if result != kIOReturnSuccess {
                 logger.error("LED output command \(packet[3], privacy: .public) failed: \(result, privacy: .public)")
+                return false
             }
         }
+        return true
     }
 
     fileprivate func consume(_ bytes: [UInt8]) {

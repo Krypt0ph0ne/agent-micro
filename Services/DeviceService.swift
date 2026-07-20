@@ -65,7 +65,7 @@ final class DeviceService {
     func validate(profile: MacropadProfile, keyboardLayout: KeyboardLayout = .usANSI) -> ProcessResult? {
         if currentDevice?.isCodexPadFirmware == true {
             do {
-                let packets = try codexPadEncoder.packets(profile: profile, layout: keyboardLayout)
+                let packets = try codexPadEncoder.uploadPackets(profile: profile, layout: keyboardLayout)
                 let result = ProcessResult(exitCode: 0, stdout: "\(packets.count) lokale HID-Pakete sind gültig.", stderr: "", timedOut: false, launchError: nil)
                 diagnostics.record(result, title: "CH552-Profil validieren")
                 return result
@@ -108,13 +108,12 @@ final class DeviceService {
 
         if currentDevice?.isCodexPadFirmware == true {
             do {
-                let packets = try codexPadEncoder.packets(profile: profile, layout: keyboardLayout)
-                    + [codexPadEncoder.allOffPacket()]
+                let packets = try codexPadEncoder.uploadPackets(profile: profile, layout: keyboardLayout)
                 let result = codexPadClient.send(packets)
                 diagnostics.record(result, title: "Profil und RGB live an CH552 übertragen")
                 if result.succeeded {
                     lastSuccessfulUpload = .now
-                    diagnostics.append(.success, "CH552-Profil aktiv", detail: "Neun Eingabebelegungen wurden übertragen; die sechs LEDs bleiben im Idle ausgeschaltet.")
+                    diagnostics.append(.success, "CH552-Profil aktiv", detail: "Neun Eingabebelegungen und die konfigurierte Idle-Beleuchtung wurden übertragen.")
                 }
                 return result
             } catch {
@@ -154,12 +153,19 @@ final class DeviceService {
 
     @discardableResult
     func applyLED(_ setting: KeyLEDConfiguration) -> ProcessResult? {
+        applyLEDs([setting])
+    }
+
+    @discardableResult
+    func applyLEDs(_ settings: [KeyLEDConfiguration]) -> ProcessResult? {
+        guard !settings.isEmpty else { return nil }
         guard currentDevice?.isCodexPadFirmware == true else {
             diagnostics.append(.error, "RGB nicht übertragen", detail: "Keine eigene CH552-CodexPad-Firmware verbunden.")
             return nil
         }
-        let result = codexPadClient.send([codexPadEncoder.ledPacket(setting: setting)])
-        diagnostics.record(result, title: "\(setting.control.title) RGB anwenden")
+        let result = codexPadClient.send(settings.map(codexPadEncoder.ledPacket))
+        let title = settings.count == 1 ? "\(settings[0].control.title) RGB anwenden" : "Alle RGB-Einstellungen anwenden"
+        diagnostics.record(result, title: title)
         return result
     }
 
