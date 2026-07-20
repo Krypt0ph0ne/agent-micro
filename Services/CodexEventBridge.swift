@@ -2,6 +2,46 @@ import Foundation
 import Observation
 import OSLog
 
+/// Splits a byte stream into complete newline-terminated JSON messages and
+/// deserializes them. Not thread-safe on its own; the bridge only ever uses it
+/// from a single serial queue, keeping this work off the main thread.
+final class NDJSONLineReader: @unchecked Sendable {
+    private var buffer = [UInt8]()
+    /// How far into `buffer` we have already looked for a newline. Without this,
+    /// a long message split across many chunks makes every chunk re-scan the
+    /// whole growing buffer — O(n²) — which pegged the CPU even though the
+    /// app-server itself was idle.
+    private var scanOffset = 0
+
+    func reset() {
+        buffer.removeAll(keepingCapacity: true)
+        scanOffset = 0
+    }
+
+    /// Appends new bytes and returns every newly completed message, parsed. Only
+    /// the freshly appended bytes are scanned, so total work is O(bytes).
+    func appendAndParse(_ data: Data) -> [[String: Any]] {
+        buffer.append(contentsOf: data)
+        var lineStart = 0
+        var objects: [[String: Any]] = []
+        var index = scanOffset
+        while index < buffer.count {
+            if buffer[index] == 0x0A {
+                if index > lineStart,
+                   let object = try? JSONSerialization.jsonObject(with: Data(buffer[lineStart..<index])) as? [String: Any] {
+                    objects.append(object)
+                }
+                lineStart = index + 1
+            }
+            index += 1
+        }
+        if lineStart > 0 { buffer.removeFirst(lineStart) }
+        // Everything currently buffered has now been scanned for a newline.
+        scanOffset = buffer.count
+        return objects
+    }
+}
+
 /// Read-only observer for Codex lifecycle and elicitation events. In particular,
 /// server-initiated approval and user-input requests are intentionally never answered.
 @MainActor
@@ -15,11 +55,16 @@ final class CodexEventBridge: @unchecked Sendable {
     }
 
     private let logger = Logger(subsystem: "com.codexpad.app", category: "codex-bridge")
-    private var process: Process?
-    private var input: FileHandle?
-    private var outputBuffer = Data()
-    private var nextRequestID = 1
-    private var pendingRequests: [Int: RequestPurpose] = [:]
+    @ObservationIgnored private var process: Process?
+    @ObservationIgnored private var input: FileHandle?
+    /// The app-server stream is split into NDJSON lines and deserialized off the
+    /// main thread; only the finished objects are handed back to the main actor.
+    /// An active Codex session streams a lot, and doing this parse on the main
+    /// thread froze the UI. The reader is only ever touched on `parseQueue`.
+    @ObservationIgnored nonisolated private let parseQueue = DispatchQueue(label: "com.codexpad.bridge.parse")
+    @ObservationIgnored nonisolated private let lineReader = NDJSONLineReader()
+    @ObservationIgnored private var nextRequestID = 1
+    @ObservationIgnored private var pendingRequests: [Int: RequestPurpose] = [:]
     private var reconnectTask: Task<Void, Never>?
     private var statusSyncTask: Task<Void, Never>?
     private var reconnectAttempt = 0
@@ -100,8 +145,17 @@ final class CodexEventBridge: @unchecked Sendable {
 
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty else { return }
-            Task { @MainActor [weak self] in self?.consume(data) }
+            guard !data.isEmpty, let self else { return }
+            // Parse off the main thread; hand only finished objects back.
+            self.parseQueue.async { [weak self] in
+                guard let self else { return }
+                let objects = self.lineReader.appendAndParse(data)
+                guard !objects.isEmpty else { return }
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    for object in objects { self.handle(object) }
+                }
+            }
         }
         stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
@@ -118,7 +172,7 @@ final class CodexEventBridge: @unchecked Sendable {
             try process.run()
             self.process = process
             input = stdinPipe.fileHandleForWriting
-            outputBuffer.removeAll(keepingCapacity: true)
+            parseQueue.async { [lineReader] in lineReader.reset() }
             pendingRequests.removeAll()
             statusReadsInFlight.removeAll()
             sendInitialize()
@@ -206,17 +260,6 @@ final class CodexEventBridge: @unchecked Sendable {
             try input?.write(contentsOf: data)
         } catch {
             fail("Schreiben zum Codex App Server fehlgeschlagen: \(error.localizedDescription)")
-        }
-    }
-
-    private func consume(_ data: Data) {
-        outputBuffer.append(data)
-        while let newline = outputBuffer.firstIndex(of: 0x0A) {
-            let line = outputBuffer[..<newline]
-            outputBuffer.removeSubrange(...newline)
-            guard !line.isEmpty,
-                  let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
-            handle(object)
         }
     }
 
