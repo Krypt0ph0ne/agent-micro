@@ -1,10 +1,52 @@
 import Foundation
 
 struct ControlBinding: Codable, Hashable, Identifiable {
+    /// Sensible default before a hold registers, tuned so a deliberate press is
+    /// distinguished from a quick tap without feeling sluggish.
+    static let defaultHoldThresholdMilliseconds = 320
+    static let holdThresholdRange = 200...800
+
     var control: HardwareControl
     var action: KeyboardAction
+    /// Optional second function fired when the key is held past the threshold.
+    /// When present, the control is driven by CodexPad (app-only) instead of the
+    /// firmware, so the tap and the hold action can differ.
+    var holdAction: KeyboardAction?
+    var holdThresholdMilliseconds: Int?
 
     var id: HardwareControl { control }
+
+    /// A binding runs in tap-vs-hold mode only when the hold slot is filled with
+    /// an enabled action.
+    var isTapHold: Bool { holdAction?.isEnabled == true }
+
+    var resolvedHoldThresholdMilliseconds: Int {
+        holdThresholdMilliseconds ?? Self.defaultHoldThresholdMilliseconds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case control, action, holdAction, holdThresholdMilliseconds
+    }
+
+    init(
+        control: HardwareControl,
+        action: KeyboardAction,
+        holdAction: KeyboardAction? = nil,
+        holdThresholdMilliseconds: Int? = nil
+    ) {
+        self.control = control
+        self.action = action
+        self.holdAction = holdAction
+        self.holdThresholdMilliseconds = holdThresholdMilliseconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        control = try container.decode(HardwareControl.self, forKey: .control)
+        action = try container.decode(KeyboardAction.self, forKey: .action)
+        holdAction = try container.decodeIfPresent(KeyboardAction.self, forKey: .holdAction)
+        holdThresholdMilliseconds = try container.decodeIfPresent(Int.self, forKey: .holdThresholdMilliseconds)
+    }
 }
 
 enum LEDEffect: UInt8, Codable, CaseIterable, Identifiable, Hashable {
@@ -320,11 +362,36 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
         controls.first(where: { $0.control == control })?.action ?? .disabled
     }
 
+    func binding(for control: HardwareControl) -> ControlBinding {
+        controls.first(where: { $0.control == control }) ?? ControlBinding(control: control, action: .disabled)
+    }
+
+    func holdAction(for control: HardwareControl) -> KeyboardAction? {
+        binding(for: control).holdAction
+    }
+
     mutating func setAction(_ action: KeyboardAction, for control: HardwareControl) {
         if let index = controls.firstIndex(where: { $0.control == control }) {
             controls[index].action = action
         } else {
             controls.append(ControlBinding(control: control, action: action))
+        }
+        updatedAt = .now
+    }
+
+    /// Sets or clears the hold slot. Passing `nil` turns the control back into a
+    /// plain single-function binding and drops any stored threshold.
+    mutating func setHoldAction(_ action: KeyboardAction?, thresholdMilliseconds: Int? = nil, for control: HardwareControl) {
+        if let index = controls.firstIndex(where: { $0.control == control }) {
+            controls[index].holdAction = action
+            controls[index].holdThresholdMilliseconds = action == nil ? nil : thresholdMilliseconds
+        } else {
+            controls.append(ControlBinding(
+                control: control,
+                action: .disabled,
+                holdAction: action,
+                holdThresholdMilliseconds: action == nil ? nil : thresholdMilliseconds
+            ))
         }
         updatedAt = .now
     }
