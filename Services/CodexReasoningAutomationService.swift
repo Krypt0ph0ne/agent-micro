@@ -59,18 +59,20 @@ private enum CodexDismissibleArea: String {
 
 /// The hardware uses private function-key triggers. F13–F15 toggle
 /// dismissible Codex areas; F22–F24 are the encoder's private rotate/press
-/// triggers, translated here into either the direct reasoning-effort
-/// shortcuts or (in model-list-navigation mode) arrow-key menu navigation.
+/// triggers. The encoder always has both gestures at once, mirroring the
+/// buttons' tap-vs-hold model: a plain rotate/press changes reasoning effort
+/// or toggles the Model Picker, while holding the dial and rotating drives
+/// the Model Picker's "Modell" submenu with arrow keys instead.
 @MainActor
 @Observable
 final class CodexReasoningAutomationService {
     private let logger = Logger(subsystem: "com.codexpad.app", category: "encoder")
     private static let preferenceKey = "CodexPad.encoderAutomationEnabled"
     private static let migrationKey = "CodexPad.simpleEncoderV5"
-    private static let modelListNavigationKey = "CodexPad.encoderModelListNavigation"
     /// The dial must be held this long before a press starts driving the
     /// Model Picker; short presses fall through untouched.
     private static let modelListHoldThresholdSeconds: TimeInterval = 0.35
+    static var modelListHoldThresholdMilliseconds: Int { Int(modelListHoldThresholdSeconds * 1000) }
     private var hidManager: IOHIDManager?
     private var inputDebouncer = HIDInputDebouncer()
     private var openDismissibleArea: CodexDismissibleArea?
@@ -92,15 +94,6 @@ final class CodexReasoningAutomationService {
             updateMonitoring()
         }
     }
-    /// Alternate encoder behaviour: instead of sending the direct F18/F19
-    /// reasoning-effort shortcuts, rotation opens the Model Picker and drives
-    /// its "Modell" submenu with arrow keys; pressing confirms the highlight.
-    var useModelListNavigation: Bool {
-        didSet {
-            UserDefaults.standard.set(useModelListNavigation, forKey: Self.modelListNavigationKey)
-            resetModelPickerNavigation()
-        }
-    }
 
     init() {
         self.hasAccessibilityPermission = AXIsProcessTrusted()
@@ -110,7 +103,6 @@ final class CodexReasoningAutomationService {
             UserDefaults.standard.set(true, forKey: Self.migrationKey)
         }
         self.isEnabled = UserDefaults.standard.bool(forKey: Self.preferenceKey)
-        self.useModelListNavigation = UserDefaults.standard.bool(forKey: Self.modelListNavigationKey)
         updateMonitoring()
     }
 
@@ -169,7 +161,7 @@ final class CodexReasoningAutomationService {
     /// read from the same protocol for consistency, since it is unaffected by
     /// whichever macro happens to be flashed for the dial.
     func handlePhysicalEvent(_ event: CodexPadPhysicalEvent) {
-        guard useModelListNavigation, let control = HardwareControl(reportedControlIndex: event.control) else { return }
+        guard let control = HardwareControl(reportedControlIndex: event.control) else { return }
         switch control {
         case .encoderPress:
             switch event.phase {
@@ -179,10 +171,10 @@ final class CodexReasoningAutomationService {
             }
         case .encoderLeft:
             guard event.phase == .triggered else { return }
-            handleEncoderRotation(.previous)
+            driveModelListHighlight(.previous)
         case .encoderRight:
             guard event.phase == .triggered else { return }
-            handleEncoderRotation(.next)
+            driveModelListHighlight(.next)
         case .key1, .key2, .key3, .key4, .key5, .key6:
             break
         }
@@ -227,13 +219,20 @@ final class CodexReasoningAutomationService {
         }
     }
 
-    /// Releasing confirms the highlighted model and closes the picker.
+    /// Releasing after a short press (below the hold threshold) is the plain
+    /// tap gesture: toggle the Model Picker open/closed, unchanged from
+    /// direct-effort behaviour. Releasing after the dial was actually held
+    /// confirms the highlighted model and closes the picker instead.
     private func endEncoderHold() {
         encoderHoldTimer?.invalidate()
         encoderHoldTimer = nil
         let wasHeld = encoderHoldFired
         encoderHoldFired = false
-        guard wasHeld, isModelListOpen else { return }
+        guard wasHeld else {
+            toggleModelPicker()
+            return
+        }
+        guard isModelListOpen else { return }
         isModelListOpen = false
         guard let codex = readyCodexApplication() else { return }
         codex.activate(options: [.activateAllWindows])
@@ -245,17 +244,12 @@ final class CodexReasoningAutomationService {
         }
     }
 
-    /// Rotation, while the encoder is held past the threshold, moves the
-    /// Model Picker's highlight; otherwise (or outside model-list-navigation
-    /// mode) it falls back to the direct reasoning-effort shortcuts.
-    private func handleEncoderRotation(_ step: CodexModelListStep) {
-        guard useModelListNavigation else {
-            switch step {
-            case .previous: perform(.decreaseEffort)
-            case .next: perform(.increaseEffort)
-            }
-            return
-        }
+    /// Only acts while the dial is held past the threshold and the Model
+    /// Picker is already driven open; a plain (unheld) rotate is handled
+    /// separately by the direct reasoning-effort shortcuts in
+    /// `handleHIDValue`, so this stays silent otherwise to avoid double
+    /// handling the same physical tick.
+    private func driveModelListHighlight(_ step: CodexModelListStep) {
         guard encoderHoldFired, isModelListOpen else { return }
         guard readyCodexApplication() != nil else { return }
         let keyCode = step == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
@@ -263,7 +257,7 @@ final class CodexReasoningAutomationService {
         Self.postKey(keyCode)
     }
 
-    /// Testing hooks for the Settings panel: skip the hold-timer wait so a
+    /// Testing hooks for the assignment panel: skip the hold-timer wait so a
     /// button click can exercise the same state machine as a real long press.
     func testBeginHold() {
         encoderHoldTimer?.invalidate()
@@ -271,7 +265,7 @@ final class CodexReasoningAutomationService {
     }
 
     func testRotate(_ step: CodexModelListStep) {
-        handleEncoderRotation(step)
+        driveModelListHighlight(step)
     }
 
     func testEndHold() {
@@ -350,9 +344,7 @@ final class CodexReasoningAutomationService {
             return
         }
 
-        status = useModelListNavigation
-            ? "Bereit: Drehrad halten (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + drehen navigiert, loslassen bestätigt."
-            : "Bereit: Drehen = Aufwand · Drücken = Model Picker."
+        status = "Bereit: Drehen/Drücken = Aufwand & Modellwahl · Halten (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + drehen = Modell wechseln."
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let keyboardIdentity: (Int, Int) -> [String: Any] = { vendorID, productID in
@@ -384,25 +376,12 @@ final class CodexReasoningAutomationService {
     }
 
     private func handleHIDValue(usagePage: Int, usage: Int, value: Int) {
-        guard usagePage == 0x07, [0x68, 0x69, 0x6A, 0x71, 0x72, 0x73].contains(usage) else { return }
+        guard usagePage == 0x07, [0x68, 0x69, 0x6A, 0x71, 0x73].contains(usage) else { return }
 
-        // In model-list-navigation mode the encoder is driven exclusively by
-        // `handlePhysicalEvent` (the firmware protocol reliably reports the
-        // press release and rotation ticks there; this generic keyboard-HID
-        // path does not). Avoid handling the same physical action twice.
-        if useModelListNavigation, [0x71, 0x72, 0x73].contains(usage) { return }
-
-        // F23 (press) needs both the key-down and key-up edge in direct-effort
-        // mode's plain toggle, but this interface only ever delivers the
-        // down edge for it on the confirmed hardware, so only that edge acts.
-        if usage == 0x72 {
-            guard value != 0 else { return }
-            let now = ProcessInfo.processInfo.systemUptime
-            guard inputDebouncer.accepts(usage: usage, at: now) else { return }
-            recordInput(usage: usage, value: value)
-            toggleModelPicker()
-            return
-        }
+        // The encoder press (F23) needs both edges to measure hold duration,
+        // which this generic keyboard-HID path cannot reliably deliver on the
+        // confirmed hardware (only the key-down ever arrives here); it is
+        // handled exclusively via `handlePhysicalEvent` instead.
 
         guard value != 0 else { return }
         let now = ProcessInfo.processInfo.systemUptime
@@ -416,9 +395,13 @@ final class CodexReasoningAutomationService {
             toggle(.modelPicker)
         case 0x6A: // F15: Side Chat (configured in Codex)
             toggle(.sideChat)
-        case 0x71: // F22: rotate left
+        case 0x71: // F22: rotate left — suppressed mid-hold so the same tick
+                   // doesn't also fire the direct effort shortcut while
+                   // `driveModelListHighlight` is navigating the Model Picker.
+            guard !encoderHoldFired else { break }
             perform(.decreaseEffort)
-        case 0x73: // F24: rotate right
+        case 0x73: // F24: rotate right, same guard as above.
+            guard !encoderHoldFired else { break }
             perform(.increaseEffort)
         default:
             break
