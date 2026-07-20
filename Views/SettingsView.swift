@@ -34,7 +34,7 @@ private struct ReasoningAutomationSettings: View {
         VStack(alignment: .leading, spacing: 13) {
             Text("Codex Reasoning")
                 .font(.title2.weight(.semibold))
-            Text("F22/F23/F24 sind interne Hardware-Trigger. Drehen sendet F18/F19 an Codex und ändert den Reasoning-Aufwand direkt. Drücken öffnet den Model Picker, erneutes Drücken schließt ihn.")
+            Text("F13/F14/F15 schalten Settings, Model Picker und Side Chat um. F22/F23/F24 bleiben interne Drehrad-Trigger: Drehen sendet F18/F19, Drücken schaltet den Model Picker um.")
                 .foregroundStyle(.secondary)
             Toggle("Drehradsteuerung aktivieren", isOn: $automation.isEnabled)
             LabeledContent("Input Monitoring", value: automation.hasInputMonitoringPermission ? "Erteilt" : "Fehlt")

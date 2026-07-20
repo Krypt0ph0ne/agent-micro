@@ -3,6 +3,7 @@ import SwiftUI
 struct ControlAssignmentPanel: View {
     let appState: AppState
     @Binding var control: HardwareControl
+    @State private var isPresentingTextSubmission = false
 
     private var action: KeyboardAction {
         appState.profiles.selectedProfile.action(for: control)
@@ -19,13 +20,6 @@ struct ControlAssignmentPanel: View {
 
     private var assignableActions: [CodexActionDefinition] {
         appState.catalog.actions.filter(\.isDirectlyAssignable)
-    }
-
-    private var usesReasoningTriggers: Bool {
-        let profile = appState.profiles.selectedProfile
-        return profile.action(for: .encoderLeft).deviceMacro == "f22"
-            && profile.action(for: .encoderPress).deviceMacro == "f23"
-            && profile.action(for: .encoderRight).deviceMacro == "f24"
     }
 
     var body: some View {
@@ -68,6 +62,15 @@ struct ControlAssignmentPanel: View {
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             Menu {
+                if HardwareControl.buttons.contains(control) {
+                    Button("Codex Agent …") {
+                        appState.profiles.updateAction(
+                            KeyboardAction(kind: .codexAgent, label: "Codex Agent auswählen", icon: "terminal.fill"),
+                            for: control
+                        )
+                    }
+                    Divider()
+                }
                 if HardwareControl.encoderActions.contains(control) {
                     Button("Codex-Drehradsteuerung") {
                         appState.profiles.updateAction(ProfileFactory.reasoningTriggerAction(for: control), for: control)
@@ -78,6 +81,7 @@ struct ControlAssignmentPanel: View {
                     Menu(category) {
                         ForEach(assignableActions.filter { $0.category == category }) { item in
                             Button {
+                                appState.codexThreads.removeAssignment(for: control)
                                 appState.profiles.assignCodexAction(id: item.id, to: control)
                             } label: {
                                 if item.id == action.codexActionID {
@@ -90,7 +94,11 @@ struct ControlAssignmentPanel: View {
                     }
                 }
                 Divider()
+                Button("Text absenden …") {
+                    isPresentingTextSubmission = true
+                }
                 Button("Deaktivieren") {
+                    appState.codexThreads.removeAssignment(for: control)
                     appState.profiles.updateAction(.disabled, for: control)
                 }
             } label: {
@@ -113,15 +121,17 @@ struct ControlAssignmentPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
-            } else {
+            } else if action.kind != .codexAgent {
                 Text(action.kind == .disabled ? "Dieses Bedienelement löst nichts aus." : "Eigene oder profilinterne Belegung.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            if HardwareControl.encoderActions.contains(control), usesReasoningTriggers {
-                encoderControls
-            } else if HardwareControl.encoderActions.contains(control) {
+            if action.kind == .codexAgent {
+                CodexAgentAssignmentView(appState: appState, control: control)
+            }
+
+            if HardwareControl.encoderActions.contains(control) {
                 Spacer(minLength: 0)
                 Label("Direkt vom Pad gesendet", systemImage: "cable.connector")
                     .font(.caption2)
@@ -136,75 +146,61 @@ struct ControlAssignmentPanel: View {
         .padding(12)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private var encoderControls: some View {
-        @Bindable var automation = appState.reasoningAutomation
-        return VStack(alignment: .leading, spacing: 7) {
-            Divider()
-            HStack {
-                Text("Codex-Direktsteuerung")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Toggle("Aktiv", isOn: $automation.isEnabled)
-                    .labelsHidden()
-                    .controlSize(.mini)
-            }
-
-            HStack(spacing: 5) {
-                permissionDot(granted: automation.hasInputMonitoringPermission, label: "Input")
-                permissionDot(granted: automation.hasAccessibilityPermission, label: "Zugriff")
-                Spacer()
-                Button("Testen") { testSelectedEncoder() }
-                    .controlSize(.mini)
-                    .disabled(!automation.isEnabled)
-            }
-
-            if !automation.hasInputMonitoringPermission || !automation.hasAccessibilityPermission {
-                Button("Freigeben …") { automation.requestPermissions() }
-                    .buttonStyle(.link)
-                    .controlSize(.mini)
+        .sheet(isPresented: $isPresentingTextSubmission) {
+            TextSubmissionSheet { text in
+                guard let textAction = KeyboardAction.textSubmission(text) else { return }
+                appState.codexThreads.removeAssignment(for: control)
+                appState.profiles.updateAction(textAction, for: control)
             }
         }
-    }
-
-    private func permissionDot(granted: Bool, label: String) -> some View {
-        Label(label, systemImage: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-            .font(.caption2)
-            .foregroundStyle(granted ? .green : .orange)
     }
 
     private var infoMessage: String {
         if HardwareControl.encoderActions.contains(control) {
-            if usesReasoningTriggers {
-                return "Links-Drehen, Drücken und Rechts-Drehen sind eigenständige Belegungen. In diesem Profil dienen F22/F23/F24 als interne Trigger für Reasoning und Modellwahl. Eine andere Zuweisung ersetzt den jeweiligen Trigger."
+            if control == .encoderPress {
+                return "Der Encoder-Druck wird von CodexPad als Umschalter verarbeitet: einmal öffnet die Modellwahl, der nächste Druck schließt sie mit Escape. Nur diese Encoder-Aktion benötigt die laufende CodexPad-App."
             }
-            return "Diese Drehrad-Geste wird wie eine Taste direkt vom Pad gesendet. Über „Codex-Drehradsteuerung“ im Auswahlmenü kannst du den internen Trigger wiederherstellen."
+            return "Diese Drehrad-Geste wird direkt vom Pad gesendet. Links und rechts nutzen F18/F19 für den Reasoning-Aufwand."
         }
-        return "Wähle links eine Taste und danach hier eine Codex-Aktion. Die Änderung wird sofort im Profil gespeichert, aber erst mit „Übertragen“ auf das Pad geschrieben."
+        return "Wähle links eine Taste und danach eine Aktion. Ein Codex Agent wird lokal einem Thread oder Subagenten zugeordnet; dessen Live-Status steuert die LED. Die app-only Belegung muss einmal auf das Pad übertragen werden."
     }
 
-    private func testSelectedEncoder() {
-        switch control {
-        case .encoderLeft:
-            appState.reasoningAutomation.perform(.decreaseEffort)
-        case .encoderPress:
-            appState.reasoningAutomation.toggleModelPicker()
-        case .encoderRight:
-            appState.reasoningAutomation.perform(.increaseEffort)
-        case .key1, .key2, .key3, .key4, .key5, .key6:
-            break
-        }
-    }
 }
 
-private extension HardwareControl {
-    var shortTitle: String {
-        switch self {
-        case .encoderLeft: "Links drehen"
-        case .encoderPress: "Drehrad drücken"
-        case .encoderRight: "Rechts drehen"
-        default: title
+private struct TextSubmissionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = "Yeet"
+
+    let save: (String) -> Void
+
+    private var isValid: Bool { TextSubmissionMacro.macro(for: text) != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Text absenden")
+                .font(.title2.weight(.semibold))
+            Text("Der Text wird als Tasteneingabe gesendet und mit Enter abgeschickt. Das Zielfeld muss dabei bereits aktiv sein.")
+                .foregroundStyle(.secondary)
+            TextField("Text", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: text) { _, value in
+                    text = String(value.prefix(TextSubmissionMacro.maximumTextLength))
+                }
+            Text("Bis zu 4 Buchstaben oder Ziffern; Groß- und Kleinschreibung werden übernommen.")
+                .font(.caption)
+                .foregroundStyle(isValid ? Color.secondary : Color.red)
+            HStack {
+                Spacer()
+                Button("Abbrechen") { dismiss() }
+                Button("Zuweisen") {
+                    save(text)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!isValid)
+            }
         }
+        .padding(24)
+        .frame(width: 420)
     }
 }

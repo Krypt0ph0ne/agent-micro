@@ -26,6 +26,12 @@ struct DeviceCapabilities: Codable, Hashable {
         supportsDirectKeyboard: true, supportsSequences: true, supportsMedia: true, supportsMouse: true,
         supportsGlobalLEDMode: true, supportedLEDModes: [0, 1, 2], supportsPerKeyLED: false
     )
+
+    static let codexPadCH552 = DeviceCapabilities(
+        keyCount: 6, encoderCount: 1, encoderActionsPerEncoder: 3,
+        supportsDirectKeyboard: true, supportsSequences: true, supportsMedia: true, supportsMouse: false,
+        supportsGlobalLEDMode: false, supportedLEDModes: [], supportsPerKeyLED: true
+    )
 }
 
 struct ConnectedDevice: Identifiable, Hashable {
@@ -49,6 +55,7 @@ struct ConnectedDevice: Identifiable, Hashable {
 
     var vendorIDHex: String { String(format: "0x%04X", vendorID) }
     var productIDHex: String { String(format: "0x%04X", productID) }
+    var isCodexPadFirmware: Bool { vendorID == 0x4249 && productID == 0x4287 }
 }
 
 struct USBInterface: Codable, Hashable, Identifiable {

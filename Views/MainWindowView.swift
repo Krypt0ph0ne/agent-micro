@@ -32,6 +32,7 @@ struct MainWindowView: View {
         } message: { Text(resultDetail) }
         .task {
             appState.refreshDevice()
+            appState.startCodexBridge()
             appState.reasoningAutomation.refreshPermissions()
         }
         .onChange(of: scenePhase) { _, phase in
@@ -61,12 +62,29 @@ struct MainWindowView: View {
                 message: "Ein Profil enthält alle sechs Tasten und die drei Drehrad-Gesten. Jede Änderung wird sofort lokal gespeichert; erst „Übertragen“ schreibt sie auf das Gerät."
             )
 
+            Picker("Tastaturlayout", selection: $profiles.keyboardLayout) {
+                ForEach(KeyboardLayout.allCases) { layout in
+                    Text(layout.title).tag(layout)
+                }
+            }
+            .frame(width: 124)
+            .controlSize(.small)
+            .help("HID-Zeichenlayout: \(profiles.keyboardLayout.detail)")
+
             Spacer(minLength: 8)
+
+            Label(
+                appState.codexThreads.connectionState.isConnected ? "Codex verbunden" : "Codex getrennt",
+                systemImage: appState.codexThreads.connectionState.isConnected ? "bolt.horizontal.circle.fill" : "bolt.slash.circle"
+            )
+            .font(.caption.weight(.medium))
+            .foregroundStyle(appState.codexThreads.connectionState.isConnected ? .green : .secondary)
+            .help(appState.codexThreads.connectionError ?? appState.codexThreads.connectionState.title)
 
             DeviceConnectionBadge(appState: appState)
             ContextInfoButton(
                 title: "Geräteverbindung",
-                message: "CodexPad schreibt ausschließlich auf das bestätigte CH57x-Gerät 0x1189:0x8890. Die Suche verändert keine Belegung."
+                message: "CodexPad erkennt sowohl die Herstellerfirmware 0x1189:0x8890 als auch unsere bestätigte CH552-Firmware 0x4249:0x4287. Die Suche verändert keine Belegung."
             )
             Button { appState.refreshDevice() } label: {
                 Image(systemName: "arrow.clockwise")
@@ -132,18 +150,27 @@ struct MainWindowView: View {
 
     private var uploadSummary: String {
         let profile = appState.profiles.selectedProfile
-        return "„\(profile.name)“ wird vor dem Upload validiert. CodexPad akzeptiert Erfolg nur bei Exit-Code 0, leerem stderr und dem exakten Ziel 0x1189:0x8890. Anschließend prüfe die neun Eingaben im Diagnose-Monitor."
+        if appState.device.currentDevice?.isCodexPadFirmware == true {
+            return "„\(profile.name)“ wird validiert. Danach sendet CodexPad neun Belegungen und sechs individuelle RGB-Einstellungen live an die bestätigte Firmware 0x4249:0x4287. Nach dem Aus- und Einstecken muss das Profil erneut übertragen werden."
+        }
+        return "„\(profile.name)“ wird vor dem Upload validiert und anschließend ausschließlich auf das bestätigte Herstellergerät 0x1189:0x8890 geschrieben."
     }
 
     private func validate() {
-        let result = appState.device.validate(profile: appState.profiles.selectedProfile)
+        let result = appState.device.validate(
+            profile: appState.profiles.selectedProfile,
+            keyboardLayout: appState.profiles.keyboardLayout
+        )
         resultTitle = result?.succeeded == true ? "Konfiguration gültig" : "Validierung fehlgeschlagen"
         resultDetail = detail(for: result)
         showResult = true
     }
 
     private func upload() {
-        let result = appState.device.upload(profile: appState.profiles.selectedProfile)
+        let result = appState.device.upload(
+            profile: appState.profiles.selectedProfile,
+            keyboardLayout: appState.profiles.keyboardLayout
+        )
         if result?.succeeded == true { appState.profiles.markSynchronized() }
         resultTitle = result?.succeeded == true ? "Transport erfolgreich – Eingabe noch prüfen" : "Upload fehlgeschlagen"
         resultDetail = detail(for: result)

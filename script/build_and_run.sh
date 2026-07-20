@@ -40,15 +40,22 @@ swift build
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 BUILD_BINARY="$BUILD_BIN_DIR/$APP_NAME"
 RESOURCE_BUNDLE="$BUILD_BIN_DIR/CodexPad_CodexPad.bundle"
+APP_ICON="$ROOT_DIR/Resources/CodexPadIcon.icns"
 
 if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
   echo "SwiftPM-Ressourcen fehlen: $RESOURCE_BUNDLE" >&2
   exit 1
 fi
 
+if [[ ! -f "$APP_ICON" ]]; then
+  echo "App-Symbol fehlt: $APP_ICON" >&2
+  exit 1
+fi
+
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
+cp "$APP_ICON" "$APP_RESOURCES/CodexPadIcon.icns"
 cp "$HELPER_DESTINATION" "$APP_RESOURCES/ch57x-keyboard-tool"
 cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCES/"
 chmod +x "$APP_BINARY" "$APP_RESOURCES/ch57x-keyboard-tool"
@@ -64,6 +71,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$BUNDLE_ID</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
+  <key>CFBundleIconFile</key>
+  <string>CodexPadIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
@@ -76,10 +85,23 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-# Give the development bundle a stable identity. Without this explicit bundle
-# signature macOS derives a new hash-based identifier after every build, which
-# invalidates Input Monitoring and Accessibility permissions.
-/usr/bin/codesign --force --deep --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
+# TCC permissions such as Input Monitoring and Accessibility are tied to the
+# app's signing requirement. Ad-hoc signing changes that requirement after
+# every rebuild, so prefer the first installed Apple Development identity.
+# CI and other Macs can override this explicitly or fall back to ad-hoc.
+SIGNING_IDENTITY="${CODEXPAD_SIGNING_IDENTITY:-}"
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="$(security find-identity -v -p codesigning \
+    | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' \
+    | head -n 1)"
+fi
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="-"
+  echo "No Apple Development identity found; using ad-hoc signing."
+else
+  echo "Signing with stable identity: $SIGNING_IDENTITY"
+fi
+/usr/bin/codesign --force --deep --sign "$SIGNING_IDENTITY" --identifier "$BUNDLE_ID" "$APP_BUNDLE"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"

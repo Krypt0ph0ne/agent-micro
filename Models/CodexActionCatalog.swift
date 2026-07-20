@@ -31,7 +31,11 @@ struct CodexActionDefinition: Codable, Hashable, Identifiable {
     var compatibleWith: String
     var availabilityNote: String?
 
-    var isDirectlyAssignable: Bool { execution == .keyboardShortcut && deviceMacro != nil }
+    /// A configurable action can be assigned when the pad emits a dedicated
+    /// trigger which Codex can bind in its Keyboard Shortcuts settings.
+    var isDirectlyAssignable: Bool {
+        (execution == .keyboardShortcut || execution == .configurableShortcut) && deviceMacro != nil
+    }
 }
 
 struct CodexActionCatalogDocument: Codable {

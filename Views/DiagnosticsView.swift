@@ -19,8 +19,10 @@ struct DiagnosticsView: View {
                 }
 
                 DeviceDiagnosticsCard(appState: appState)
+                CodexPadProtocolCard(appState: appState)
                 InputMonitorCard(appState: appState)
                 LEDDiagnosticsCard(appState: appState)
+                CodexBridgeDiagnosticsCard(appState: appState)
 
                 DisclosureGroup("Prozess- und App-Logs", isExpanded: $logsExpanded) {
                     LazyVStack(alignment: .leading, spacing: 8) {
@@ -63,6 +65,59 @@ struct DiagnosticsView: View {
 
     private func color(for level: DiagnosticEntry.Level) -> Color {
         switch level { case .info: .blue; case .success: .green; case .warning: .orange; case .error: .red }
+    }
+}
+
+private struct CodexBridgeDiagnosticsCard: View {
+    let appState: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Codex Event Bridge", systemImage: "bolt.horizontal.circle")
+                    .font(.headline)
+                Spacer()
+                Button("Threads laden") { appState.codexThreads.refresh() }
+                Button("Neu verbinden") { appState.codexThreads.reconnect() }
+            }
+            LabeledContent("App Server", value: appState.codexThreads.connectionState.title)
+            LabeledContent("Geladene Threads", value: "\(appState.codexThreads.threads.count)")
+            LabeledContent("Tastenzuordnungen", value: "\(appState.codexThreads.assignments.count) / 6")
+            Text("Approval- und Nutzereingabe-Requests werden ausschließlich als Status beobachtet und nie beantwortet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let error = appState.codexThreads.connectionError {
+                Text(error).font(.caption.monospaced()).foregroundStyle(.red).textSelection(.enabled)
+            }
+        }
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct CodexPadProtocolCard: View {
+    let appState: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("CodexPad-Protokoll", systemImage: "externaldrive.connected.to.line.below")
+                    .font(.headline)
+                Spacer()
+                Button("Status abfragen") { appState.padEvents.requestStatus() }
+            }
+            Text(appState.padEvents.status).font(.caption).foregroundStyle(.secondary)
+            if let firmware = appState.padEvents.firmwareStatus {
+                LabeledContent("Firmware", value: firmware.version)
+                LabeledContent("Fähigkeiten", value: String(format: "0x%02X", firmware.capabilities))
+                LabeledContent("Gedrückte Controls", value: String(format: "0x%03X", firmware.pressedMask))
+            }
+            if let event = appState.padEvents.events.first {
+                LabeledContent("Letztes physisches Ereignis", value: "Control \(event.control + 1) · \(String(describing: event.phase)) · #\(event.sequence)")
+            }
+        }
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

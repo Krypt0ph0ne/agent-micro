@@ -28,6 +28,7 @@ struct DeviceCanvasView: View {
                                     KeyControlView(
                                         control: control,
                                         action: profile.action(for: control),
+                                        led: profile.led.setting(for: control),
                                         isSelected: selectedControl == control
                                     ) { selectedControl = control }
                                 }
@@ -73,6 +74,7 @@ struct DeviceCanvasView: View {
 struct KeyControlView: View {
     let control: HardwareControl
     let action: KeyboardAction
+    let led: KeyLEDConfiguration
     let isSelected: Bool
     let select: () -> Void
 
@@ -85,6 +87,16 @@ struct KeyControlView: View {
                     Spacer(minLength: 0)
                     Image(systemName: action.icon)
                         .font(.system(size: 9, weight: .medium))
+                }
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(led.previewColor)
+                        .frame(width: 8, height: 8)
+                        .shadow(color: led.previewColor.opacity(0.9), radius: led.effect == .off ? 0 : 4)
+                    Text(led.effect.title)
+                        .font(.system(size: 7, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 Text(action.label)
@@ -109,6 +121,17 @@ struct KeyControlView: View {
 
     private var keyMaterial: some ShapeStyle {
         isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.22)) : AnyShapeStyle(Color.white.opacity(0.10))
+    }
+}
+
+extension KeyLEDConfiguration {
+    var previewColor: Color {
+        guard effect != .off else { return Color.white.opacity(0.16) }
+        return Color(
+            red: Double(red) / 255,
+            green: Double(green) / 255,
+            blue: Double(blue) / 255
+        ).opacity(max(0.18, Double(brightness) / 255))
     }
 }
 
