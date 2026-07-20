@@ -19,7 +19,7 @@ struct TapHoldSection: View {
     }
 
     private var assignableActions: [CodexActionDefinition] {
-        appState.catalog.actions.filter { $0.isDirectlyAssignable && KeystrokeSynthesizer.canSynthesize($0.deviceMacro) }
+        appState.activeCatalog.actions.filter { $0.isDirectlyAssignable && KeystrokeSynthesizer.canSynthesize($0.deviceMacro) }
     }
 
     private var filteredHoldActions: [CodexActionDefinition] {
@@ -117,7 +117,7 @@ struct TapHoldSection: View {
                     ForEach(filteredHoldActions) { action in
                         Button {
                             appState.profiles.setHoldAction(
-                                appState.catalog.keyboardAction(id: action.id),
+                                appState.activeCatalog.keyboardAction(id: action.id),
                                 thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds,
                                 for: control
                             )
@@ -225,7 +225,7 @@ struct TapHoldSection: View {
     private func defaultHoldAction() -> KeyboardAction? {
         let tapID = binding.action.codexActionID
         let choice = assignableActions.first { $0.id != tapID } ?? assignableActions.first
-        return choice.flatMap { appState.catalog.keyboardAction(id: $0.id) }
+        return choice.flatMap { appState.activeCatalog.keyboardAction(id: $0.id) }
     }
 
     private var infoMessage: String {

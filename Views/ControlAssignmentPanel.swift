@@ -14,11 +14,11 @@ struct ControlAssignmentPanel: View {
 
     private var definition: CodexActionDefinition? {
         guard let id = action.codexActionID else { return nil }
-        return appState.catalog.action(id: id)
+        return appState.activeCatalog.action(id: id)
     }
 
     private var assignableActions: [CodexActionDefinition] {
-        appState.catalog.actions.filter(\.isDirectlyAssignable)
+        appState.activeCatalog.actions.filter(\.isDirectlyAssignable)
     }
 
     private var filteredActions: [CodexActionDefinition] {
@@ -157,11 +157,13 @@ struct ControlAssignmentPanel: View {
                     isPresentingTextSubmission = true
                     isShowingActionPicker = false
                 }
-                Button("Assistent", systemImage: "wand.and.stars") {
-                    isPresentingWizard = true
-                    isShowingActionPicker = false
+                if appState.profiles.activeLayer != .claude {
+                    Button("Assistent", systemImage: "wand.and.stars") {
+                        isPresentingWizard = true
+                        isShowingActionPicker = false
+                    }
+                    .help("Konfigurierbare Codex-Aktion mit Trigger einrichten")
                 }
-                .help("Konfigurierbare Codex-Aktion mit Trigger einrichten")
                 Button("Aus", systemImage: "minus.circle") { chooseDisabled() }
             }
             .controlSize(.small)
@@ -190,7 +192,9 @@ struct ControlAssignmentPanel: View {
     private func actionRow(_ item: CodexActionDefinition) -> some View {
         Button {
             appState.codexThreads.removeAssignment(for: control)
-            appState.profiles.assignCodexAction(id: item.id, to: control)
+            if let action = appState.activeCatalog.keyboardAction(id: item.id) {
+                appState.profiles.updateAction(action, for: control)
+            }
             isShowingActionPicker = false
             actionSearch = ""
         } label: {

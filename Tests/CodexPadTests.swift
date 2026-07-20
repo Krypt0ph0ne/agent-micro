@@ -724,6 +724,83 @@ final class CodexPadTests: XCTestCase {
     func testTriggerPoolDisplayLabel() {
         XCTAssertEqual(CodexTriggerPool.displayLabel(for: "cmd-ctrl-opt-shift-a"), "⌘⌃⌥⇧A")
     }
+
+    // MARK: - Harness layers
+
+    func testClaudeCatalogLoadsShortcuts() {
+        let catalog = CodexActionCatalog.claude()
+        XCTAssertFalse(catalog.actions.isEmpty)
+        XCTAssertEqual(catalog.keyboardAction(id: "claude-new-session")?.deviceMacro, "cmd-n")
+        XCTAssertEqual(catalog.keyboardAction(id: "claude-toggle-terminal")?.deviceMacro, "ctrl-grave")
+        XCTAssertEqual(catalog.action(id: "claude-permission-mode")?.shortcut, "⌘⇧M")
+    }
+
+    func testClaudeProfileUsesSynthesizableSwitchKeys() {
+        let profile = ProfileFactory.claude(catalog: .claude())
+        XCTAssertEqual(profile.name, "Claude Code")
+        XCTAssertEqual(profile.action(for: .key2).deviceMacro, "cmd-n")
+        // The default switch keys (4 and 6) must be cleanly synthesizable.
+        XCTAssertTrue(KeystrokeSynthesizer.canSynthesize(profile.action(for: .key4).deviceMacro))
+        XCTAssertTrue(KeystrokeSynthesizer.canSynthesize(profile.action(for: .key6).deviceMacro))
+    }
+
+    func testHarnessLayerMappingAndColors() {
+        XCTAssertEqual(HarnessLayer(profileName: "Claude Code"), .claude)
+        XCTAssertEqual(HarnessLayer(profileName: "Codex"), .codex)
+        XCTAssertNil(HarnessLayer(profileName: "macOS"))
+        XCTAssertEqual(HarnessLayer.codex.other, .claude)
+        XCTAssertEqual(HarnessLayer.claude.switchColor.red, 224) // deep orange
+        XCTAssertEqual(HarnessLayer.codex.switchColor.blue, 168) // dark blue
+    }
+
+    func testSwitchKeysUploadAppOnlyWhenPassed() throws {
+        let profile = ProfileFactory.claude(catalog: .claude())
+        let packets = try CodexPadPacketEncoder().packets(profile: profile, appOnlyControls: [.key4, .key6])
+        let key4 = try XCTUnwrap(bindingPacket(for: .key4, in: packets))
+        let key6 = try XCTUnwrap(bindingPacket(for: .key6, in: packets))
+        XCTAssertEqual(key4[5], 3)
+        XCTAssertEqual(key6[5], 3)
+        // A non-switch key keeps its real binding.
+        let key2 = try XCTUnwrap(bindingPacket(for: .key2, in: packets))
+        XCTAssertEqual(key2[5], 1)
+    }
+
+    @MainActor
+    func testAppOnlySwitchControlsExcludesDictationAndRespectsToggle() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-layer-\(UUID().uuidString)")
+        let url = directory.appendingPathComponent("Profiles.json")
+        let store = ProfileStore(catalog: CodexActionCatalog(), persistenceURL: url)
+        store.layerSwitchKeys = [.key4, .key6]
+
+        // Disabled: nothing is app-only.
+        store.layerSwitchEnabled = false
+        XCTAssertTrue(store.appOnlySwitchControls(in: store.selectedProfile).isEmpty)
+
+        store.layerSwitchEnabled = true
+        // Codex layer: key4 is dictation (a real hold) and must stay on firmware.
+        XCTAssertTrue(store.selectLayer(.codex))
+        let codexClean = store.appOnlySwitchControls(in: store.selectedProfile)
+        XCTAssertFalse(codexClean.contains(.key4))
+        XCTAssertTrue(codexClean.contains(.key6))
+
+        // Claude layer: both switch keys are plain shortcuts, so both are clean.
+        XCTAssertTrue(store.selectLayer(.claude))
+        XCTAssertEqual(store.activeLayer, .claude)
+        let claudeClean = store.appOnlySwitchControls(in: store.selectedProfile)
+        XCTAssertEqual(claudeClean, [.key4, .key6])
+    }
+
+    @MainActor
+    func testSelectLayerTogglesBetweenBuiltInProfiles() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-layer2-\(UUID().uuidString)")
+        let url = directory.appendingPathComponent("Profiles.json")
+        let store = ProfileStore(catalog: CodexActionCatalog(), persistenceURL: url)
+        XCTAssertNotNil(store.profile(for: .claude))
+        XCTAssertTrue(store.selectLayer(.claude))
+        XCTAssertEqual(store.activeLayer, .claude)
+        XCTAssertTrue(store.selectLayer(.codex))
+        XCTAssertEqual(store.activeLayer, .codex)
+    }
 }
 
 private struct MockRunner: ProcessRunning {
