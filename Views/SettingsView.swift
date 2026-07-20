@@ -56,7 +56,7 @@ struct SettingsView: View {
                 Toggle(isOn: $automation.useModelListNavigation) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Halten navigiert die Modellliste")
-                        Text("Statt Aufwand ±: Drehrad halten + drehen bewegt das Menü, Loslassen bestätigt")
+                        Text("Statt Aufwand ±: Drehrad halten öffnet sofort die Modellliste, drehen wählt, Loslassen übernimmt")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
