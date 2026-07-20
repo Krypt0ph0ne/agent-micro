@@ -4,6 +4,7 @@ struct ControlAssignmentPanel: View {
     let appState: AppState
     @Binding var control: HardwareControl
     @State private var isPresentingTextSubmission = false
+    @State private var isPresentingWizard = false
     @State private var isShowingActionPicker = false
     @State private var actionSearch = ""
 
@@ -102,8 +103,14 @@ struct ControlAssignmentPanel: View {
                     .foregroundStyle(.secondary)
             }
 
+            configurableReminder
+
             if action.kind == .codexAgent && !isShowingActionPicker {
                 CodexAgentAssignmentView(appState: appState, control: control)
+            }
+
+            if HardwareControl.buttons.contains(control) && !isShowingActionPicker {
+                TapHoldSection(appState: appState, control: control)
             }
 
             if HardwareControl.encoderActions.contains(control) {
@@ -124,6 +131,9 @@ struct ControlAssignmentPanel: View {
                 appState.codexThreads.removeAssignment(for: control)
                 appState.profiles.updateAction(textAction, for: control)
             }
+        }
+        .sheet(isPresented: $isPresentingWizard) {
+            CodexAssignmentWizardView(appState: appState, control: control)
         }
         .onChange(of: control) { _, _ in
             isShowingActionPicker = false
@@ -147,6 +157,11 @@ struct ControlAssignmentPanel: View {
                     isPresentingTextSubmission = true
                     isShowingActionPicker = false
                 }
+                Button("Assistent", systemImage: "wand.and.stars") {
+                    isPresentingWizard = true
+                    isShowingActionPicker = false
+                }
+                .help("Konfigurierbare Codex-Aktion mit Trigger einrichten")
                 Button("Aus", systemImage: "minus.circle") { chooseDisabled() }
             }
             .controlSize(.small)
@@ -223,6 +238,32 @@ struct ControlAssignmentPanel: View {
         appState.codexThreads.removeAssignment(for: control)
         appState.profiles.updateAction(.disabled, for: control)
         isShowingActionPicker = false
+    }
+
+    /// When a wizard-configured Codex action is bound, remind the user that the
+    /// trigger still has to be assigned inside Codex once.
+    @ViewBuilder
+    private var configurableReminder: some View {
+        if let definition, definition.execution == .configurableShortcut,
+           let macro = action.deviceMacro, !macro.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "wand.and.stars")
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("In Codex zuweisen: \(CodexTriggerPool.displayLabel(for: macro))")
+                        .font(.caption.weight(.semibold))
+                    Text("Codex › Settings › Keyboard Shortcuts › „\(definition.title)“. Danach übertragen.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Button("Anleitung") { isPresentingWizard = true }
+                    .controlSize(.small)
+            }
+            .padding(10)
+            .background(.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+        }
     }
 
     private var infoMessage: String {

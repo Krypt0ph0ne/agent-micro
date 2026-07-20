@@ -636,6 +636,94 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(setting.effect, .steady)
         XCTAssertEqual(setting.control, .key2)
     }
+
+    // MARK: - Tap-vs-hold
+
+    private func bindingPacket(for control: HardwareControl, in packets: [[UInt8]]) -> [UInt8]? {
+        packets.first { $0[3] == 0x20 && $0[4] == control.firmwareControlIndex }
+    }
+
+    func testTapHoldControlUploadsAppOnlyBinding() throws {
+        var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        let hold = CodexActionCatalog().keyboardAction(id: "new-chat")
+        profile.setHoldAction(hold, thresholdMilliseconds: 300, for: .key1)
+        XCTAssertTrue(profile.binding(for: .key1).isTapHold)
+
+        let packets = try CodexPadPacketEncoder().packets(profile: profile)
+        let key1 = try XCTUnwrap(bindingPacket(for: .key1, in: packets))
+        XCTAssertEqual(key1[5], 3, "Tap-hold control must upload the app-only mode")
+        // A neighbouring plain control keeps a real keyboard binding.
+        let key2 = try XCTUnwrap(bindingPacket(for: .key2, in: packets))
+        XCTAssertEqual(key2[5], 1)
+    }
+
+    func testControlBindingDecodesWithoutHoldFields() throws {
+        let legacy = Data("""
+        {"control":"key1","action":{"id":"\(UUID().uuidString)","kind":"singleKey","label":"F13","icon":"keyboard","deviceMacro":"f13"}}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(ControlBinding.self, from: legacy)
+        XCTAssertNil(decoded.holdAction)
+        XCTAssertFalse(decoded.isTapHold)
+        XCTAssertEqual(decoded.resolvedHoldThresholdMilliseconds, ControlBinding.defaultHoldThresholdMilliseconds)
+    }
+
+    func testSetHoldActionClearsThresholdWhenRemoved() {
+        var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        profile.setHoldAction(CodexActionCatalog().keyboardAction(id: "new-chat"), thresholdMilliseconds: 500, for: .key3)
+        XCTAssertTrue(profile.binding(for: .key3).isTapHold)
+        XCTAssertEqual(profile.binding(for: .key3).holdThresholdMilliseconds, 500)
+        profile.setHoldAction(nil, for: .key3)
+        XCTAssertFalse(profile.binding(for: .key3).isTapHold)
+        XCTAssertNil(profile.binding(for: .key3).holdThresholdMilliseconds)
+    }
+
+    // MARK: - Keystroke synthesis
+
+    func testSynthesizerRecognizesKeyboardChordsOnly() {
+        XCTAssertTrue(KeystrokeSynthesizer.canSynthesize("cmd-shift-p"))
+        XCTAssertTrue(KeystrokeSynthesizer.canSynthesize("cmd-n"))
+        XCTAssertTrue(KeystrokeSynthesizer.canSynthesize("f18"))
+        XCTAssertTrue(KeystrokeSynthesizer.canSynthesize("cmd-ctrl-opt-shift-a"))
+        XCTAssertTrue(KeystrokeSynthesizer.canSynthesize("shift-y,e,e,t,enter"))
+        XCTAssertFalse(KeystrokeSynthesizer.canSynthesize("mute"))
+        XCTAssertFalse(KeystrokeSynthesizer.canSynthesize("wheel(1)"))
+        XCTAssertFalse(KeystrokeSynthesizer.canSynthesize("f24"))
+        XCTAssertFalse(KeystrokeSynthesizer.canSynthesize(nil))
+        XCTAssertFalse(KeystrokeSynthesizer.canSynthesize(""))
+    }
+
+    // MARK: - Assignment wizard trigger pool
+
+    func testTriggerPoolPicksFreeHyperChords() {
+        var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        let first = try? XCTUnwrap(CodexTriggerPool.nextFreeTrigger(in: profile))
+        XCTAssertEqual(first, "cmd-ctrl-opt-shift-a")
+
+        profile.setAction(
+            KeyboardAction(kind: .codexShortcut, label: "X", deviceMacro: "cmd-ctrl-opt-shift-a", codexActionID: "toggle-plan-mode"),
+            for: .key1
+        )
+        XCTAssertEqual(CodexTriggerPool.nextFreeTrigger(in: profile), "cmd-ctrl-opt-shift-b")
+        XCTAssertTrue(CodexTriggerPool.usedTriggers(in: profile).contains("cmd-ctrl-opt-shift-a"))
+        XCTAssertNotEqual(CodexTriggerPool.alternativeTrigger(to: "cmd-ctrl-opt-shift-b", in: profile), "cmd-ctrl-opt-shift-b")
+    }
+
+    func testTriggerPoolKeepsOwnTriggerWhenReediting() {
+        var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        profile.setAction(
+            KeyboardAction(kind: .codexShortcut, label: "Plan", deviceMacro: "cmd-ctrl-opt-shift-a", codexActionID: "toggle-plan-mode"),
+            for: .key1
+        )
+        // Re-running the wizard for the same control keeps its assigned trigger.
+        XCTAssertEqual(
+            CodexTriggerPool.nextFreeTrigger(in: profile, keeping: "cmd-ctrl-opt-shift-a"),
+            "cmd-ctrl-opt-shift-a"
+        )
+    }
+
+    func testTriggerPoolDisplayLabel() {
+        XCTAssertEqual(CodexTriggerPool.displayLabel(for: "cmd-ctrl-opt-shift-a"), "⌘⌃⌥⇧A")
+    }
 }
 
 private struct MockRunner: ProcessRunning {

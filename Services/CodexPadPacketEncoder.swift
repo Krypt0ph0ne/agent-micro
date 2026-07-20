@@ -21,8 +21,26 @@ struct CodexPadPacketEncoder {
     static let packetSize = 32
 
     func packets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI) throws -> [[UInt8]] {
-        try HardwareControl.allCases.map { try bindingPacket(action: profile.action(for: $0), control: $0, layout: layout) }
-            + HardwareControl.buttons.map { ledPacket(setting: profile.led.setting(for: $0)) }
+        try HardwareControl.allCases.map { control -> [UInt8] in
+            let binding = profile.binding(for: control)
+            // Tap-vs-hold controls are driven by CodexPad: the firmware only
+            // reports the physical edges while the app synthesizes the resolved
+            // tap or hold action, so nothing is bound on the device itself.
+            if binding.isTapHold {
+                return appOnlyPacket(control: control)
+            }
+            return try bindingPacket(action: binding.action, control: control, layout: layout)
+        }
+        + HardwareControl.buttons.map { ledPacket(setting: profile.led.setting(for: $0)) }
+    }
+
+    /// Binds a control to the app-only mode (`mode 3`): the pad reports key-down
+    /// and key-up but emits no HID macro of its own.
+    func appOnlyPacket(control: HardwareControl) -> [UInt8] {
+        var packet = base(command: 0x20)
+        packet[4] = control.firmwareControlIndex
+        packet[5] = 3
+        return finalized(packet)
     }
 
     /// Full transfer sequence. Idle packets deliberately come last so the

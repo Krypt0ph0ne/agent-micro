@@ -12,6 +12,7 @@ final class AppState {
     let reasoningAutomation: CodexReasoningAutomationService
     let padEvents: CodexPadEventService
     let keyboardState: CodexPadKeyboardStateService
+    let tapHold: CodexPadTapHoldService
     let ledFeedback: CodexPadLEDFeedbackService
     let codexBridge: CodexEventBridge
     let codexThreads: CodexThreadStore
@@ -27,6 +28,8 @@ final class AppState {
         self.reasoningAutomation = CodexReasoningAutomationService()
         self.padEvents = CodexPadEventService()
         self.keyboardState = CodexPadKeyboardStateService()
+        let profiles = self.profiles
+        self.tapHold = CodexPadTapHoldService { profiles.selectedProfile }
         let codexBridge = CodexEventBridge()
         self.codexBridge = codexBridge
         self.codexThreads = CodexThreadStore(bridge: codexBridge)
@@ -37,6 +40,7 @@ final class AppState {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.ledFeedback.handle(event, profile: self.profiles.selectedProfile)
+                self.tapHold.handle(event)
                 if event.phase == .pressed || event.phase == .triggered,
                    let control = HardwareControl(reportedControlIndex: event.control),
                    self.profiles.selectedProfile.action(for: control).kind == .codexAgent {
