@@ -2,8 +2,7 @@ import AppKit
 import SwiftUI
 
 private enum LEDEditorSection: String, CaseIterable, Identifiable {
-    case keys = "Tasten"
-    case idle = "Idle"
+    case base = "Grundlicht"
     case reactions = "Reaktionen"
     var id: String { rawValue }
 }
@@ -32,9 +31,8 @@ private enum LEDScope: Hashable {
 struct LEDControlPanel: View {
     let appState: AppState
     @Binding var control: HardwareControl
-    @State private var section: LEDEditorSection = .keys
+    @State private var section: LEDEditorSection = .base
     @State private var scope: LEDScope = .all
-    @State private var resultMessage: String?
 
     private var targetControls: [HardwareControl] {
         switch scope {
@@ -47,16 +45,26 @@ struct LEDControlPanel: View {
         appState.profiles.selectedProfile.led.setting(for: targetControls[0])
     }
 
+    private var idle: IdleLEDConfiguration {
+        appState.profiles.selectedProfile.idleLighting
+    }
+
+    /// Colour swatch shown in the header, reflecting the current base layer.
+    private var headerPreviewColor: Color {
+        guard idle.enabled else { return Color.white.opacity(0.16) }
+        return idle.perKey ? setting.previewColor : idle.keyConfiguration(for: targetControls[0]).previewColor
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 7) {
                 Image(systemName: "lightbulb.led.fill")
-                    .foregroundStyle(setting.previewColor)
-                Text("Licht · \(scope.detailTitle)")
+                    .foregroundStyle(headerPreviewColor)
+                Text("Licht")
                     .font(.headline)
                 ContextInfoButton(
-                    title: "RGB-Beleuchtung und Reaktionen",
-                    message: "Unter Tasten bearbeitest du eine oder alle LEDs gemeinsam. Reaktionen legen die automatischen Farben für Diktat, Senden und Agent-Status fest."
+                    title: "So funktioniert das Licht",
+                    message: "Zwei Ebenen: Das Grundlicht zeigt, wie deine Tasten im Ruhezustand aussehen. Reaktionen legen sich bei Ereignissen (Diktat, Senden, Agent-Status) automatisch darüber und kehren danach zum Grundlicht zurück."
                 )
                 Spacer()
             }
@@ -67,10 +75,8 @@ struct LEDControlPanel: View {
             .pickerStyle(.segmented)
             .labelsHidden()
 
-            if section == .keys {
-                keyEditor
-            } else if section == .idle {
-                idleEditor
+            if section == .base {
+                baseEditor
             } else {
                 LEDReactionEditor(appState: appState)
             }
@@ -79,13 +85,82 @@ struct LEDControlPanel: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onChange(of: scope) { _, newScope in
             if case .key(let selected) = newScope { control = selected }
-            resultMessage = nil
         }
     }
 
-    private var keyEditor: some View {
+    private var baseEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Bereich", selection: $scope) {
+            Text("So sehen deine Tasten aus, solange nichts passiert. Reaktionen legen sich bei Ereignissen kurz darüber und kehren danach hierher zurück.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Grundlicht an", isOn: idleBinding(\.enabled))
+
+            Picker("Modus", selection: idleBinding(\.perKey)) {
+                Text("Alle gleich").tag(false)
+                Text("Pro Taste").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(!idle.enabled)
+
+            if idle.perKey {
+                perKeyControls
+                    .disabled(!idle.enabled)
+            } else {
+                allKeysControls
+                    .disabled(!idle.enabled)
+            }
+        }
+    }
+
+    // MARK: Base · one colour for every key
+
+    private var allKeysControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Effekt")
+                Spacer()
+                Picker("Effekt", selection: idleBinding(\.effect)) {
+                    ForEach(LEDEffect.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 138)
+            }
+
+            HStack {
+                ColorPicker("Farbe", selection: idleColorBinding, supportsOpacity: false)
+                Spacer()
+                idlePresetColors
+            }
+
+            brightnessControls(
+                effect: idle.effect,
+                maxLabel: "Helligkeit",
+                max: idleByteBinding(\.brightness),
+                maxPercent: Int(idle.brightness) * 100 / 255,
+                min: idleByteBinding(\.minBrightness),
+                minPercent: Int(idle.minBrightness) * 100 / 255
+            )
+
+            if idle.effect == .blink || idle.effect == .pulse {
+                LabeledContent(idle.effect == .blink ? "Blinkdauer" : "Pulsdauer") {
+                    HStack(spacing: 8) {
+                        Slider(value: idlePeriodBinding, in: 100...5_000)
+                        Text(idlePeriodLabel)
+                            .monospacedDigit()
+                            .frame(width: 46, alignment: .trailing)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Base · individual colour per key
+
+    private var perKeyControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Taste", selection: $scope) {
                 ForEach(LEDScope.allScopes, id: \.self) { scope in
                     Text(scope.title).tag(scope)
                 }
@@ -109,14 +184,14 @@ struct LEDControlPanel: View {
                 presetColors
             }
 
-            LabeledContent("Helligkeit") {
-                HStack(spacing: 8) {
-                    Slider(value: byteBinding(\.brightness), in: 0...255)
-                    Text("\(Int(setting.brightness) * 100 / 255) %")
-                        .monospacedDigit()
-                        .frame(width: 38, alignment: .trailing)
-                }
-            }
+            brightnessControls(
+                effect: setting.effect,
+                maxLabel: "Helligkeit",
+                max: byteBinding(\.brightness),
+                maxPercent: Int(setting.brightness) * 100 / 255,
+                min: byteBinding(\.minBrightness),
+                minPercent: Int(setting.minBrightness) * 100 / 255
+            )
 
             if setting.effect == .blink || setting.effect == .pulse {
                 LabeledContent(setting.effect == .blink ? "Blinkdauer" : "Pulsdauer") {
@@ -129,71 +204,9 @@ struct LEDControlPanel: View {
                 }
             }
 
-            if let resultMessage {
-                Text(resultMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
             HStack {
-                Button("Alle aus") { turnAllOff() }
+                Button("Alle Tasten aus") { turnAllOff() }
                 Spacer()
-                Button(scope == .all ? "Alle anwenden" : "Jetzt anwenden") { applyCurrentScope() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(appState.device.currentDevice?.isCodexPadFirmware != true)
-            }
-        }
-    }
-
-    private var idleEditor: some View {
-        let idle = appState.profiles.selectedProfile.idleLighting
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("Standardbeleuchtung, solange das Pad keine Reaktion oder Agentenanzeige zeigt.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle("Idle-Modus aktiv", isOn: idleBinding(\.enabled))
-
-            HStack {
-                Text("Effekt")
-                Spacer()
-                Picker("Idle-Effekt", selection: idleBinding(\.effect)) {
-                    ForEach(LEDEffect.allCases) { Text($0.title).tag($0) }
-                }
-                .labelsHidden()
-                .frame(width: 138)
-                .disabled(!idle.enabled)
-            }
-
-            HStack {
-                ColorPicker("Farbe", selection: idleColorBinding, supportsOpacity: false)
-                    .disabled(!idle.enabled)
-                Spacer()
-                idlePresetColors
-                    .disabled(!idle.enabled)
-            }
-
-            LabeledContent("Helligkeit") {
-                HStack(spacing: 8) {
-                    Slider(value: idleByteBinding(\.brightness), in: 0...255)
-                        .disabled(!idle.enabled)
-                    Text("\(Int(idle.brightness) * 100 / 255) %")
-                        .monospacedDigit()
-                        .frame(width: 38, alignment: .trailing)
-                }
-            }
-
-            if idle.effect == .blink || idle.effect == .pulse {
-                LabeledContent(idle.effect == .blink ? "Blinkdauer" : "Pulsdauer") {
-                    HStack(spacing: 8) {
-                        Slider(value: idlePeriodBinding, in: 100...5_000)
-                            .disabled(!idle.enabled)
-                        Text(idlePeriodLabel)
-                            .monospacedDigit()
-                            .frame(width: 46, alignment: .trailing)
-                    }
-                }
             }
         }
     }
@@ -240,6 +253,41 @@ struct LEDControlPanel: View {
                 .help(preset.name)
                 .accessibilityLabel("Idle-Farbe \(preset.name)")
             }
+        }
+    }
+
+    /// Brightness row(s) shared by the base editors: a single slider normally,
+    /// or a "Von / Bis" pair once "Pulsieren" is selected, so the effect can
+    /// breathe within a configured range instead of always dipping to zero.
+    @ViewBuilder
+    private func brightnessControls(
+        effect: LEDEffect,
+        maxLabel: String,
+        max: Binding<Double>,
+        maxPercent: Int,
+        min: Binding<Double>,
+        minPercent: Int
+    ) -> some View {
+        LabeledContent(effect == .pulse ? "Bis" : maxLabel) {
+            HStack(spacing: 8) {
+                Slider(value: max, in: 0...255)
+                Text("\(maxPercent) %")
+                    .monospacedDigit()
+                    .frame(width: 38, alignment: .trailing)
+            }
+        }
+        if effect == .pulse {
+            LabeledContent("Von") {
+                HStack(spacing: 8) {
+                    Slider(value: min, in: 0...255)
+                    Text("\(minPercent) %")
+                        .monospacedDigit()
+                        .frame(width: 38, alignment: .trailing)
+                }
+            }
+            Text("Pulsiert zwischen \(minPercent) % und \(maxPercent) %. Bei 0 % pulsiert es klassisch bis ganz aus.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -324,7 +372,7 @@ struct LEDControlPanel: View {
             return next
         }
         appState.profiles.updateLEDs(settings)
-        resultMessage = nil
+        appState.refreshAgentLEDs()
     }
 
     private func updateIdle(_ mutation: (inout IdleLEDConfiguration) -> Void) {
@@ -334,14 +382,6 @@ struct LEDControlPanel: View {
         appState.refreshAgentLEDs()
     }
 
-    private func applyCurrentScope() {
-        let settings = targetControls.map { appState.profiles.selectedProfile.led.setting(for: $0) }
-        let result = appState.device.applyLEDs(settings)
-        resultMessage = result?.succeeded == true
-            ? (scope == .all ? "Alle Tasten wurden aktualisiert." : "\(scope.detailTitle) wurde aktualisiert.")
-            : result?.failureDescription
-    }
-
     private func turnAllOff() {
         let settings = HardwareControl.buttons.map { control in
             var next = appState.profiles.selectedProfile.led.setting(for: control)
@@ -349,8 +389,7 @@ struct LEDControlPanel: View {
             return next
         }
         appState.profiles.updateLEDs(settings)
-        let result = appState.device.turnOffCustomLEDs()
-        resultMessage = result?.succeeded == true ? "Alle LEDs sind aus." : "Alle LEDs wurden im Profil ausgeschaltet."
+        appState.refreshAgentLEDs()
     }
 
     private static let presets: [(name: String, color: Color, rgb: (UInt8, UInt8, UInt8))] = [
@@ -436,14 +475,27 @@ private struct LEDReactionEditor: View {
 
     private func reactionOptions(_ event: LEDReactionEvent, reaction: LEDReactionConfiguration) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            LabeledContent("Helligkeit") {
+            LabeledContent(reaction.effect == .pulse ? "Bis" : "Helligkeit") {
                 HStack(spacing: 8) {
                     Slider(value: reactionByteBinding(event, \.brightness), in: 0...255)
                     Text("\(Int(reaction.brightness) * 100 / 255) %")
-                        .font(.caption)
                         .monospacedDigit()
                         .frame(width: 38, alignment: .trailing)
                 }
+            }
+
+            if reaction.effect == .pulse {
+                LabeledContent("Von") {
+                    HStack(spacing: 8) {
+                        Slider(value: reactionByteBinding(event, \.minBrightness), in: 0...255)
+                        Text("\(Int(reaction.minBrightness) * 100 / 255) %")
+                            .monospacedDigit()
+                            .frame(width: 38, alignment: .trailing)
+                    }
+                }
+                Text("Pulsiert zwischen \(Int(reaction.minBrightness) * 100 / 255) % und \(Int(reaction.brightness) * 100 / 255) %.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             if reaction.effect == .blink || reaction.effect == .pulse || reaction.effect == .flash {
@@ -459,7 +511,7 @@ private struct LEDReactionEditor: View {
             }
 
             if event.isAgentEvent {
-                Toggle("Idle-Modus bei diesem Agentenstatus deaktivieren", isOn: reactionIdleOverrideBinding(event))
+                Toggle("Grundlicht bei diesem Status ausblenden", isOn: reactionIdleOverrideBinding(event))
                     .font(.caption)
             }
         }

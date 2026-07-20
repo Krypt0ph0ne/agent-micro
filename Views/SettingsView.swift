@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     let appState: AppState
     @State private var resultText: String?
-    @State private var ledTestMessage: String?
     @State private var showDiagnostics = false
 
     var body: some View {
@@ -96,25 +95,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Hersteller-LED") {
-                Text("Beim 0x1189:0x8890 stehen drei firmwareseitige, globale LED-Muster zur Verfügung.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack {
-                    Button("Aus") { setLEDMode(0) }
-                    Button("Pattern 1") { setLEDMode(1) }
-                    Button("Pattern 2") { setLEDMode(2) }
-                }
-                .disabled(!appState.device.state.isSupportedConnection || appState.device.isBusy)
-
-                if let ledTestMessage {
-                    Text(ledTestMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             Section("Sicherheit") {
                 Text("Profile und Agent-Zuordnungen bleiben lokal unter Application Support. Der Event-Bridge-Service beobachtet Ereignisse, beantwortet Approvals aber nie automatisch.")
                     .font(.caption)
@@ -165,12 +145,6 @@ struct SettingsView: View {
         }
     }
 
-    private func setLEDMode(_ mode: Int) {
-        let result = appState.device.setLEDMode(mode)
-        ledTestMessage = result?.succeeded == true
-            ? "LED-Pattern \(mode) wurde auf dem Pad gesetzt."
-            : "LED-Pattern \(mode) konnte nicht gesetzt werden – Details stehen in Diagnose."
-    }
 }
 
 private struct PermissionStatus: View {
