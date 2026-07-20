@@ -450,6 +450,21 @@ enum ProfileFactory {
         return profile
     }
 
+    static func claude(catalog: CodexActionCatalog) -> MacropadProfile {
+        let assignments: [(HardwareControl, String)] = [
+            (.key1, "claude-previous-session"), (.key2, "claude-new-session"), (.key3, "claude-next-session"),
+            (.key4, "claude-toggle-diff"), (.key5, "claude-toggle-terminal"), (.key6, "claude-permission-mode"),
+            (.encoderLeft, "claude-effort-menu"), (.encoderPress, "claude-model-menu"), (.encoderRight, "claude-side-chat")
+        ]
+        return MacropadProfile(
+            name: HarnessLayer.claude.profileName,
+            controls: assignments.map { control, actionID in
+                ControlBinding(control: control, action: catalog.keyboardAction(id: actionID) ?? .disabled)
+            },
+            isBuiltIn: true
+        )
+    }
+
     static func safe() -> MacropadProfile {
         let controls = zip(HardwareControl.allCases, ["f13", "f14", "f15", "f16", "f17", "f18", "f19", "f20", "f21"])
             .map { control, key in
