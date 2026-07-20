@@ -55,13 +55,19 @@ struct SettingsView: View {
 
                 Toggle(isOn: $automation.useModelListNavigation) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Drehen navigiert die Modellliste")
-                        Text("Statt Aufwand ±: Drehen öffnet den Model Picker und wählt per Pfeiltasten, Drücken übernimmt")
+                        Text("Halten navigiert die Modellliste")
+                        Text("Statt Aufwand ±: Drehrad halten + drehen bewegt das Menü, Loslassen bestätigt")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .disabled(!automation.isEnabled)
+
+                if automation.useModelListNavigation {
+                    Text("Profil nach dieser Änderung einmal erneut „Übertragen“, damit F22/F23/F24 auf dem Gerät aktiv sind.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 HStack(spacing: 8) {
                     PermissionStatus(
@@ -76,11 +82,13 @@ struct SettingsView: View {
 
                 if automation.useModelListNavigation {
                     HStack {
-                        Button("◀ Modell") { automation.navigateModelList(.previous) }
+                        Button("Halten (simulieren)") { automation.testBeginHold() }
                             .frame(maxWidth: .infinity)
-                        Button("Übernehmen") { automation.confirmModelSelection() }
+                        Button("▲") { automation.testRotate(.previous) }
                             .frame(maxWidth: .infinity)
-                        Button("Modell ▶") { automation.navigateModelList(.next) }
+                        Button("▼") { automation.testRotate(.next) }
+                            .frame(maxWidth: .infinity)
+                        Button("Loslassen") { automation.testEndHold() }
                             .frame(maxWidth: .infinity)
                     }
                     .disabled(!automation.isEnabled)

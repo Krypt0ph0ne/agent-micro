@@ -17,26 +17,26 @@ final class CodexPadTests: XCTestCase {
 
     func testReasoningTriggerProfileUsesConfirmedLocalShortcuts() {
         let profile = ProfileFactory.codexReasoningTriggers(catalog: CodexActionCatalog())
-        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f18")
+        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f22")
         XCTAssertEqual(profile.action(for: .encoderPress).deviceMacro, "f23")
-        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f19")
+        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f24")
         XCTAssertEqual(profile.action(for: .encoderLeft).codexActionID, "encoder-effort-decrease")
     }
 
     func testCodexProfileUsesReasoningTriggersByDefault() {
         let profile = ProfileFactory.codex(catalog: CodexActionCatalog())
-        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f18")
+        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f22")
         XCTAssertEqual(profile.action(for: .encoderPress).deviceMacro, "f23")
-        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f19")
+        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f24")
         XCTAssertEqual(profile.action(for: .encoderRight).codexActionID, "encoder-effort-increase")
     }
 
     func testCodexProfileGeneratesReasoningFunctionKeys() throws {
         let profile = ProfileFactory.codex(catalog: CodexActionCatalog())
         let yaml = try CH57xConfigurationEncoder().encode(profile: profile)
-        XCTAssertTrue(yaml.contains("ccw: 'f18'"))
+        XCTAssertTrue(yaml.contains("ccw: 'f22'"))
         XCTAssertTrue(yaml.contains("press: 'f23'"))
-        XCTAssertTrue(yaml.contains("cw: 'f19'"))
+        XCTAssertTrue(yaml.contains("cw: 'f24'"))
     }
 
     func testEncoderAutomationUsesDirectCodexShortcuts() {
