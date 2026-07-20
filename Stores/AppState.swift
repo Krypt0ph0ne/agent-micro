@@ -51,7 +51,8 @@ final class AppState {
             }
         }
         keyboardState.onDictationHoldChanged = { [weak self] isHeld in
-            self?.ledFeedback.handleDictationKeyboardReport(isHeld: isHeld)
+            guard let self else { return }
+            self.ledFeedback.handleDictationKeyboardReport(isHeld: isHeld, profile: self.profiles.selectedProfile)
         }
         codexThreads.onStatusChange = { [weak self] in self?.refreshAgentLEDs() }
     }
@@ -91,6 +92,6 @@ final class AppState {
         let statuses = Dictionary(uniqueKeysWithValues: HardwareControl.buttons.map { control in
             (control, codexThreads.status(for: control))
         })
-        ledFeedback.showAgentStatuses(statuses)
+        ledFeedback.showAgentStatuses(statuses, profile: profiles.selectedProfile)
     }
 }

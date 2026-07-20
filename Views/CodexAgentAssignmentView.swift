@@ -3,11 +3,21 @@ import SwiftUI
 struct CodexAgentAssignmentView: View {
     let appState: AppState
     let control: HardwareControl
+    @State private var threadSearch = ""
 
     private var assignment: AgentKeyAssignment? { appState.codexThreads.assignment(for: control) }
     private var status: CodexAgentStatus { appState.codexThreads.status(for: control) }
-    private var regularThreads: [CodexThreadDescriptor] { appState.codexThreads.threads.filter { !$0.isSubagent } }
-    private var subagents: [CodexThreadDescriptor] { appState.codexThreads.threads.filter(\.isSubagent) }
+    private var filteredThreads: [CodexThreadDescriptor] {
+        let query = threadSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let threads = appState.codexThreads.threads
+        guard !query.isEmpty else { return Array(threads.prefix(75)) }
+        return Array(threads.filter {
+            $0.displayTitle.localizedCaseInsensitiveContains(query)
+                || $0.preview.localizedCaseInsensitiveContains(query)
+                || $0.cwd.localizedCaseInsensitiveContains(query)
+                || ($0.agentRole?.localizedCaseInsensitiveContains(query) ?? false)
+        }.prefix(75))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -36,32 +46,25 @@ struct CodexAgentAssignmentView: View {
                 }
             }
 
-            Menu {
-                if regularThreads.isEmpty && subagents.isEmpty {
-                    Text("Keine Threads gefunden")
-                }
-                if !regularThreads.isEmpty {
-                    Section("Threads") {
-                        ForEach(regularThreads.prefix(75)) { thread in threadButton(thread) }
+            TextField("Threads & Subagenten durchsuchen", text: $threadSearch)
+                .textFieldStyle(.roundedBorder)
+
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    if filteredThreads.isEmpty {
+                        ContentUnavailableView(
+                            appState.codexThreads.threads.isEmpty ? "Keine Threads geladen" : "Keine Treffer",
+                            systemImage: "rectangle.stack.badge.person.crop"
+                        )
+                        .frame(height: 96)
+                    } else {
+                        ForEach(filteredThreads) { thread in
+                            threadRow(thread)
+                        }
                     }
                 }
-                if !subagents.isEmpty {
-                    Section("Subagenten") {
-                        ForEach(subagents.prefix(75)) { thread in threadButton(thread) }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text(assignment == nil ? "Thread oder Subagent auswählen" : "Zuordnung ändern")
-                    Spacer()
-                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
-                }
-                .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .padding(.horizontal, 9)
-            .frame(minHeight: 30)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
+            .frame(height: 166)
 
             HStack(spacing: 6) {
                 Label(appState.codexThreads.connectionState.title, systemImage: connectionIcon)
@@ -87,20 +90,52 @@ struct CodexAgentAssignmentView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    @ViewBuilder
-    private func threadButton(_ thread: CodexThreadDescriptor) -> some View {
+    private func threadRow(_ thread: CodexThreadDescriptor) -> some View {
         Button {
             appState.assignCodexThread(thread, to: control)
+            threadSearch = ""
         } label: {
-            if assignment?.threadID == thread.id {
-                Label(thread.displayTitle, systemImage: "checkmark")
-            } else {
-                Text(thread.displayTitle)
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color(for: thread.status))
+                    .frame(width: 8, height: 8)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 5) {
+                        Text(thread.displayTitle)
+                            .font(.caption.weight(.medium))
+                            .lineLimit(1)
+                        if thread.isSubagent {
+                            Text("SUB")
+                                .font(.system(size: 8, weight: .bold))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
+                        }
+                    }
+                    Text([thread.preview, thread.status.title].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if assignment?.threadID == thread.id {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                }
             }
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .background(.quaternary.opacity(assignment?.threadID == thread.id ? 0.65 : 0.22), in: RoundedRectangle(cornerRadius: 7))
     }
 
     private var statusColor: Color {
+        color(for: status)
+    }
+
+    private func color(for status: CodexAgentStatus) -> Color {
         switch status {
         case .unassigned: .secondary
         case .idle: .white

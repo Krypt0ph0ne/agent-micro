@@ -12,6 +12,7 @@ final class CodexThreadStore {
     private(set) var assignments: [AgentKeyAssignment]
     private(set) var lastPersistenceError: String?
     var onStatusChange: (() -> Void)?
+    private var pendingStatuses: [String: CodexAgentStatus] = [:]
 
     init(bridge: CodexEventBridge, persistenceURL: URL? = nil) {
         self.bridge = bridge
@@ -81,21 +82,36 @@ final class CodexThreadStore {
     }
 
     private func merge(_ incoming: [CodexThreadDescriptor]) {
+        let previousAssignedStatuses = assignedStatusSnapshot()
         var byID = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
         for var thread in incoming {
-            if let current = byID[thread.id], current.status != .idle, thread.status == .idle {
+            if let pending = pendingStatuses.removeValue(forKey: thread.id) {
+                thread.status = pending
+            } else if let current = byID[thread.id], current.status != .idle, thread.status == .idle {
                 thread.status = current.status
             }
             byID[thread.id] = thread
         }
         threads = byID.values.sorted { $0.updatedAt > $1.updatedAt }
+        if assignedStatusSnapshot() != previousAssignedStatuses {
+            onStatusChange?()
+        }
     }
 
     private func updateStatus(_ status: CodexAgentStatus, threadID: String) -> Bool {
-        guard let index = threads.firstIndex(where: { $0.id == threadID }),
-              threads[index].status != status else { return false }
+        guard let index = threads.firstIndex(where: { $0.id == threadID }) else {
+            pendingStatuses[threadID] = status
+            return false
+        }
+        guard threads[index].status != status else { return false }
         threads[index].status = status
         return true
+    }
+
+    private func assignedStatusSnapshot() -> [HardwareControl: CodexAgentStatus] {
+        Dictionary(uniqueKeysWithValues: assignments.map { assignment in
+            (assignment.control, threads.first(where: { $0.id == assignment.threadID })?.status ?? .idle)
+        })
     }
 
     private func persist() {
