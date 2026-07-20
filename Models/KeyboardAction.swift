@@ -1,5 +1,12 @@
 import Foundation
 
+/// Which half of a tap-vs-hold binding an action gets written to. Tap and hold
+/// share the same catalog of assignable actions, this only picks the target.
+enum ActionSlot {
+    case tap
+    case hold
+}
+
 enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case codexAgent
     case codexShortcut
