@@ -198,13 +198,15 @@ final class CodexReasoningAutomationService {
 
     /// Fires the instant the hold threshold is crossed: opens the Model
     /// Picker and drills straight into its "Modell" submenu with no further
-    /// press/release cycle needed. The menu opens with nothing highlighted,
-    /// so the first Up only highlights the last entry ("Erweitert") without
-    /// moving off it; three more Up presses (four total) reach the first
-    /// entry ("Modell") before Right expands its model list. Each step needs
-    /// Codex to have actually rendered the previous one before the next key
-    /// lands, so this chains the smallest delays that still land reliably
-    /// rather than firing everything in one un-spaced burst.
+    /// press/release cycle needed. The menu opens with "Erweitert" (the last
+    /// entry) highlighted, so three Up presses reach the first entry
+    /// ("Modell") before Right expands its model list.
+    ///
+    /// Sending all of these back-to-back with no gap landed one entry short
+    /// every time (3 or 4 presses made no difference), which means rapid
+    /// identical key events were being coalesced/dropped rather than each
+    /// one moving the highlight — so every key here is spaced out via
+    /// `postKeysSequentially` instead of fired in one burst.
     private func fireEncoderHold() {
         encoderHoldFired = true
         guard !isModelListOpen else { return }
@@ -214,15 +216,8 @@ final class CodexReasoningAutomationService {
         status = "Modellliste offen: drehen wählt, loslassen übernimmt."
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             Self.openModelPickerShortcut()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                Self.postKey(UInt16(kVK_UpArrow))
-                Self.postKey(UInt16(kVK_UpArrow))
-                Self.postKey(UInt16(kVK_UpArrow))
-                Self.postKey(UInt16(kVK_UpArrow))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                    Self.postKey(UInt16(kVK_RightArrow))
-                }
-            }
+            let upArrow = UInt16(kVK_UpArrow)
+            Self.postKeysSequentially([upArrow, upArrow, upArrow, UInt16(kVK_RightArrow)], startingAfter: 0.08, interval: 0.08)
         }
     }
 
@@ -454,5 +449,17 @@ final class CodexReasoningAutomationService {
         let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: false)
         up?.flags = flags
         up?.post(tap: .cghidEventTap)
+    }
+
+    /// Posts each key with a real gap after the previous one, rather than in
+    /// one burst: identical key events fired back-to-back with no spacing
+    /// were observed to be coalesced/dropped, silently under-counting menu
+    /// navigation presses.
+    private nonisolated static func postKeysSequentially(_ keyCodes: [UInt16], startingAfter delay: TimeInterval, interval: TimeInterval) {
+        guard let first = keyCodes.first else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            postKey(first)
+            postKeysSequentially(Array(keyCodes.dropFirst()), startingAfter: interval, interval: interval)
+        }
     }
 }
