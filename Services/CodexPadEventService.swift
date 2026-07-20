@@ -1,6 +1,7 @@
 import Foundation
 import IOKit.hid
 import Observation
+import OSLog
 
 struct CodexPadFirmwareStatus: Equatable {
     let version: String
@@ -17,16 +18,26 @@ struct CodexPadPhysicalEvent: Identifiable, Equatable {
     let date = Date()
 }
 
+/// All callbacks are scheduled on the main run loop. The Sendable marker is
+/// limited to satisfying Foundation's Timer callback contract.
 @Observable
-final class CodexPadEventService {
+final class CodexPadEventService: @unchecked Sendable {
+    private let logger = Logger(subsystem: "com.codexpad.app", category: "pad-events")
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var reportBuffer: UnsafeMutablePointer<UInt8>?
+    private var statusTimer: Timer?
+    private var lastLoggedPressedMask: UInt16?
     private(set) var firmwareStatus: CodexPadFirmwareStatus?
     private(set) var events: [CodexPadPhysicalEvent] = []
     private(set) var status = "Noch nicht verbunden"
+    var onPhysicalEvent: ((CodexPadPhysicalEvent) -> Void)?
+    var onFirmwareStatus: ((CodexPadFirmwareStatus) -> Void)?
 
-    deinit { reportBuffer?.deallocate() }
+    deinit {
+        statusTimer?.invalidate()
+        reportBuffer?.deallocate()
+    }
 
     func refresh(enabled: Bool) {
         stop()
@@ -53,9 +64,14 @@ final class CodexPadEventService {
         self.reportBuffer = buffer
         status = "Protokoll v2 verbunden"
         requestStatus()
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.requestStatus()
+        }
     }
 
     func stop() {
+        statusTimer?.invalidate()
+        statusTimer = nil
         if let device {
             IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
             IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -73,15 +89,43 @@ final class CodexPadEventService {
         }
     }
 
+    func sendLEDs(_ packets: [[UInt8]]) {
+        guard let device else {
+            logger.error("LED packets dropped: Raw HID is not connected")
+            return
+        }
+        for var packet in packets where packet.count == CodexPadPacketEncoder.packetSize {
+            let result = packet.withUnsafeMutableBufferPointer {
+                IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, 0, $0.baseAddress!, $0.count)
+            }
+            if result != kIOReturnSuccess {
+                logger.error("LED output command \(packet[3], privacy: .public) failed: \(result, privacy: .public)")
+            }
+        }
+    }
+
     fileprivate func consume(_ bytes: [UInt8]) {
         guard bytes.count == 32, bytes[0] == 0x43, bytes[1] == 0x50,
               bytes[0..<31].reduce(0, ^) == bytes[31] else { return }
         if bytes[3] == 0x80 {
-            firmwareStatus = .init(version: "\(bytes[4]).\(bytes[5]).\(bytes[6])", capabilities: bytes[7], pressedMask: UInt16(bytes[10]) | UInt16(bytes[11]) << 8)
-            status = "Firmware \(firmwareStatus!.version) · Protokoll v\(bytes[2])"
+            let firmwareStatus = CodexPadFirmwareStatus(
+                version: "\(bytes[4]).\(bytes[5]).\(bytes[6])",
+                capabilities: bytes[7],
+                pressedMask: UInt16(bytes[10]) | UInt16(bytes[11]) << 8
+            )
+            self.firmwareStatus = firmwareStatus
+            status = "Firmware \(firmwareStatus.version) · Protokoll v\(bytes[2])"
+            if lastLoggedPressedMask != firmwareStatus.pressedMask {
+                lastLoggedPressedMask = firmwareStatus.pressedMask
+                logger.info("Pressed mask changed: 0x\(String(firmwareStatus.pressedMask, radix: 16), privacy: .public)")
+            }
+            onFirmwareStatus?(firmwareStatus)
         } else if bytes[3] == 0x81, let phase = CodexPadPhysicalEvent.Phase(rawValue: bytes[6]) {
-            events.insert(.init(sequence: bytes[4], control: bytes[5], phase: phase), at: 0)
+            let event = CodexPadPhysicalEvent(sequence: bytes[4], control: bytes[5], phase: phase)
+            logger.info("Physical event control=\(event.control, privacy: .public) phase=\(event.phase.rawValue, privacy: .public)")
+            events.insert(event, at: 0)
             if events.count > 100 { events.removeLast(events.count - 100) }
+            onPhysicalEvent?(event)
         }
     }
 }

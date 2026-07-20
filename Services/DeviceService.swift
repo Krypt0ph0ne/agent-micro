@@ -108,11 +108,13 @@ final class DeviceService {
 
         if currentDevice?.isCodexPadFirmware == true {
             do {
-                let result = codexPadClient.send(try codexPadEncoder.packets(profile: profile, layout: keyboardLayout))
+                let packets = try codexPadEncoder.packets(profile: profile, layout: keyboardLayout)
+                    + [codexPadEncoder.allOffPacket()]
+                let result = codexPadClient.send(packets)
                 diagnostics.record(result, title: "Profil und RGB live an CH552 übertragen")
                 if result.succeeded {
                     lastSuccessfulUpload = .now
-                    diagnostics.append(.success, "CH552-Profil aktiv", detail: "Neun Eingabebelegungen und sechs LED-Konfigurationen wurden über Raw HID übertragen.")
+                    diagnostics.append(.success, "CH552-Profil aktiv", detail: "Neun Eingabebelegungen wurden übertragen; die sechs LEDs bleiben im Idle ausgeschaltet.")
                 }
                 return result
             } catch {

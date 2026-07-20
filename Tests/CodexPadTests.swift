@@ -261,6 +261,54 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(packet[31], packet[0..<31].reduce(0, ^))
     }
 
+    func testTransientWholePadLEDsCoverAllSixKeys() {
+        let packets = CodexPadPacketEncoder().allLEDs(
+            effect: .pulse,
+            red: 255,
+            green: 255,
+            blue: 255,
+            brightness: 255,
+            periodMilliseconds: 900
+        )
+
+        XCTAssertEqual(packets.count, 6)
+        XCTAssertEqual(packets.map { $0[4] }, [2, 1, 0, 5, 4, 3])
+        XCTAssertTrue(packets.allSatisfy { $0[5] == LEDEffect.pulse.rawValue && $0[6...10] == [255, 255, 255, 45, 255] })
+    }
+
+    func testNativePulseUsesFirmwarePulseCommands() {
+        let packets = CodexPadPacketEncoder().allLEDs(
+            effect: .pulse,
+            red: 255,
+            green: 0,
+            blue: 0,
+            brightness: 176,
+            periodMilliseconds: 900
+        )
+
+        XCTAssertEqual(packets.count, 6)
+        XCTAssertTrue(packets.allSatisfy { $0[5] == LEDEffect.pulse.rawValue })
+        XCTAssertTrue(packets.allSatisfy { $0[6...10] == [255, 0, 0, 45, 176] })
+    }
+
+    func testCodexPadAllOffPacketUsesTheGlobalOffCommand() {
+        let packet = CodexPadPacketEncoder().allOffPacket()
+
+        XCTAssertEqual(Array(packet[0...3]), [0x43, 0x50, 0x01, 0x12])
+        XCTAssertEqual(packet[31], packet[0..<31].reduce(0, ^))
+    }
+
+    func testFirmwareInputUsesLogicalOrderWhileConfigurationUsesPCBOrder() {
+        let dictationControl = HardwareControl.key4
+        let mask = UInt16(1) << dictationControl.reportedControlIndex
+
+        XCTAssertEqual(dictationControl.firmwareControlIndex, 5)
+        XCTAssertEqual(dictationControl.reportedControlIndex, 3)
+        XCTAssertEqual(HardwareControl(firmwareControlIndex: 5), .key4)
+        XCTAssertEqual(HardwareControl(reportedControlIndex: 3), .key4)
+        XCTAssertNotEqual(mask & (UInt16(1) << dictationControl.reportedControlIndex), 0)
+    }
+
     func testCodexPadKeyboardBindingPacketEncodesShortcut() throws {
         let action = KeyboardAction(kind: .keyboardShortcut, label: "Neu", icon: "command", deviceMacro: "cmd-shift-n")
         let packet = try CodexPadPacketEncoder().bindingPacket(action: action, control: .key2)
@@ -280,6 +328,114 @@ final class CodexPadTests: XCTestCase {
         let packet = try CodexPadPacketEncoder().bindingPacket(action: action, control: .key1)
         XCTAssertEqual(packet[5], 3)
         XCTAssertEqual(packet[6], 0)
+    }
+
+    func testCodexAgentActionUsesTheFirmwareAppOnlyEvent() throws {
+        let action = KeyboardAction(kind: .codexAgent, label: "Build Agent", icon: "terminal.fill")
+        let packet = try CodexPadPacketEncoder().bindingPacket(action: action, control: .key1)
+
+        XCTAssertEqual(packet[4], HardwareControl.key1.firmwareControlIndex)
+        XCTAssertEqual(packet[5], 3)
+        XCTAssertEqual(packet[6], 0)
+        XCTAssertTrue(action.isEnabled)
+    }
+
+    func testCodexStatusMapperCoversAllRequiredLiveStates() {
+        XCTAssertEqual(StatusMapper.threadStatus(type: "notLoaded"), .idle)
+        XCTAssertEqual(StatusMapper.threadStatus(type: "idle"), .idle)
+        XCTAssertEqual(StatusMapper.threadStatus(type: "active"), .running)
+        XCTAssertEqual(StatusMapper.threadStatus(type: "active", activeFlags: ["waitingOnApproval"]), .needsAttention)
+        XCTAssertEqual(StatusMapper.threadStatus(type: "active", activeFlags: ["waitingOnUserInput"]), .needsAttention)
+        XCTAssertEqual(StatusMapper.threadStatus(type: "systemError"), .failed)
+        XCTAssertEqual(StatusMapper.turnStatus("completed"), .completed)
+        XCTAssertEqual(StatusMapper.turnStatus("failed"), .failed)
+        XCTAssertEqual(StatusMapper.turnStatus("interrupted"), .interrupted)
+    }
+
+    func testSnapshotTreatsExternallyOwnedUnfinishedTurnAsRunning() {
+        XCTAssertEqual(StatusMapper.synchronizedStatus(
+            threadType: "notLoaded",
+            latestTurnStatus: "interrupted",
+            latestTurnHasCompletionTimestamp: false
+        ), .running)
+    }
+
+    func testSnapshotKeepsActuallyCompletedInterruptedTurnPurple() {
+        XCTAssertEqual(StatusMapper.synchronizedStatus(
+            threadType: "notLoaded",
+            latestTurnStatus: "interrupted",
+            latestTurnHasCompletionTimestamp: true
+        ), .interrupted)
+    }
+
+    func testSnapshotMapsCompletedAndFailedTurns() {
+        XCTAssertEqual(StatusMapper.synchronizedStatus(
+            threadType: "notLoaded",
+            latestTurnStatus: "completed",
+            latestTurnHasCompletionTimestamp: true
+        ), .completed)
+        XCTAssertEqual(StatusMapper.synchronizedStatus(
+            threadType: "notLoaded",
+            latestTurnStatus: "failed",
+            latestTurnHasCompletionTimestamp: true
+        ), .failed)
+    }
+
+    func testCodexStatusLEDMappingMatchesTheProductContract() {
+        let idle = StatusMapper.ledConfiguration(for: .idle, control: .key1)
+        XCTAssertEqual(idle.effect, .steady)
+        XCTAssertEqual([idle.red, idle.green, idle.blue], [255, 255, 255])
+        XCTAssertLessThan(idle.brightness, 100)
+
+        let running = StatusMapper.ledConfiguration(for: .running, control: .key2)
+        XCTAssertEqual(running.effect, .pulse)
+        XCTAssertEqual([running.red, running.green, running.blue], [20, 110, 255])
+
+        let approval = StatusMapper.ledConfiguration(for: .needsAttention, control: .key3)
+        XCTAssertEqual(approval.effect, .pulse)
+        XCTAssertEqual([approval.red, approval.green, approval.blue], [255, 105, 0])
+
+        let completed = StatusMapper.ledConfiguration(for: .completed, control: .key4)
+        XCTAssertEqual(completed.effect, .steady)
+        XCTAssertEqual([completed.red, completed.green, completed.blue], [0, 220, 70])
+
+        let failed = StatusMapper.ledConfiguration(for: .failed, control: .key5)
+        XCTAssertEqual(failed.effect, .blink)
+        XCTAssertEqual([failed.red, failed.green, failed.blue], [255, 0, 0])
+
+        let interrupted = StatusMapper.ledConfiguration(for: .interrupted, control: .key6)
+        XCTAssertEqual(interrupted.effect, .steady)
+        XCTAssertEqual([interrupted.red, interrupted.green, interrupted.blue], [160, 70, 255])
+
+        let unassigned = StatusMapper.ledConfiguration(for: .unassigned, control: .key1)
+        XCTAssertEqual(unassigned.effect, .off)
+    }
+
+    @MainActor
+    func testAllSixCodexAgentAssignmentsPersistLocally() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-agent-store-\(UUID().uuidString)")
+        let url = directory.appendingPathComponent("AgentKeyAssignments.json")
+        let store = CodexThreadStore(bridge: CodexEventBridge(), persistenceURL: url)
+
+        for (index, control) in HardwareControl.buttons.enumerated() {
+            store.assign(CodexThreadDescriptor(
+                id: "thread-\(index)",
+                title: "Agent \(index + 1)",
+                preview: "",
+                cwd: "/tmp",
+                parentThreadID: index.isMultiple(of: 2) ? nil : "parent",
+                agentNickname: nil,
+                agentRole: nil,
+                updatedAt: .now,
+                status: .idle
+            ), to: control)
+        }
+
+        XCTAssertEqual(store.assignments.count, 6)
+        XCTAssertNil(store.lastPersistenceError)
+        let restored = CodexThreadStore(bridge: CodexEventBridge(), persistenceURL: url)
+        XCTAssertEqual(restored.assignments.count, 6)
+        XCTAssertEqual(restored.assignment(for: .key6)?.threadID, "thread-5")
     }
 
     func testCodexPadDictationUsesCommandF17HoldBinding() throws {

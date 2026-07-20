@@ -62,6 +62,15 @@ struct ControlAssignmentPanel: View {
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             Menu {
+                if HardwareControl.buttons.contains(control) {
+                    Button("Codex Agent …") {
+                        appState.profiles.updateAction(
+                            KeyboardAction(kind: .codexAgent, label: "Codex Agent auswählen", icon: "terminal.fill"),
+                            for: control
+                        )
+                    }
+                    Divider()
+                }
                 if HardwareControl.encoderActions.contains(control) {
                     Button("Codex-Drehradsteuerung") {
                         appState.profiles.updateAction(ProfileFactory.reasoningTriggerAction(for: control), for: control)
@@ -72,6 +81,7 @@ struct ControlAssignmentPanel: View {
                     Menu(category) {
                         ForEach(assignableActions.filter { $0.category == category }) { item in
                             Button {
+                                appState.codexThreads.removeAssignment(for: control)
                                 appState.profiles.assignCodexAction(id: item.id, to: control)
                             } label: {
                                 if item.id == action.codexActionID {
@@ -88,6 +98,7 @@ struct ControlAssignmentPanel: View {
                     isPresentingTextSubmission = true
                 }
                 Button("Deaktivieren") {
+                    appState.codexThreads.removeAssignment(for: control)
                     appState.profiles.updateAction(.disabled, for: control)
                 }
             } label: {
@@ -110,10 +121,14 @@ struct ControlAssignmentPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
-            } else {
+            } else if action.kind != .codexAgent {
                 Text(action.kind == .disabled ? "Dieses Bedienelement löst nichts aus." : "Eigene oder profilinterne Belegung.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if action.kind == .codexAgent {
+                CodexAgentAssignmentView(appState: appState, control: control)
             }
 
             if HardwareControl.encoderActions.contains(control) {
@@ -134,6 +149,7 @@ struct ControlAssignmentPanel: View {
         .sheet(isPresented: $isPresentingTextSubmission) {
             TextSubmissionSheet { text in
                 guard let textAction = KeyboardAction.textSubmission(text) else { return }
+                appState.codexThreads.removeAssignment(for: control)
                 appState.profiles.updateAction(textAction, for: control)
             }
         }
@@ -146,7 +162,7 @@ struct ControlAssignmentPanel: View {
             }
             return "Diese Drehrad-Geste wird direkt vom Pad gesendet. Links und rechts nutzen F18/F19 für den Reasoning-Aufwand."
         }
-        return "Wähle links eine Taste und danach hier eine Codex-Aktion. Die Änderung wird sofort im Profil gespeichert, aber erst mit „Übertragen“ auf das Pad geschrieben."
+        return "Wähle links eine Taste und danach eine Aktion. Ein Codex Agent wird lokal einem Thread oder Subagenten zugeordnet; dessen Live-Status steuert die LED. Die app-only Belegung muss einmal auf das Pad übertragen werden."
     }
 
 }
