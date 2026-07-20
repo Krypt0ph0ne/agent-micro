@@ -308,7 +308,7 @@ final class ProfileStore {
             let isCurrentDirectDefault = left.codexActionID == "encoder-effort-decrease"
                 && left.deviceMacro == "f18"
                 && press.codexActionID == "encoder-model-modifier"
-                && press.deviceMacro == "ctrl-shift-m"
+                && press.deviceMacro == "f23"
                 && right.codexActionID == "encoder-effort-increase"
                 && right.deviceMacro == "f19"
             guard isNavigationDefault || isLegacyReasoningDefault || isDirectReasoningDefault || isPowerDialDefault || isPrivateTriggerDefault || isCurrentDirectDefault else { return profile }

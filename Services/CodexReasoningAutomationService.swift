@@ -166,22 +166,31 @@ final class CodexReasoningAutomationService {
         toggle(.modelPicker)
     }
 
-    /// Encoder-press entry point. In direct-effort mode this is the plain
-    /// open/close toggle unchanged; in model-list-navigation mode a press
-    /// only starts driving the Model Picker once held past
-    /// `modelListHoldThresholdSeconds`, and releasing it either drills into
-    /// the highlighted submenu (first cycle) or confirms the highlighted
-    /// model and closes the menu (second cycle).
-    private func handleEncoderPress(value: Int) {
-        guard useModelListNavigation else {
-            guard value != 0 else { return }
-            toggleModelPicker()
-            return
-        }
-        if value != 0 {
-            beginEncoderHold()
-        } else {
-            endEncoderHold()
+    /// Model-list-navigation entry point fed by CodexPad's own firmware
+    /// protocol (`CodexPadEventService`), which is the only channel that
+    /// reliably reports the encoder press's release edge: the generic
+    /// keyboard-HID interface only ever delivers the key-down for this
+    /// control on the confirmed hardware, never the key-up, so hold-duration
+    /// timing cannot be driven from `handleHIDValue` alone. Rotation ticks are
+    /// read from the same protocol for consistency, since it is unaffected by
+    /// whichever macro happens to be flashed for the dial.
+    func handlePhysicalEvent(_ event: CodexPadPhysicalEvent) {
+        guard useModelListNavigation, let control = HardwareControl(reportedControlIndex: event.control) else { return }
+        switch control {
+        case .encoderPress:
+            switch event.phase {
+            case .pressed: beginEncoderHold()
+            case .released: endEncoderHold()
+            case .triggered: break
+            }
+        case .encoderLeft:
+            guard event.phase == .triggered else { return }
+            handleEncoderRotation(.previous)
+        case .encoderRight:
+            guard event.phase == .triggered else { return }
+            handleEncoderRotation(.next)
+        case .key1, .key2, .key3, .key4, .key5, .key6:
+            break
         }
     }
 
@@ -379,14 +388,21 @@ final class CodexReasoningAutomationService {
     private func handleHIDValue(usagePage: Int, usage: Int, value: Int) {
         guard usagePage == 0x07, [0x68, 0x69, 0x6A, 0x71, 0x72, 0x73].contains(usage) else { return }
 
-        // F23 (press) needs both the key-down and key-up edge to measure how
-        // long the dial was held; every other trigger only cares about the
-        // down edge.
+        // In model-list-navigation mode the encoder is driven exclusively by
+        // `handlePhysicalEvent` (the firmware protocol reliably reports the
+        // press release and rotation ticks there; this generic keyboard-HID
+        // path does not). Avoid handling the same physical action twice.
+        if useModelListNavigation, [0x71, 0x72, 0x73].contains(usage) { return }
+
+        // F23 (press) needs both the key-down and key-up edge in direct-effort
+        // mode's plain toggle, but this interface only ever delivers the
+        // down edge for it on the confirmed hardware, so only that edge acts.
         if usage == 0x72 {
+            guard value != 0 else { return }
             let now = ProcessInfo.processInfo.systemUptime
             guard inputDebouncer.accepts(usage: usage, at: now) else { return }
             recordInput(usage: usage, value: value)
-            handleEncoderPress(value: value)
+            toggleModelPicker()
             return
         }
 
@@ -403,9 +419,9 @@ final class CodexReasoningAutomationService {
         case 0x6A: // F15: Side Chat (configured in Codex)
             toggle(.sideChat)
         case 0x71: // F22: rotate left
-            handleEncoderRotation(.previous)
+            perform(.decreaseEffort)
         case 0x73: // F24: rotate right
-            handleEncoderRotation(.next)
+            perform(.increaseEffort)
         default:
             break
         }
