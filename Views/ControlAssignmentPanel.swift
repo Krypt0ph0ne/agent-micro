@@ -278,7 +278,7 @@ struct ControlAssignmentPanel: View {
 
 }
 
-private struct TextSubmissionSheet: View {
+struct TextSubmissionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = "Yeet"
 

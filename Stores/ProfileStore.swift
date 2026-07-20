@@ -129,7 +129,9 @@ final class ProfileStore {
 
     /// Binds a configurable Codex action that has no default keybinding by
     /// giving it a dedicated trigger chord the pad sends straight to Codex.
-    func assignConfigurableCodexAction(_ definition: CodexActionDefinition, trigger: String, to control: HardwareControl) {
+    /// `slot` chooses whether the trigger becomes the tap or the hold action,
+    /// so the wizard offers the same configurable actions in both places.
+    func assignConfigurableCodexAction(_ definition: CodexActionDefinition, trigger: String, to control: HardwareControl, slot: ActionSlot = .tap) {
         let action = KeyboardAction(
             kind: .codexShortcut,
             label: definition.title,
@@ -137,7 +139,10 @@ final class ProfileStore {
             deviceMacro: trigger,
             codexActionID: definition.id
         )
-        updateAction(action, for: control)
+        switch slot {
+        case .tap: updateAction(action, for: control)
+        case .hold: setHoldAction(action, thresholdMilliseconds: selectedProfile.binding(for: control).resolvedHoldThresholdMilliseconds, for: control)
+        }
     }
 
     func setHoldAction(_ action: KeyboardAction?, thresholdMilliseconds: Int? = nil, for control: HardwareControl) {
