@@ -34,7 +34,7 @@ struct GeneralView: View {
                 if let resultText { Text(resultText).font(.caption).foregroundStyle(.secondary) }
             }
             Section("Sicherheitsmodell") {
-                Text("CodexPad speichert Profile ausschließlich unter Application Support/CodexPad, führt keine Netzwerkanfragen aus und startet keine lokalen Shell Commands. Deep Links und Commands bleiben bis zu einer späteren, sichtbaren Listener-Freigabe nicht auf das Gerät übertragbar.")
+                Text("CodexPad speichert Profile und Agent-Zuordnungen ausschließlich unter Application Support/CodexPad. Der Event-Bridge-Service startet den lokalen Codex App Server über stdio, beobachtet Thread-, Turn-, Approval- und Nutzereingabe-Ereignisse und beantwortet Approval-Anfragen niemals. Tastendrücke öffnen ausschließlich den offiziellen Codex-Thread-Link; Mausautomation wird nicht verwendet.")
                     .fixedSize(horizontal: false, vertical: true)
             }
             Section("LED") {

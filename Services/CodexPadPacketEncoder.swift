@@ -27,7 +27,7 @@ struct CodexPadPacketEncoder {
 
     func ledPacket(setting: KeyLEDConfiguration) -> [UInt8] {
         var packet = base(command: 0x10)
-        packet[4] = firmwareControlIndex(for: setting.control)
+        packet[4] = setting.control.firmwareControlIndex
         packet[5] = setting.effect.rawValue
         packet[6] = setting.red
         packet[7] = setting.green
@@ -39,13 +39,27 @@ struct CodexPadPacketEncoder {
 
     func allOffPacket() -> [UInt8] { finalized(base(command: 0x12)) }
 
+    func allLEDs(effect: LEDEffect, red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8, periodMilliseconds: Int) -> [[UInt8]] {
+        HardwareControl.buttons.map {
+            ledPacket(setting: KeyLEDConfiguration(
+                control: $0,
+                effect: effect,
+                red: red,
+                green: green,
+                blue: blue,
+                brightness: brightness,
+                periodMilliseconds: periodMilliseconds
+            ))
+        }
+    }
+
     func statusRequestPacket() -> [UInt8] { finalized(base(command: 0x30, version: 2)) }
 
     func bindingPacket(action: KeyboardAction, control: HardwareControl, layout: KeyboardLayout = .usANSI) throws -> [UInt8] {
         var packet = base(command: 0x20)
-        packet[4] = firmwareControlIndex(for: control)
+        packet[4] = control.firmwareControlIndex
         guard action.kind != .disabled else { return finalized(packet) }
-        if action.kind == .hostEvent {
+        if action.kind == .hostEvent || action.kind == .codexAgent {
             packet[5] = 3
             return finalized(packet)
         }
@@ -104,23 +118,6 @@ struct CodexPadPacketEncoder {
         packet[2] = version
         packet[3] = command
         return packet
-    }
-
-    /// The PCB's key pin names run right-to-left in each physical row, while
-    /// the app deliberately numbers keys left-to-right as the user sees them.
-    /// Encoder controls already use the same logical order on both sides.
-    private func firmwareControlIndex(for control: HardwareControl) -> UInt8 {
-        switch control {
-        case .key1: 2
-        case .key2: 1
-        case .key3: 0
-        case .key4: 5
-        case .key5: 4
-        case .key6: 3
-        case .encoderLeft: 6
-        case .encoderPress: 7
-        case .encoderRight: 8
-        }
     }
 
     private func finalized(_ source: [UInt8]) -> [UInt8] {

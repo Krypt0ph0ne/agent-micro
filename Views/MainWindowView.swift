@@ -32,6 +32,7 @@ struct MainWindowView: View {
         } message: { Text(resultDetail) }
         .task {
             appState.refreshDevice()
+            appState.startCodexBridge()
             appState.reasoningAutomation.refreshPermissions()
         }
         .onChange(of: scenePhase) { _, phase in
@@ -71,6 +72,14 @@ struct MainWindowView: View {
             .help("HID-Zeichenlayout: \(profiles.keyboardLayout.detail)")
 
             Spacer(minLength: 8)
+
+            Label(
+                appState.codexThreads.connectionState.isConnected ? "Codex verbunden" : "Codex getrennt",
+                systemImage: appState.codexThreads.connectionState.isConnected ? "bolt.horizontal.circle.fill" : "bolt.slash.circle"
+            )
+            .font(.caption.weight(.medium))
+            .foregroundStyle(appState.codexThreads.connectionState.isConnected ? .green : .secondary)
+            .help(appState.codexThreads.connectionError ?? appState.codexThreads.connectionState.title)
 
             DeviceConnectionBadge(appState: appState)
             ContextInfoButton(

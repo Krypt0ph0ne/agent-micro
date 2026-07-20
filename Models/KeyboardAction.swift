@@ -1,6 +1,7 @@
 import Foundation
 
 enum ActionKind: String, Codable, CaseIterable, Identifiable {
+    case codexAgent
     case codexShortcut
     case keyboardShortcut
     case singleKey
@@ -17,6 +18,7 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .codexAgent: "Codex Agent"
         case .codexShortcut: "Codex Shortcut"
         case .keyboardShortcut: "macOS Shortcut"
         case .singleKey: "Einzelne Taste"
@@ -33,7 +35,7 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
 
     var isDirectlySupportedByDevice: Bool {
         switch self {
-        case .codexShortcut, .keyboardShortcut, .singleKey, .keySequence, .textSubmission, .media, .mouse, .disabled, .hostEvent:
+        case .codexAgent, .codexShortcut, .keyboardShortcut, .singleKey, .keySequence, .textSubmission, .media, .mouse, .disabled, .hostEvent:
             true
         case .codexDeepLink, .localCommand:
             false
@@ -91,7 +93,7 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
         )
     }
 
-    var isEnabled: Bool { kind == .hostEvent || (kind != .disabled && !(deviceMacro?.isEmpty ?? true)) }
+    var isEnabled: Bool { kind == .hostEvent || kind == .codexAgent || (kind != .disabled && !(deviceMacro?.isEmpty ?? true)) }
 
     var displayShortcut: String {
         guard let deviceMacro, !deviceMacro.isEmpty else { return "—" }
