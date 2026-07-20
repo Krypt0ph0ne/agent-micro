@@ -25,6 +25,15 @@ struct CodexPadPacketEncoder {
             + HardwareControl.buttons.map { ledPacket(setting: profile.led.setting(for: $0)) }
     }
 
+    /// Full transfer sequence. Idle packets deliberately come last so the
+    /// board enters the configured resting state as soon as upload completes.
+    func uploadPackets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI) throws -> [[UInt8]] {
+        try packets(profile: profile, layout: layout)
+            + HardwareControl.buttons.map {
+                ledPacket(setting: profile.idleLighting.keyConfiguration(for: $0))
+            }
+    }
+
     func ledPacket(setting: KeyLEDConfiguration) -> [UInt8] {
         var packet = base(command: 0x10)
         packet[4] = setting.control.firmwareControlIndex

@@ -12,29 +12,27 @@ struct DeviceEditorView: View {
     @State private var mode: EditorMode = .actions
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
+            DeviceCanvasView(
+                profile: appState.profiles.selectedProfile,
+                selectedControl: $selectedControl
+            )
+            .frame(height: 146)
+
             Picker("Editor", selection: $mode) {
                 ForEach(EditorMode.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 280)
+            .labelsHidden()
 
-            HStack(alignment: .top, spacing: 12) {
-                DeviceCanvasView(
-                    profile: appState.profiles.selectedProfile,
-                    selectedControl: $selectedControl
-                )
-                .frame(width: 340)
-
-                Group {
-                    if mode == .actions {
-                        ControlAssignmentPanel(appState: appState, control: $selectedControl)
-                    } else {
-                        LEDControlPanel(appState: appState, control: $selectedControl)
-                    }
+            Group {
+                if mode == .actions {
+                    ControlAssignmentPanel(appState: appState, control: $selectedControl)
+                } else {
+                    LEDControlPanel(appState: appState, control: $selectedControl)
                 }
-                .frame(maxWidth: .infinity)
             }
+            .frame(maxWidth: .infinity)
         }
         .onAppear { selectedControl = .key1 }
         .onChange(of: mode) { _, newMode in

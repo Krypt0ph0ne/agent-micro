@@ -5,21 +5,7 @@ struct DeviceCanvasView: View {
     @Binding var selectedControl: HardwareControl
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 5) {
-                Text("Hardware")
-                    .font(.headline)
-                ContextInfoButton(
-                    title: "Virtuelles CodexPad",
-                    message: "Klicke eine der sechs Tasten. Beim Drehrad sind Links-Drehen, Drücken und Rechts-Drehen drei getrennt auswählbare Aktionen."
-                )
-                Spacer()
-                Text("3 × 2 + Drehrad")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
                 VStack(spacing: 8) {
                     ForEach(0..<2, id: \.self) { row in
                         HStack(spacing: 7) {
@@ -41,10 +27,10 @@ struct DeviceCanvasView: View {
                     profile: profile,
                     selectedControl: $selectedControl
                 )
-            }
-            .padding(10)
-            .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+        }
+        .padding(12)
+        .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [Color.black.opacity(0.88), Color(nsColor: .darkGray).opacity(0.78)],
@@ -53,18 +39,17 @@ struct DeviceCanvasView: View {
                         )
                     )
                     .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(.white.opacity(0.12), lineWidth: 1)
                     }
                     .shadow(color: .black.opacity(0.16), radius: 8, y: 5)
-            }
-            .overlay(alignment: .bottomTrailing) {
+        }
+        .overlay(alignment: .bottomTrailing) {
                 Text("CODEXPAD")
                     .font(.system(size: 7, weight: .bold, design: .rounded))
                     .tracking(1.2)
                     .foregroundStyle(.white.opacity(0.28))
                     .padding(8)
-            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Virtuelles CodexPad mit sechs Tasten und drei Drehrad-Aktionen")
@@ -106,7 +91,7 @@ struct KeyControlView: View {
             }
             .foregroundStyle(isSelected ? Color.primary : Color.white.opacity(0.9))
             .padding(7)
-            .frame(width: 64, height: 68, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 58, maxHeight: 58, alignment: .topLeading)
             .background(keyMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -117,6 +102,7 @@ struct KeyControlView: View {
         .shadow(color: .black.opacity(0.3), radius: 2, y: 2)
         .accessibilityLabel("\(control.title): \(action.label)")
         .accessibilityHint("Auswählen und rechts neu belegen")
+        .frame(maxWidth: .infinity)
     }
 
     private var keyMaterial: some ShapeStyle {
@@ -183,7 +169,7 @@ struct EncoderControlView: View {
             .shadow(color: .black.opacity(0.28), radius: 3, y: 3)
             .accessibilityLabel("Drehrad drücken: \(profile.action(for: .encoderPress).label)")
         }
-        .frame(width: 78)
+        .frame(width: 86)
     }
 }
 
