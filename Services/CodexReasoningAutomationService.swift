@@ -198,11 +198,13 @@ final class CodexReasoningAutomationService {
 
     /// Fires the instant the hold threshold is crossed: opens the Model
     /// Picker and drills straight into its "Modell" submenu with no further
-    /// press/release cycle needed. The menu opens on its last entry
-    /// ("Erweitert"), so three Up presses reach the first ("Modell") before
-    /// Right expands its model list. Everything here runs back-to-back with
-    /// only the one short delay actually needed for Codex to take focus and
-    /// the menu to appear — there is no second hold cycle to wait for.
+    /// press/release cycle needed. The menu opens with nothing highlighted,
+    /// so the first Up only highlights the last entry ("Erweitert") without
+    /// moving off it; three more Up presses (four total) reach the first
+    /// entry ("Modell") before Right expands its model list. Each step needs
+    /// Codex to have actually rendered the previous one before the next key
+    /// lands, so this chains the smallest delays that still land reliably
+    /// rather than firing everything in one un-spaced burst.
     private func fireEncoderHold() {
         encoderHoldFired = true
         guard !isModelListOpen else { return }
@@ -210,12 +212,17 @@ final class CodexReasoningAutomationService {
         codex.activate(options: [.activateAllWindows])
         isModelListOpen = true
         status = "Modellliste offen: drehen wählt, loslassen übernimmt."
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             Self.openModelPickerShortcut()
-            Self.postKey(UInt16(kVK_UpArrow))
-            Self.postKey(UInt16(kVK_UpArrow))
-            Self.postKey(UInt16(kVK_UpArrow))
-            Self.postKey(UInt16(kVK_RightArrow))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                Self.postKey(UInt16(kVK_UpArrow))
+                Self.postKey(UInt16(kVK_UpArrow))
+                Self.postKey(UInt16(kVK_UpArrow))
+                Self.postKey(UInt16(kVK_UpArrow))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    Self.postKey(UInt16(kVK_RightArrow))
+                }
+            }
         }
     }
 
