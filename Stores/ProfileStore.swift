@@ -127,6 +127,25 @@ final class ProfileStore {
         updateAction(action, for: control)
     }
 
+    /// Binds a configurable Codex action that has no default keybinding by
+    /// giving it a dedicated trigger chord the pad sends straight to Codex.
+    func assignConfigurableCodexAction(_ definition: CodexActionDefinition, trigger: String, to control: HardwareControl) {
+        let action = KeyboardAction(
+            kind: .codexShortcut,
+            label: definition.title,
+            icon: definition.icon,
+            deviceMacro: trigger,
+            codexActionID: definition.id
+        )
+        updateAction(action, for: control)
+    }
+
+    func setHoldAction(_ action: KeyboardAction?, thresholdMilliseconds: Int? = nil, for control: HardwareControl) {
+        var profile = selectedProfile
+        profile.setHoldAction(action, thresholdMilliseconds: thresholdMilliseconds, for: control)
+        replace(profile)
+    }
+
     func newProfile() {
         let profile = ProfileFactory.safe()
         var renamed = profile
