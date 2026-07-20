@@ -84,6 +84,41 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Layer · Codex ⇄ Claude Code") {
+                Toggle(isOn: $profiles.layerSwitchEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Layer per Tasten-Chord umschalten")
+                        Text("Beide Umschalt-Tasten zusammen halten wechselt Codex ⇄ Claude Code")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack {
+                    Picker("Taste A", selection: switchKeyBinding(0)) {
+                        ForEach(HardwareControl.buttons) { Text($0.title).tag($0) }
+                    }
+                    Picker("Taste B", selection: switchKeyBinding(1)) {
+                        ForEach(HardwareControl.buttons) { Text($0.title).tag($0) }
+                    }
+                }
+                .disabled(!profiles.layerSwitchEnabled)
+
+                Picker("LED beim Wechsel", selection: $profiles.layerSwitchLightMode) {
+                    ForEach(LayerSwitchLightMode.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!profiles.layerSwitchEnabled)
+
+                Text(profiles.layerSwitchLightMode.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Umschalt-Tasten mit einfachem Shortcut werden app-vermittelt: kurzer Tipp = normale Aktion, beide halten = umschalten. Braucht die CH552-Firmware und Bedienungshilfen. Codex' Diktat-Taste bleibt als echter Halte-Trigger unverändert.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Gerät") {
                 Text("Der Helper öffnet nur ein bestätigtes USB-HID-Gerät. Für die Entwicklung läuft die App absichtlich unsandboxed.")
                     .font(.caption)
@@ -144,6 +179,25 @@ struct SettingsView: View {
             DiagnosticsView(appState: appState)
                 .frame(minWidth: 720, minHeight: 520)
         }
+    }
+
+    /// Binds one of the two switch-key slots, keeping the two keys distinct by
+    /// swapping when the user picks the key already used by the other slot.
+    private func switchKeyBinding(_ index: Int) -> Binding<HardwareControl> {
+        Binding(
+            get: {
+                let keys = appState.profiles.layerSwitchKeys
+                return keys.indices.contains(index) ? keys[index] : .key4
+            },
+            set: { newValue in
+                var keys = appState.profiles.layerSwitchKeys
+                guard keys.count == 2 else { return }
+                let other = 1 - index
+                if keys[other] == newValue { keys[other] = keys[index] }
+                keys[index] = newValue
+                appState.profiles.layerSwitchKeys = keys
+            }
+        )
     }
 
     private func exportProfile() {
