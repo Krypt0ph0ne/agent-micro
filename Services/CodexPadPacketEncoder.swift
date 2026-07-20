@@ -45,10 +45,17 @@ struct CodexPadPacketEncoder {
 
     /// Full transfer sequence. Idle packets deliberately come last so the
     /// board enters the configured resting state as soon as upload completes.
+    ///
+    /// A range-limited pulse (`KeyLEDConfiguration.isRangePulse`) has no
+    /// firmware representation — the packet format has no floor byte, and
+    /// `ledPacket` simply writes the plain `.pulse` effect. The persisted,
+    /// flashed baseline therefore falls back to a classic 0→brightness pulse;
+    /// the configured floor only actually breathes while CodexPad is running
+    /// and driving it live, via `CodexPadLEDFeedbackService`.
     func uploadPackets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI) throws -> [[UInt8]] {
         try packets(profile: profile, layout: layout)
             + HardwareControl.buttons.map {
-                ledPacket(setting: profile.idleLighting.keyConfiguration(for: $0))
+                ledPacket(setting: profile.baseLighting(for: $0))
             }
     }
 

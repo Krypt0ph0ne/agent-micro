@@ -159,6 +159,11 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
     /// When this agent status is active, suppress the otherwise ambient idle
     /// lighting so the status indication has the pad's full attention.
     var disablesIdle: Bool
+    /// Floor for a "Pulsieren" effect, so it breathes between `minBrightness`
+    /// and `brightness` instead of the firmware's native 0→`brightness`
+    /// sweep. Zero (the default) reproduces the classic firmware-native pulse
+    /// exactly. See `KeyLEDConfiguration.isRangePulse`.
+    var minBrightness: UInt8
 
     var id: LEDReactionEvent { event }
 
@@ -170,7 +175,8 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
             green: green,
             blue: blue,
             brightness: brightness,
-            periodMilliseconds: periodMilliseconds
+            periodMilliseconds: periodMilliseconds,
+            minBrightness: minBrightness
         )
     }
 
@@ -185,7 +191,7 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
     ]
 
     private enum CodingKeys: String, CodingKey {
-        case event, effect, red, green, blue, brightness, periodMilliseconds, disablesIdle
+        case event, effect, red, green, blue, brightness, periodMilliseconds, disablesIdle, minBrightness
     }
 
     init(
@@ -196,7 +202,8 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
         blue: UInt8,
         brightness: UInt8,
         periodMilliseconds: Int,
-        disablesIdle: Bool = false
+        disablesIdle: Bool = false,
+        minBrightness: UInt8 = 0
     ) {
         self.event = event
         self.effect = effect
@@ -206,6 +213,7 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
         self.brightness = brightness
         self.periodMilliseconds = periodMilliseconds
         self.disablesIdle = disablesIdle
+        self.minBrightness = minBrightness
     }
 
     init(from decoder: Decoder) throws {
@@ -219,20 +227,29 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
         periodMilliseconds = try container.decode(Int.self, forKey: .periodMilliseconds)
         disablesIdle = try container.decodeIfPresent(Bool.self, forKey: .disablesIdle)
             ?? event.isAgentEvent
+        minBrightness = try container.decodeIfPresent(UInt8.self, forKey: .minBrightness) ?? 0
     }
 }
 
+/// The base ("Grundlicht") layer: how the pad looks at rest, before any
+/// event reaction is layered on top. `perKey` switches between a single colour
+/// for all keys (stored here) and individual per-key colours (stored in the
+/// profile's `led` configuration).
 struct IdleLEDConfiguration: Codable, Hashable {
     var enabled: Bool
+    var perKey: Bool
     var effect: LEDEffect
     var red: UInt8
     var green: UInt8
     var blue: UInt8
     var brightness: UInt8
     var periodMilliseconds: Int
+    /// Floor for a "Pulsieren" effect. See `KeyLEDConfiguration.isRangePulse`.
+    var minBrightness: UInt8
 
     static let `default` = IdleLEDConfiguration(
         enabled: true,
+        perKey: false,
         effect: .steady,
         red: 255,
         green: 255,
@@ -241,6 +258,7 @@ struct IdleLEDConfiguration: Codable, Hashable {
         periodMilliseconds: 1_000
     )
 
+    /// The single-colour base applied to every key when `perKey` is off.
     func keyConfiguration(for control: HardwareControl) -> KeyLEDConfiguration {
         KeyLEDConfiguration(
             control: control,
@@ -249,8 +267,48 @@ struct IdleLEDConfiguration: Codable, Hashable {
             green: green,
             blue: blue,
             brightness: brightness,
-            periodMilliseconds: periodMilliseconds
+            periodMilliseconds: periodMilliseconds,
+            minBrightness: minBrightness
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled, perKey, effect, red, green, blue, brightness, periodMilliseconds, minBrightness
+    }
+
+    init(
+        enabled: Bool,
+        perKey: Bool = false,
+        effect: LEDEffect,
+        red: UInt8,
+        green: UInt8,
+        blue: UInt8,
+        brightness: UInt8,
+        periodMilliseconds: Int,
+        minBrightness: UInt8 = 0
+    ) {
+        self.enabled = enabled
+        self.perKey = perKey
+        self.effect = effect
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.brightness = brightness
+        self.periodMilliseconds = periodMilliseconds
+        self.minBrightness = minBrightness
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        perKey = try container.decodeIfPresent(Bool.self, forKey: .perKey) ?? false
+        effect = try container.decode(LEDEffect.self, forKey: .effect)
+        red = try container.decode(UInt8.self, forKey: .red)
+        green = try container.decode(UInt8.self, forKey: .green)
+        blue = try container.decode(UInt8.self, forKey: .blue)
+        brightness = try container.decode(UInt8.self, forKey: .brightness)
+        periodMilliseconds = try container.decode(Int.self, forKey: .periodMilliseconds)
+        minBrightness = try container.decodeIfPresent(UInt8.self, forKey: .minBrightness) ?? 0
     }
 }
 
@@ -262,8 +320,22 @@ struct KeyLEDConfiguration: Codable, Hashable, Identifiable {
     var blue: UInt8
     var brightness: UInt8
     var periodMilliseconds: Int
+    /// Floor for a "Pulsieren" effect, breathing between `minBrightness` and
+    /// `brightness` rather than the CH552 firmware's native 0→`brightness`
+    /// sweep. Zero (the default) is the classic firmware-native pulse.
+    var minBrightness: UInt8
 
     var id: HardwareControl { control }
+
+    /// True when this key should breathe within a host-managed brightness
+    /// range. The firmware has no concept of a pulse floor, so whenever this
+    /// is true `CodexPadLEDFeedbackService` must animate it itself instead of
+    /// handing the effect off to the device. A degenerate range (min ≥ max)
+    /// is treated as a plain pulse, so the default `minBrightness == 0`
+    /// reproduces the original firmware-native behaviour exactly.
+    var isRangePulse: Bool {
+        effect == .pulse && minBrightness > 0 && minBrightness < brightness
+    }
 
     static func steadyWhite(for control: HardwareControl) -> KeyLEDConfiguration {
         KeyLEDConfiguration(
@@ -275,6 +347,42 @@ struct KeyLEDConfiguration: Codable, Hashable, Identifiable {
             brightness: 96,
             periodMilliseconds: 1_000
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case control, effect, red, green, blue, brightness, periodMilliseconds, minBrightness
+    }
+
+    init(
+        control: HardwareControl,
+        effect: LEDEffect,
+        red: UInt8,
+        green: UInt8,
+        blue: UInt8,
+        brightness: UInt8,
+        periodMilliseconds: Int,
+        minBrightness: UInt8 = 0
+    ) {
+        self.control = control
+        self.effect = effect
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.brightness = brightness
+        self.periodMilliseconds = periodMilliseconds
+        self.minBrightness = minBrightness
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        control = try container.decode(HardwareControl.self, forKey: .control)
+        effect = try container.decode(LEDEffect.self, forKey: .effect)
+        red = try container.decode(UInt8.self, forKey: .red)
+        green = try container.decode(UInt8.self, forKey: .green)
+        blue = try container.decode(UInt8.self, forKey: .blue)
+        brightness = try container.decode(UInt8.self, forKey: .brightness)
+        periodMilliseconds = try container.decode(Int.self, forKey: .periodMilliseconds)
+        minBrightness = try container.decodeIfPresent(UInt8.self, forKey: .minBrightness) ?? 0
     }
 }
 
@@ -399,6 +507,21 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
     func reaction(for event: LEDReactionEvent) -> LEDReactionConfiguration {
         ledReactions.first(where: { $0.event == event })
             ?? LEDReactionConfiguration.defaults.first(where: { $0.event == event })!
+    }
+
+    /// The resting ("Grundlicht") appearance for a key, honouring the per-key
+    /// vs. single-colour base mode. Agent-status idle suppression is applied
+    /// separately by the live feedback service.
+    func baseLighting(for control: HardwareControl) -> KeyLEDConfiguration {
+        guard idleLighting.enabled else {
+            return KeyLEDConfiguration(
+                control: control, effect: .off, red: 0, green: 0, blue: 0,
+                brightness: 0, periodMilliseconds: idleLighting.periodMilliseconds
+            )
+        }
+        return idleLighting.perKey
+            ? led.setting(for: control)
+            : idleLighting.keyConfiguration(for: control)
     }
 
     mutating func setReaction(_ reaction: LEDReactionConfiguration) {
