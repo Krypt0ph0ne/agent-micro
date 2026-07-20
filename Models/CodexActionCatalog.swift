@@ -48,9 +48,9 @@ struct CodexActionCatalogDocument: Codable {
 struct CodexActionCatalog {
     let document: CodexActionCatalogDocument
 
-    init(resource: String = "CodexActions", bundle: Bundle = .module) {
+    init(bundle: Bundle = .module) {
         guard
-            let url = bundle.url(forResource: resource, withExtension: "json"),
+            let url = bundle.url(forResource: "CodexActions", withExtension: "json"),
             let data = try? Data(contentsOf: url),
             let document = try? JSONDecoder().decode(CodexActionCatalogDocument.self, from: data)
         else {
@@ -58,11 +58,6 @@ struct CodexActionCatalog {
             return
         }
         self.document = document
-    }
-
-    /// The Claude Code shortcut catalog used when the Claude layer is active.
-    static func claude(bundle: Bundle = .module) -> CodexActionCatalog {
-        CodexActionCatalog(resource: "ClaudeActions", bundle: bundle)
     }
 
     var actions: [CodexActionDefinition] { document.actions }

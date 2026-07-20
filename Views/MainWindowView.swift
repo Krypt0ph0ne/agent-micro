@@ -62,8 +62,6 @@ struct MainWindowView: View {
     private var header: some View {
         @Bindable var profiles = appState.profiles
         return HStack(spacing: 10) {
-            layerSwitcher
-
             Picker("Profil", selection: $profiles.selectedProfileID) {
                 ForEach(profiles.profiles) { profile in
                     Text(profile.name).tag(profile.id)
@@ -71,7 +69,7 @@ struct MainWindowView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
-            .frame(maxWidth: 150, alignment: .leading)
+            .frame(maxWidth: 180, alignment: .leading)
             .controlSize(.small)
 
             Spacer(minLength: 8)
@@ -86,29 +84,6 @@ struct MainWindowView: View {
         .padding(.horizontal, 12)
         .frame(height: 40)
         .background(.bar)
-    }
-
-    private var layerSwitcher: some View {
-        HStack(spacing: 2) {
-            ForEach(HarnessLayer.allCases) { layer in
-                let isActive = appState.profiles.activeLayer == layer
-                Button {
-                    appState.switchToLayer(layer)
-                } label: {
-                    Label(layer.title, systemImage: layer.icon)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                .background(isActive ? Color.accentColor.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
-        }
-        .padding(2)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .help("Coding-Harness umschalten (Codex / Claude Code)")
     }
 
     private var actionBar: some View {
@@ -156,11 +131,9 @@ struct MainWindowView: View {
     }
 
     private func validate() {
-        let profile = appState.profiles.selectedProfile
         let result = appState.device.validate(
-            profile: profile,
-            keyboardLayout: appState.profiles.keyboardLayout,
-            appOnlyControls: appState.profiles.appOnlySwitchControls(in: profile)
+            profile: appState.profiles.selectedProfile,
+            keyboardLayout: appState.profiles.keyboardLayout
         )
         showFeedback(
             message: result?.succeeded == true ? "Konfiguration gültig" : "Validierung fehlgeschlagen",
@@ -169,11 +142,9 @@ struct MainWindowView: View {
     }
 
     private func upload() {
-        let profile = appState.profiles.selectedProfile
         let result = appState.device.upload(
-            profile: profile,
-            keyboardLayout: appState.profiles.keyboardLayout,
-            appOnlyControls: appState.profiles.appOnlySwitchControls(in: profile)
+            profile: appState.profiles.selectedProfile,
+            keyboardLayout: appState.profiles.keyboardLayout
         )
         if result?.succeeded == true {
             appState.profiles.markSynchronized()

@@ -34,9 +34,6 @@ enum ProfileFileCodec {
 final class ProfileStore {
     private static let selectedProfileDefaultsKey = "CodexPad.selectedProfileID"
     private static let keyboardLayoutDefaultsKey = "CodexPad.keyboardLayout"
-    private static let layerSwitchEnabledKey = "CodexPad.layerSwitchEnabled"
-    private static let layerSwitchKeysKey = "CodexPad.layerSwitchKeys"
-    private static let layerSwitchLightModeKey = "CodexPad.layerSwitchLightMode"
     private let persistenceURL: URL
     private let catalog: CodexActionCatalog
 
@@ -57,41 +54,14 @@ final class ProfileStore {
     private(set) var hasUnsyncedChanges = false
     private(set) var lastPersistenceError: String?
 
-    // MARK: Harness layer switching
-
-    /// When enabled, holding the two switch keys together toggles Codex ⇄ Claude.
-    var layerSwitchEnabled: Bool {
-        didSet { UserDefaults.standard.set(layerSwitchEnabled, forKey: Self.layerSwitchEnabledKey) }
-    }
-    /// Exactly two buttons whose simultaneous hold switches the layer.
-    var layerSwitchKeys: [HardwareControl] {
-        didSet { UserDefaults.standard.set(layerSwitchKeys.map(\.rawValue), forKey: Self.layerSwitchKeysKey) }
-    }
-    var layerSwitchLightMode: LayerSwitchLightMode {
-        didSet { UserDefaults.standard.set(layerSwitchLightMode.rawValue, forKey: Self.layerSwitchLightModeKey) }
-    }
-
     init(catalog: CodexActionCatalog, persistenceURL: URL? = nil) {
         self.catalog = catalog
         self.keyboardLayout = UserDefaults.standard.string(forKey: Self.keyboardLayoutDefaultsKey)
             .flatMap(KeyboardLayout.init(rawValue:)) ?? .automatic
-        let defaults = UserDefaults.standard
-        self.layerSwitchEnabled = defaults.bool(forKey: Self.layerSwitchEnabledKey)
-        let storedKeys = (defaults.array(forKey: Self.layerSwitchKeysKey) as? [String])?
-            .compactMap(HardwareControl.init(rawValue:))
-            .filter(HardwareControl.buttons.contains)
-        self.layerSwitchKeys = (storedKeys?.count == 2 ? storedKeys : nil) ?? [.key4, .key6]
-        self.layerSwitchLightMode = defaults.string(forKey: Self.layerSwitchLightModeKey)
-            .flatMap(LayerSwitchLightMode.init(rawValue:)) ?? .persistent
         let baseDirectory = persistenceURL?.deletingLastPathComponent() ?? Self.applicationSupportDirectory()
         self.persistenceURL = persistenceURL ?? baseDirectory.appendingPathComponent("Profiles.json")
         let loaded = Self.load(from: self.persistenceURL)
-        let seed = loaded ?? [
-            ProfileFactory.codex(catalog: catalog),
-            ProfileFactory.claude(catalog: .claude()),
-            ProfileFactory.macOS(),
-            ProfileFactory.safe()
-        ]
+        let seed = loaded ?? [ProfileFactory.codex(catalog: catalog), ProfileFactory.macOS(), ProfileFactory.safe()]
         let builtIns = Self.ensureBuiltInProfiles(in: seed, catalog: catalog)
         let encoderMigrated = Self.migrateLegacyCodexReasoningBindings(in: builtIns)
         let initial = Self.migrateLegacyDictationBindings(in: encoderMigrated, catalog: catalog)
@@ -174,39 +144,6 @@ final class ProfileStore {
         var profile = selectedProfile
         profile.setHoldAction(action, thresholdMilliseconds: thresholdMilliseconds, for: control)
         replace(profile)
-    }
-
-    // MARK: Harness layers
-
-    /// The layer the currently selected profile represents, if it is one of the
-    /// two harness profiles.
-    var activeLayer: HarnessLayer? {
-        HarnessLayer(profileName: selectedProfile.name)
-    }
-
-    func profile(for layer: HarnessLayer) -> MacropadProfile? {
-        profiles.first(where: { $0.name == layer.profileName })
-    }
-
-    /// Selects the profile backing the given layer. Returns `false` if that
-    /// built-in profile is missing.
-    @discardableResult
-    func selectLayer(_ layer: HarnessLayer) -> Bool {
-        guard let profile = profile(for: layer) else { return false }
-        guard profile.id != selectedProfileID else { return true }
-        selectedProfileID = profile.id
-        return true
-    }
-
-    /// Switch keys that should be uploaded in the firmware's app-only mode so
-    /// the chord stays clean: only keys whose action the app can re-emit itself
-    /// (a plain, synthesizable shortcut — never the real dictation hold).
-    func appOnlySwitchControls(in profile: MacropadProfile) -> Set<HardwareControl> {
-        guard layerSwitchEnabled else { return [] }
-        return Set(layerSwitchKeys.filter { control in
-            let action = profile.action(for: control)
-            return action.codexActionID != "dictation" && KeystrokeSynthesizer.canSynthesize(action.deviceMacro)
-        })
     }
 
     func newProfile() {
@@ -328,21 +265,8 @@ final class ProfileStore {
     }
 
     private static func ensureBuiltInProfiles(in profiles: [MacropadProfile], catalog: CodexActionCatalog) -> [MacropadProfile] {
-        var result = profiles
-        if !result.contains(where: { $0.name == HarnessLayer.claude.profileName }) {
-            // Insert the Claude layer right after the Codex profile so the two
-            // harness layers sit next to each other in the picker.
-            let claude = ProfileFactory.claude(catalog: .claude())
-            if let codexIndex = result.firstIndex(where: { $0.name == HarnessLayer.codex.profileName }) {
-                result.insert(claude, at: result.index(after: codexIndex))
-            } else {
-                result.append(claude)
-            }
-        }
-        if !result.contains(where: { $0.name == "Codex · Reasoning triggers" }) {
-            result.append(ProfileFactory.codexReasoningTriggers(catalog: catalog))
-        }
-        return result
+        guard !profiles.contains(where: { $0.name == "Codex · Reasoning triggers" }) else { return profiles }
+        return profiles + [ProfileFactory.codexReasoningTriggers(catalog: catalog)]
     }
 
     /// Only migrates the exact historic built-in defaults, never a custom edit.
