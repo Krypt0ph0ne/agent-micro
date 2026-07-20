@@ -2,52 +2,192 @@ import SwiftUI
 
 struct SettingsView: View {
     let appState: AppState
+    @State private var resultText: String?
+    @State private var ledTestMessage: String?
+    @State private var showDiagnostics = false
 
     var body: some View {
-        TabView {
-            GeneralView(appState: appState)
-            .tabItem { Label("Allgemein", systemImage: "gearshape") }
+        @Bindable var profiles = appState.profiles
+        @Bindable var automation = appState.reasoningAutomation
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Gerätezugriff")
-                    .font(.title2.weight(.semibold))
-                Text("Für die Entwicklung ist die App absichtlich unsandboxed. Der Helper öffnet nur das unterstützte USB-HID-Gerät 0x1189:0x8890 und verwendet einen zehn- bzw. zwanzigsekündigen Prozess-Timeout.")
-                    .foregroundStyle(.secondary)
-                Button("Gerät erneut suchen") { appState.refreshDevice() }
-                Spacer()
+        Form {
+            Section("Profil") {
+                TextField(
+                    "Name",
+                    text: Binding(
+                        get: { profiles.selectedProfile.name },
+                        set: { profiles.renameSelected(to: $0) }
+                    )
+                )
+
+                HStack {
+                    Button("Neu") { profiles.newProfile() }
+                        .frame(maxWidth: .infinity)
+                    Button("Duplizieren") { profiles.duplicateSelected() }
+                        .frame(maxWidth: .infinity)
+                    Button("Löschen", role: .destructive) { profiles.deleteSelected() }
+                        .frame(maxWidth: .infinity)
+                }
             }
-            .padding(24)
-            .tabItem { Label("Gerät", systemImage: "cpu") }
 
-            ReasoningAutomationSettings(appState: appState)
-                .tabItem { Label("Codex Reasoning", systemImage: "brain") }
+            Section("Tastaturlayout") {
+                Picker("Tastaturlayout", selection: $profiles.keyboardLayout) {
+                    ForEach(KeyboardLayout.allCases) { layout in
+                        Text(layout.title).tag(layout)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Text(profiles.keyboardLayout.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Codex Reasoning · Drehrad") {
+                Toggle(isOn: $automation.isEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Drehradsteuerung aktiv")
+                        Text("Drehen sendet F18/F19, Druck schaltet die Modellwahl")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    PermissionStatus(
+                        title: "Input Monitoring",
+                        isGranted: automation.hasInputMonitoringPermission
+                    )
+                    PermissionStatus(
+                        title: "Accessibility",
+                        isGranted: automation.hasAccessibilityPermission
+                    )
+                }
+
+                HStack {
+                    Button("− testen") { automation.perform(.decreaseEffort) }
+                        .frame(maxWidth: .infinity)
+                    Button("Picker") { automation.toggleModelPicker() }
+                        .frame(maxWidth: .infinity)
+                    Button("+ testen") { automation.perform(.increaseEffort) }
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(!automation.isEnabled)
+
+                if !automation.hasInputMonitoringPermission || !automation.hasAccessibilityPermission {
+                    Button("Berechtigungen anfordern") { automation.requestPermissions() }
+                }
+
+                Text(automation.status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Gerät") {
+                Text("Der Helper öffnet nur ein bestätigtes USB-HID-Gerät. Für die Entwicklung läuft die App absichtlich unsandboxed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("Gerät erneut suchen") { appState.refreshDevice() }
+                    Spacer()
+                    Button("Diagnose öffnen") { showDiagnostics = true }
+                }
+            }
+
+            Section("Hersteller-LED") {
+                Text("Beim 0x1189:0x8890 stehen drei firmwareseitige, globale LED-Muster zur Verfügung.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("Aus") { setLEDMode(0) }
+                    Button("Pattern 1") { setLEDMode(1) }
+                    Button("Pattern 2") { setLEDMode(2) }
+                }
+                .disabled(!appState.device.state.isSupportedConnection || appState.device.isBusy)
+
+                if let ledTestMessage {
+                    Text(ledTestMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Sicherheit") {
+                Text("Profile und Agent-Zuordnungen bleiben lokal unter Application Support. Der Event-Bridge-Service beobachtet Ereignisse, beantwortet Approvals aber nie automatisch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Import & Export") {
+                HStack {
+                    Button("Exportieren") { exportProfile() }
+                        .frame(maxWidth: .infinity)
+                    Button("Importieren") { importProfile() }
+                        .frame(maxWidth: .infinity)
+                }
+
+                if let resultText {
+                    Text(resultText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
         }
-        .frame(width: 540, height: 330)
+        .formStyle(.grouped)
+        .controlSize(.small)
+        .frame(width: 460, height: 560)
+        .sheet(isPresented: $showDiagnostics) {
+            DiagnosticsView(appState: appState)
+                .frame(minWidth: 720, minHeight: 520)
+        }
+    }
+
+    private func exportProfile() {
+        do {
+            resultText = "Exportiert: \(try appState.profiles.exportSelectedProfile().path)"
+        } catch is CancellationError {
+        } catch {
+            resultText = "Export fehlgeschlagen: \(error.localizedDescription)"
+        }
+    }
+
+    private func importProfile() {
+        do {
+            try appState.profiles.importProfile()
+            resultText = "Profil importiert."
+        } catch is CancellationError {
+        } catch {
+            resultText = "Import fehlgeschlagen: \(error.localizedDescription)"
+        }
+    }
+
+    private func setLEDMode(_ mode: Int) {
+        let result = appState.device.setLEDMode(mode)
+        ledTestMessage = result?.succeeded == true
+            ? "LED-Pattern \(mode) wurde auf dem Pad gesetzt."
+            : "LED-Pattern \(mode) konnte nicht gesetzt werden – Details stehen in Diagnose."
     }
 }
 
-private struct ReasoningAutomationSettings: View {
-    let appState: AppState
+private struct PermissionStatus: View {
+    let title: String
+    let isGranted: Bool
 
     var body: some View {
-        @Bindable var automation = appState.reasoningAutomation
-        VStack(alignment: .leading, spacing: 13) {
-            Text("Codex Reasoning")
-                .font(.title2.weight(.semibold))
-            Text("F13/F14/F15 schalten Settings, Model Picker und Side Chat um. F22/F23/F24 bleiben interne Drehrad-Trigger: Drehen sendet F18/F19, Drücken schaltet den Model Picker um.")
-                .foregroundStyle(.secondary)
-            Toggle("Drehradsteuerung aktivieren", isOn: $automation.isEnabled)
-            LabeledContent("Input Monitoring", value: automation.hasInputMonitoringPermission ? "Erteilt" : "Fehlt")
-            LabeledContent("Accessibility", value: automation.hasAccessibilityPermission ? "Erteilt" : "Fehlt")
-            Text(automation.status).font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("Berechtigungen anfordern") { automation.requestPermissions() }
-                Button("− testen") { automation.perform(.decreaseEffort) }.disabled(!automation.isEnabled)
-                Button("Picker testen") { automation.toggleModelPicker() }.disabled(!automation.isEnabled)
-                Button("+ testen") { automation.perform(.increaseEffort) }.disabled(!automation.isEnabled)
-            }
-            Spacer()
+        HStack(spacing: 6) {
+            Text(title)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(isGranted ? "Erteilt" : "Fehlt")
+                .foregroundStyle(isGranted ? Color.green : Color.orange)
         }
-        .padding(24)
+        .font(.caption)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 28)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
     }
 }

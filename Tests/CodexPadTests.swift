@@ -12,6 +12,7 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(decoded.name, "Codex")
         XCTAssertEqual(decoded.action(for: .key2).codexActionID, "quick-chat")
         XCTAssertEqual(decoded.controls.count, 9)
+        XCTAssertEqual(decoded.ledReactions.count, LEDReactionEvent.allCases.count)
     }
 
     func testReasoningTriggerProfileUsesConfirmedLocalShortcuts() {
@@ -298,6 +299,28 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(packet[31], packet[0..<31].reduce(0, ^))
     }
 
+    func testUploadEndsWithConfiguredIdleLightingInsteadOfGlobalOff() throws {
+        var profile = ProfileFactory.safe()
+        profile.idleLighting = IdleLEDConfiguration(
+            enabled: true,
+            effect: .pulse,
+            red: 11,
+            green: 22,
+            blue: 33,
+            brightness: 144,
+            periodMilliseconds: 1_200
+        )
+
+        let packets = try CodexPadPacketEncoder().uploadPackets(profile: profile)
+        let idlePackets = packets.suffix(HardwareControl.buttons.count)
+
+        XCTAssertEqual(packets.count, 21)
+        XCTAssertTrue(packets.allSatisfy { $0[3] != 0x12 })
+        XCTAssertTrue(idlePackets.allSatisfy {
+            $0[3] == 0x10 && $0[5...10] == [LEDEffect.pulse.rawValue, 11, 22, 33, 60, 144]
+        })
+    }
+
     func testFirmwareInputUsesLogicalOrderWhileConfigurationUsesPCBOrder() {
         let dictationControl = HardwareControl.key4
         let mask = UInt16(1) << dictationControl.reportedControlIndex
@@ -438,6 +461,53 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(restored.assignment(for: .key6)?.threadID, "thread-5")
     }
 
+    @MainActor
+    func testAgentStatusArrivingBeforeThreadListIsNotLost() {
+        let bridge = CodexEventBridge()
+        let persistenceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexpad-early-status-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, persistenceURL: persistenceURL)
+        let thread = CodexThreadDescriptor(
+            id: "early-agent",
+            title: "Early Agent",
+            preview: "",
+            cwd: "/tmp",
+            parentThreadID: nil,
+            agentNickname: nil,
+            agentRole: nil,
+            updatedAt: .now,
+            status: .idle
+        )
+        store.assign(thread, to: .key1)
+        var changeCount = 0
+        store.onStatusChange = { changeCount += 1 }
+
+        bridge.onStatus?(thread.id, .running)
+        bridge.onThreads?([thread])
+
+        XCTAssertEqual(store.status(for: .key1), .running)
+        XCTAssertEqual(changeCount, 1)
+    }
+
+    @MainActor
+    func testCompletedFlashRestoresIdleInsteadOfTurningBoardDark() {
+        var batches: [[[UInt8]]] = []
+        let feedback = CodexPadLEDFeedbackService { batches.append($0) }
+        let profile = ProfileFactory.safe()
+        let statuses: [HardwareControl: CodexAgentStatus] = [.key1: .completed]
+
+        feedback.showAgentStatuses(statuses, profile: profile)
+        feedback.showAgentStatuses(statuses, profile: profile)
+
+        let restored = batches.last ?? []
+        XCTAssertEqual(restored.count, HardwareControl.buttons.count)
+        XCTAssertTrue(restored.allSatisfy {
+            $0[3] == 0x10
+                && $0[5] == profile.idleLighting.effect.rawValue
+                && $0[10] == profile.idleLighting.brightness
+        })
+    }
+
     func testCodexPadDictationUsesCommandF17HoldBinding() throws {
         let action = try XCTUnwrap(CodexActionCatalog().keyboardAction(id: "dictation"))
         let packet = try CodexPadPacketEncoder().bindingPacket(action: action, control: .key4)
@@ -489,6 +559,82 @@ final class CodexPadTests: XCTestCase {
 
         XCTAssertEqual(decoded.led.keys.count, 6)
         XCTAssertEqual(decoded.led.setting(for: .key3).effect, .steady)
+    }
+
+    func testLegacyProfileWithoutReactionConfigurationGetsDefaults() throws {
+        let profile = ProfileFactory.safe()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(profile)) as? [String: Any])
+        object.removeValue(forKey: "ledReactions")
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(MacropadProfile.self, from: data)
+
+        XCTAssertEqual(decoded.ledReactions.count, LEDReactionEvent.allCases.count)
+        XCTAssertEqual(decoded.reaction(for: .agentRunning).effect, .pulse)
+        XCTAssertEqual(decoded.reaction(for: .messageSent).effect, .flash)
+    }
+
+    func testLegacyProfileGetsIdleDefaultsAndAgentIdleOverride() throws {
+        let profile = ProfileFactory.safe()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(profile)) as? [String: Any])
+        object.removeValue(forKey: "idleLighting")
+        var reactions = try XCTUnwrap(object["ledReactions"] as? [[String: Any]])
+        let runningIndex = try XCTUnwrap(reactions.firstIndex { $0["event"] as? String == LEDReactionEvent.agentRunning.rawValue })
+        reactions[runningIndex].removeValue(forKey: "disablesIdle")
+        object["ledReactions"] = reactions
+        let data = try JSONSerialization.data(withJSONObject: object)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(MacropadProfile.self, from: data)
+
+        XCTAssertEqual(decoded.idleLighting, .default)
+        XCTAssertTrue(decoded.reaction(for: .agentRunning).disablesIdle)
+    }
+
+    @MainActor
+    func testProfileStoreCanUpdateAllSixLEDsTogetherAndPersistReaction() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-profile-store-\(UUID().uuidString)")
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+        let store = ProfileStore(catalog: catalog, persistenceURL: url)
+        let settings = HardwareControl.buttons.map {
+            KeyLEDConfiguration(control: $0, effect: .steady, red: 12, green: 34, blue: 56, brightness: 200, periodMilliseconds: 700)
+        }
+        store.updateLEDs(settings)
+        var reaction = store.selectedProfile.reaction(for: .agentFailed)
+        reaction.effect = .flash
+        reaction.red = 99
+        store.updateReaction(reaction)
+        var idle = store.selectedProfile.idleLighting
+        idle.effect = .pulse
+        idle.brightness = 155
+        store.updateIdleLighting(idle)
+
+        XCTAssertTrue(HardwareControl.buttons.allSatisfy {
+            store.selectedProfile.led.setting(for: $0).red == 12
+        })
+        XCTAssertEqual(store.selectedProfile.reaction(for: .agentFailed).effect, .flash)
+
+        let restored = ProfileStore(catalog: catalog, persistenceURL: url)
+        restored.selectedProfileID = store.selectedProfileID
+        XCTAssertEqual(restored.selectedProfile.led.setting(for: .key6).blue, 56)
+        XCTAssertEqual(restored.selectedProfile.reaction(for: .agentFailed).red, 99)
+        XCTAssertEqual(restored.selectedProfile.idleLighting.effect, .pulse)
+        XCTAssertEqual(restored.selectedProfile.idleLighting.brightness, 155)
+    }
+
+    func testFlashReactionUsesSupportedFirmwareEffect() {
+        let reaction = LEDReactionConfiguration.defaults.first { $0.event == .messageSent }!
+        let setting = reaction.keyConfiguration(for: .key2)
+        XCTAssertEqual(reaction.effect, .flash)
+        XCTAssertEqual(setting.effect, .steady)
+        XCTAssertEqual(setting.control, .key2)
     }
 }
 

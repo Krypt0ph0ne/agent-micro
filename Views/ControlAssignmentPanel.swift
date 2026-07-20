@@ -4,6 +4,8 @@ struct ControlAssignmentPanel: View {
     let appState: AppState
     @Binding var control: HardwareControl
     @State private var isPresentingTextSubmission = false
+    @State private var isShowingActionPicker = false
+    @State private var actionSearch = ""
 
     private var action: KeyboardAction {
         appState.profiles.selectedProfile.action(for: control)
@@ -14,12 +16,19 @@ struct ControlAssignmentPanel: View {
         return appState.catalog.action(id: id)
     }
 
-    private var categories: [String] {
-        Array(Set(assignableActions.map(\.category))).sorted()
-    }
-
     private var assignableActions: [CodexActionDefinition] {
         appState.catalog.actions.filter(\.isDirectlyAssignable)
+    }
+
+    private var filteredActions: [CodexActionDefinition] {
+        let query = actionSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return assignableActions }
+        return assignableActions.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+                || $0.category.localizedCaseInsensitiveContains(query)
+                || $0.description.localizedCaseInsensitiveContains(query)
+                || ($0.shortcut?.localizedCaseInsensitiveContains(query) ?? false)
+        }
     }
 
     var body: some View {
@@ -61,60 +70,26 @@ struct ControlAssignmentPanel: View {
             .frame(maxWidth: .infinity, minHeight: 56)
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            Menu {
-                if HardwareControl.buttons.contains(control) {
-                    Button("Codex Agent …") {
-                        appState.profiles.updateAction(
-                            KeyboardAction(kind: .codexAgent, label: "Codex Agent auswählen", icon: "terminal.fill"),
-                            for: control
-                        )
-                    }
-                    Divider()
-                }
-                if HardwareControl.encoderActions.contains(control) {
-                    Button("Codex-Drehradsteuerung") {
-                        appState.profiles.updateAction(ProfileFactory.reasoningTriggerAction(for: control), for: control)
-                    }
-                    Divider()
-                }
-                ForEach(categories, id: \.self) { category in
-                    Menu(category) {
-                        ForEach(assignableActions.filter { $0.category == category }) { item in
-                            Button {
-                                appState.codexThreads.removeAssignment(for: control)
-                                appState.profiles.assignCodexAction(id: item.id, to: control)
-                            } label: {
-                                if item.id == action.codexActionID {
-                                    Label(item.title, systemImage: "checkmark")
-                                } else {
-                                    Text(item.title)
-                                }
-                            }
-                        }
-                    }
-                }
-                Divider()
-                Button("Text absenden …") {
-                    isPresentingTextSubmission = true
-                }
-                Button("Deaktivieren") {
-                    appState.codexThreads.removeAssignment(for: control)
-                    appState.profiles.updateAction(.disabled, for: control)
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    isShowingActionPicker.toggle()
+                    actionSearch = ""
                 }
             } label: {
                 HStack {
-                    Text("Aktion auswählen")
+                    Text(isShowingActionPicker ? "Auswahl schließen" : "Belegung ändern")
                     Spacer()
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    Image(systemName: isShowingActionPicker ? "chevron.up" : "chevron.down")
                 }
                 .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 32)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .buttonStyle(.bordered)
+            .frame(maxWidth: .infinity)
+
+            if isShowingActionPicker {
+                actionPicker
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             if let definition {
                 Text(definition.description)
@@ -127,24 +102,21 @@ struct ControlAssignmentPanel: View {
                     .foregroundStyle(.secondary)
             }
 
-            if action.kind == .codexAgent {
+            if action.kind == .codexAgent && !isShowingActionPicker {
                 CodexAgentAssignmentView(appState: appState, control: control)
             }
 
             if HardwareControl.encoderActions.contains(control) {
-                Spacer(minLength: 0)
                 Label("Direkt vom Pad gesendet", systemImage: "cable.connector")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else {
-                Spacer(minLength: 0)
                 Label("Klick links, Auswahl rechts.", systemImage: "cursorarrow.click")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
         }
         .padding(12)
-        .frame(maxHeight: .infinity, alignment: .top)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .sheet(isPresented: $isPresentingTextSubmission) {
             TextSubmissionSheet { text in
@@ -153,6 +125,104 @@ struct ControlAssignmentPanel: View {
                 appState.profiles.updateAction(textAction, for: control)
             }
         }
+        .onChange(of: control) { _, _ in
+            isShowingActionPicker = false
+            actionSearch = ""
+        }
+    }
+
+    private var actionPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                if HardwareControl.buttons.contains(control) {
+                    Button("Agent", systemImage: "terminal.fill") { chooseAgent() }
+                }
+                if HardwareControl.encoderActions.contains(control) {
+                    Button("Drehrad", systemImage: "dial.medium") {
+                        appState.profiles.updateAction(ProfileFactory.reasoningTriggerAction(for: control), for: control)
+                        isShowingActionPicker = false
+                    }
+                }
+                Button("Text", systemImage: "paperplane.fill") {
+                    isPresentingTextSubmission = true
+                    isShowingActionPicker = false
+                }
+                Button("Aus", systemImage: "minus.circle") { chooseDisabled() }
+            }
+            .controlSize(.small)
+
+            TextField("Aktion durchsuchen", text: $actionSearch)
+                .textFieldStyle(.roundedBorder)
+
+            ScrollView {
+                LazyVStack(spacing: 3) {
+                    if filteredActions.isEmpty {
+                        ContentUnavailableView("Keine Aktion gefunden", systemImage: "magnifyingglass")
+                            .frame(height: 90)
+                    } else {
+                        ForEach(filteredActions) { item in
+                            actionRow(item)
+                        }
+                    }
+                }
+            }
+            .frame(height: 174)
+        }
+        .padding(9)
+        .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func actionRow(_ item: CodexActionDefinition) -> some View {
+        Button {
+            appState.codexThreads.removeAssignment(for: control)
+            appState.profiles.assignCodexAction(id: item.id, to: control)
+            isShowingActionPicker = false
+            actionSearch = ""
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: item.icon)
+                    .frame(width: 22)
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.title)
+                        .font(.caption.weight(.medium))
+                        .lineLimit(1)
+                    Text(item.category)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                if let shortcut = item.shortcut {
+                    Text(shortcut)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                if item.id == action.codexActionID {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.quaternary.opacity(item.id == action.codexActionID ? 0.65 : 0.22), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func chooseAgent() {
+        appState.codexThreads.removeAssignment(for: control)
+        appState.profiles.updateAction(
+            KeyboardAction(kind: .codexAgent, label: "Codex Agent auswählen", icon: "terminal.fill"),
+            for: control
+        )
+        isShowingActionPicker = false
+    }
+
+    private func chooseDisabled() {
+        appState.codexThreads.removeAssignment(for: control)
+        appState.profiles.updateAction(.disabled, for: control)
+        isShowingActionPicker = false
     }
 
     private var infoMessage: String {

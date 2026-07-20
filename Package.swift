@@ -12,7 +12,7 @@ let package = Package(
         .executableTarget(
             name: "CodexPad",
             path: ".",
-            exclude: ["References", "Tests", "Tools", "script", "LICENSES", "Examples", "README.md", ".codex", "dist", "Support/ch57x-keyboard-tool"],
+            exclude: ["References", "Tests", "Tools", "script", "LICENSES", "Examples", "README.md", ".codex", "dist", "DesignQA", "design-qa.md", "Support/ch57x-keyboard-tool"],
             sources: ["App", "Models", "Stores", "Services", "Views", "Support"],
             resources: [.process("Resources")]
         ),

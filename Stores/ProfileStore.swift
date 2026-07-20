@@ -97,8 +97,27 @@ final class ProfileStore {
     }
 
     func updateLED(_ setting: KeyLEDConfiguration) {
+        updateLEDs([setting])
+    }
+
+    func updateLEDs(_ settings: [KeyLEDConfiguration]) {
         var profile = selectedProfile
-        profile.led.setSetting(setting)
+        for setting in settings {
+            profile.led.setSetting(setting)
+        }
+        profile.updatedAt = .now
+        replace(profile)
+    }
+
+    func updateReaction(_ reaction: LEDReactionConfiguration) {
+        var profile = selectedProfile
+        profile.setReaction(reaction)
+        replace(profile)
+    }
+
+    func updateIdleLighting(_ idleLighting: IdleLEDConfiguration) {
+        var profile = selectedProfile
+        profile.idleLighting = idleLighting
         profile.updatedAt = .now
         replace(profile)
     }
