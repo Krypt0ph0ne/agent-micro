@@ -24,17 +24,17 @@ struct CodexAgentAssignmentView: View {
     private static let activeRecencyWindow: TimeInterval = 24 * 60 * 60
     private static let activeCap = 40
 
-    private var assignment: AgentKeyAssignment? { appState.codexThreads.assignment(for: control) }
-    private var status: CodexAgentStatus { appState.codexThreads.status(for: control) }
+    private var assignment: AgentKeyAssignment? { appState.activeAgentThreads.assignment(for: control) }
+    private var status: CodexAgentStatus { appState.activeAgentThreads.status(for: control) }
 
     /// Distinct working directories present across all loaded threads,
     /// offered as the "project" filter menu.
     private var projects: [String] {
-        Array(Set(appState.codexThreads.threads.map(\.cwd).filter { !$0.isEmpty })).sorted()
+        Array(Set(appState.activeAgentThreads.threads.map(\.cwd).filter { !$0.isEmpty })).sorted()
     }
 
     private var modeFilteredThreads: [CodexThreadDescriptor] {
-        let threads = appState.codexThreads.threads
+        let threads = appState.activeAgentThreads.threads
         switch filterMode {
         case .all:
             return threads
@@ -76,9 +76,9 @@ struct CodexAgentAssignmentView: View {
                 }
                 Spacer()
                 if let assignment {
-                    Button("Öffnen") { _ = appState.codexThreads.openAssignedThread(for: control) }
+                    Button("Öffnen") { _ = appState.activeAgentThreads.openAssignedThread(for: control) }
                         .controlSize(.small)
-                    Button(role: .destructive) { appState.removeCodexAssignment(for: control) } label: {
+                    Button(role: .destructive) { appState.removeAgentAssignment(for: control) } label: {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.borderless)
@@ -98,15 +98,15 @@ struct CodexAgentAssignmentView: View {
                     if filteredThreads.isEmpty {
                         ContentUnavailableView {
                             Label(
-                                appState.codexThreads.threads.isEmpty ? "Keine Threads geladen" : "Keine Treffer",
+                                appState.activeAgentThreads.threads.isEmpty ? "Keine Threads geladen" : "Keine Treffer",
                                 systemImage: "rectangle.stack.badge.person.crop"
                             )
                         } description: {
-                            if case .active = filterMode, !appState.codexThreads.threads.isEmpty {
+                            if case .active = filterMode, !appState.activeAgentThreads.threads.isEmpty {
                                 Text("Keine kürzlich aktiven Threads.")
                             }
                         } actions: {
-                            if case .active = filterMode, !appState.codexThreads.threads.isEmpty {
+                            if case .active = filterMode, !appState.activeAgentThreads.threads.isEmpty {
                                 Button("Alle anzeigen") { filterMode = .all }
                             }
                         }
@@ -121,18 +121,18 @@ struct CodexAgentAssignmentView: View {
             .frame(height: 166)
 
             HStack(spacing: 6) {
-                Label(appState.codexThreads.connectionState.title, systemImage: connectionIcon)
-                    .foregroundStyle(appState.codexThreads.connectionState.isConnected ? Color.green : Color.secondary)
+                Label(appState.activeAgentThreads.connectionState.title, systemImage: connectionIcon)
+                    .foregroundStyle(appState.activeAgentThreads.connectionState.isConnected ? Color.green : Color.secondary)
                 Spacer()
-                Button { appState.codexThreads.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                Button { appState.activeAgentThreads.refresh() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless)
                     .help("Threads neu laden")
-                Button("Neu verbinden") { appState.codexThreads.reconnect() }
+                Button("Neu verbinden") { appState.activeAgentThreads.reconnect() }
                     .buttonStyle(.borderless)
             }
             .font(.caption)
 
-            if let error = appState.codexThreads.connectionError {
+            if let error = appState.activeAgentThreads.connectionError {
                 Text(error)
                     .font(.caption2)
                     .foregroundStyle(.red)
@@ -183,7 +183,7 @@ struct CodexAgentAssignmentView: View {
 
     private func threadRow(_ thread: CodexThreadDescriptor) -> some View {
         Button {
-            appState.assignCodexThread(thread, to: control)
+            appState.assignAgentThread(thread, to: control)
             threadSearch = ""
         } label: {
             HStack(spacing: 8) {
@@ -239,6 +239,6 @@ struct CodexAgentAssignmentView: View {
     }
 
     private var connectionIcon: String {
-        appState.codexThreads.connectionState.isConnected ? "bolt.horizontal.circle.fill" : "bolt.slash.circle"
+        appState.activeAgentThreads.connectionState.isConnected ? "bolt.horizontal.circle.fill" : "bolt.slash.circle"
     }
 }

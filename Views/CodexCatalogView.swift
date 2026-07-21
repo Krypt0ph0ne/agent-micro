@@ -8,7 +8,7 @@ struct CodexCatalogView: View {
     @State private var category = "Alle"
 
     private var filteredActions: [CodexActionDefinition] {
-        appState.catalog.actions.filter { action in
+        appState.activeCatalog.actions.filter { action in
             let categoryMatches = category == "Alle" || action.category == category
             let queryMatches = query.isEmpty || [action.title, action.description, action.shortcut ?? ""].joined(separator: " ").localizedCaseInsensitiveContains(query)
             return categoryMatches && queryMatches
@@ -20,7 +20,7 @@ struct CodexCatalogView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Actions")
                     .font(.largeTitle.weight(.semibold))
-                Text("Versionierbarer Katalog: \(appState.catalog.document.verifiedAgainst). Direkte Shortcuts werden auf das aktuell gewählte Pad-Control geschrieben; Deep Links bleiben transparent als lokale Listener-Aktionen gekennzeichnet.")
+                Text("Versionierbarer Katalog: \(appState.activeCatalog.document.verifiedAgainst). Direkte Shortcuts werden auf das aktuell gewählte Pad-Control geschrieben; Deep Links bleiben transparent als lokale Listener-Aktionen gekennzeichnet.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -30,7 +30,7 @@ struct CodexCatalogView: View {
                         .frame(maxWidth: 330)
                     Picker("Kategorie", selection: $category) {
                         Text("Alle").tag("Alle")
-                        ForEach(appState.catalog.categories, id: \.self) { Text($0).tag($0) }
+                        ForEach(appState.activeCatalog.categories, id: \.self) { Text($0).tag($0) }
                     }
                     .frame(width: 190)
                     Spacer()
@@ -59,12 +59,10 @@ struct CodexCatalogView: View {
 
     private func assign(_ action: CodexActionDefinition) {
         switch action.execution {
-        case .keyboardShortcut:
-            appState.profiles.assignCodexAction(id: action.id, to: selectedControl)
-        case .configurableShortcut:
-            appState.profiles.assignCodexAction(id: action.id, to: selectedControl)
+        case .keyboardShortcut, .configurableShortcut:
+            appState.profiles.assignAction(id: action.id, from: appState.activeCatalog, to: selectedControl)
         case .deepLink:
-            guard let deferred = appState.catalog.deferredAction(id: action.id) else { return }
+            guard let deferred = appState.activeCatalog.deferredAction(id: action.id) else { return }
             appState.profiles.updateAction(deferred, for: selectedControl)
         case .unavailable:
             break

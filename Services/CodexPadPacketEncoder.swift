@@ -93,7 +93,7 @@ struct CodexPadPacketEncoder {
         var packet = base(command: 0x20)
         packet[4] = control.firmwareControlIndex
         guard action.kind != .disabled else { return finalized(packet) }
-        if action.kind == .hostEvent || action.kind == .codexAgent {
+        if action.kind == .hostEvent || action.kind.isAgent {
             packet[5] = 3
             return finalized(packet)
         }

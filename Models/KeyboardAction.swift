@@ -10,6 +10,8 @@ enum ActionSlot {
 enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case codexAgent
     case codexShortcut
+    case claudeAgent
+    case claudeShortcut
     case keyboardShortcut
     case singleKey
     case keySequence
@@ -18,6 +20,7 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case mouse
     case disabled
     case codexDeepLink
+    case claudeDeepLink
     case localCommand
     case hostEvent
 
@@ -27,6 +30,8 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .codexAgent: "Codex Agent"
         case .codexShortcut: "Codex Shortcut"
+        case .claudeAgent: "Claude Agent"
+        case .claudeShortcut: "Claude Shortcut"
         case .keyboardShortcut: "macOS Shortcut"
         case .singleKey: "Einzelne Taste"
         case .keySequence: "Tastensequenz / Makro"
@@ -35,6 +40,7 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         case .mouse: "Mausaktion"
         case .disabled: "Deaktiviert"
         case .codexDeepLink: "Codex Deep Link"
+        case .claudeDeepLink: "Claude Deep Link"
         case .localCommand: "Lokaler Befehl"
         case .hostEvent: "Nur an CodexPad melden"
         }
@@ -42,12 +48,21 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
 
     var isDirectlySupportedByDevice: Bool {
         switch self {
-        case .codexAgent, .codexShortcut, .keyboardShortcut, .singleKey, .keySequence, .textSubmission, .media, .mouse, .disabled, .hostEvent:
+        case .codexAgent, .codexShortcut, .claudeAgent, .claudeShortcut, .keyboardShortcut, .singleKey, .keySequence, .textSubmission, .media, .mouse, .disabled, .hostEvent:
             true
-        case .codexDeepLink, .localCommand:
+        case .codexDeepLink, .claudeDeepLink, .localCommand:
             false
         }
     }
+
+    /// True for a shortcut resolved against either app's action catalog, so UI
+    /// that only cares "is this a catalog-backed shortcut" doesn't need to
+    /// enumerate both apps.
+    var isAppShortcut: Bool { self == .codexShortcut || self == .claudeShortcut }
+
+    var isAppDeepLink: Bool { self == .codexDeepLink || self == .claudeDeepLink }
+
+    var isAgent: Bool { self == .codexAgent || self == .claudeAgent }
 }
 
 struct KeyboardAction: Codable, Hashable, Identifiable {
@@ -100,7 +115,7 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
         )
     }
 
-    var isEnabled: Bool { kind == .hostEvent || kind == .codexAgent || (kind != .disabled && !(deviceMacro?.isEmpty ?? true)) }
+    var isEnabled: Bool { kind == .hostEvent || kind.isAgent || (kind != .disabled && !(deviceMacro?.isEmpty ?? true)) }
 
     var displayShortcut: String {
         guard let deviceMacro, !deviceMacro.isEmpty else { return "—" }

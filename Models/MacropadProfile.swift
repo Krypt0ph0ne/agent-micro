@@ -450,6 +450,9 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
     var idleLighting: IdleLEDConfiguration
     var ledReactions: [LEDReactionConfiguration]
     var isBuiltIn: Bool
+    /// Which external app this profile's shortcuts/encoder/agent bridge
+    /// target. `nil` for app-agnostic profiles (macOS, Safe, Factory-like C).
+    var automationApp: AutomationApp?
 
     init(
         formatVersion: Int = currentFormatVersion,
@@ -461,7 +464,8 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
         led: LEDConfiguration = .confirmedSteady,
         idleLighting: IdleLEDConfiguration = .default,
         ledReactions: [LEDReactionConfiguration] = LEDReactionConfiguration.defaults,
-        isBuiltIn: Bool = false
+        isBuiltIn: Bool = false,
+        automationApp: AutomationApp? = nil
     ) {
         self.formatVersion = formatVersion
         self.id = id
@@ -473,6 +477,7 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
         self.idleLighting = idleLighting
         self.ledReactions = ledReactions
         self.isBuiltIn = isBuiltIn
+        self.automationApp = automationApp
     }
 
     func action(for control: HardwareControl) -> KeyboardAction {
@@ -543,7 +548,7 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, id, name, createdAt, updatedAt, controls, led, idleLighting, ledReactions, isBuiltIn
+        case formatVersion, id, name, createdAt, updatedAt, controls, led, idleLighting, ledReactions, isBuiltIn, automationApp
     }
 
     init(from decoder: Decoder) throws {
@@ -559,6 +564,7 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
         ledReactions = try container.decodeIfPresent([LEDReactionConfiguration].self, forKey: .ledReactions)
             ?? LEDReactionConfiguration.defaults
         isBuiltIn = try container.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
+        automationApp = try container.decodeIfPresent(AutomationApp.self, forKey: .automationApp)
     }
 }
 
@@ -574,7 +580,28 @@ enum ProfileFactory {
             controls: assignments.map { control, actionID in
                 ControlBinding(control: control, action: catalog.keyboardAction(id: actionID) ?? .disabled)
             },
-            isBuiltIn: true
+            isBuiltIn: true,
+            automationApp: .codex
+        )
+        profile.setAction(reasoningTriggerAction(for: .encoderLeft), for: .encoderLeft)
+        profile.setAction(reasoningTriggerAction(for: .encoderPress), for: .encoderPress)
+        profile.setAction(reasoningTriggerAction(for: .encoderRight), for: .encoderRight)
+        return profile
+    }
+
+    static func claude(catalog: CodexActionCatalog) -> MacropadProfile {
+        let assignments: [(HardwareControl, String)] = [
+            (.key1, "previous-session"), (.key2, "toggle-diff"), (.key3, "next-session"),
+            (.key4, "dictation"), (.key5, "new-session"), (.key6, "toggle-terminal"),
+            (.encoderLeft, "open-effort-menu"), (.encoderPress, "open-model-menu"), (.encoderRight, "open-effort-menu")
+        ]
+        var profile = MacropadProfile(
+            name: "Claude",
+            controls: assignments.map { control, actionID in
+                ControlBinding(control: control, action: catalog.keyboardAction(id: actionID) ?? .disabled)
+            },
+            isBuiltIn: true,
+            automationApp: .claude
         )
         profile.setAction(reasoningTriggerAction(for: .encoderLeft), for: .encoderLeft)
         profile.setAction(reasoningTriggerAction(for: .encoderPress), for: .encoderPress)

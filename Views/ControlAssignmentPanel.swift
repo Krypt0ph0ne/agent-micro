@@ -14,11 +14,11 @@ struct ControlAssignmentPanel: View {
 
     private var definition: CodexActionDefinition? {
         guard let id = action.codexActionID else { return nil }
-        return appState.catalog.action(id: id)
+        return appState.activeCatalog.action(id: id)
     }
 
     private var assignableActions: [CodexActionDefinition] {
-        appState.catalog.actions.filter(\.isDirectlyAssignable)
+        appState.activeCatalog.actions.filter(\.isDirectlyAssignable)
     }
 
     private var filteredActions: [CodexActionDefinition] {
@@ -105,7 +105,7 @@ struct ControlAssignmentPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
-            } else if action.kind != .codexAgent {
+            } else if !action.kind.isAgent {
                 Text(action.kind == .disabled ? "Dieses Bedienelement löst nichts aus." : "Eigene oder profilinterne Belegung.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -113,7 +113,7 @@ struct ControlAssignmentPanel: View {
 
             configurableReminder
 
-            if action.kind == .codexAgent && !isShowingActionPicker {
+            if action.kind.isAgent && !isShowingActionPicker {
                 CodexAgentAssignmentView(appState: appState, control: control)
             }
 
@@ -130,7 +130,7 @@ struct ControlAssignmentPanel: View {
         .sheet(isPresented: $isPresentingTextSubmission) {
             TextSubmissionSheet { text in
                 guard let textAction = KeyboardAction.textSubmission(text) else { return }
-                appState.codexThreads.removeAssignment(for: control)
+                appState.removeActiveAgentAssignment(for: control)
                 appState.profiles.updateAction(textAction, for: control)
             }
         }
@@ -183,8 +183,8 @@ struct ControlAssignmentPanel: View {
 
     private func actionRow(_ item: CodexActionDefinition) -> some View {
         Button {
-            appState.codexThreads.removeAssignment(for: control)
-            appState.profiles.assignCodexAction(id: item.id, to: control)
+            appState.removeActiveAgentAssignment(for: control)
+            appState.profiles.assignAction(id: item.id, from: appState.activeCatalog, to: control)
             isShowingActionPicker = false
             actionSearch = ""
         } label: {
@@ -220,16 +220,13 @@ struct ControlAssignmentPanel: View {
     }
 
     private func chooseAgent() {
-        appState.codexThreads.removeAssignment(for: control)
-        appState.profiles.updateAction(
-            KeyboardAction(kind: .codexAgent, label: "Codex Agent auswählen", icon: "terminal.fill"),
-            for: control
-        )
+        appState.removeActiveAgentAssignment(for: control)
+        appState.assignAgentPlaceholder(to: control)
         isShowingActionPicker = false
     }
 
     private func chooseDisabled() {
-        appState.codexThreads.removeAssignment(for: control)
+        appState.removeActiveAgentAssignment(for: control)
         appState.profiles.updateAction(.disabled, for: control)
         isShowingActionPicker = false
     }
