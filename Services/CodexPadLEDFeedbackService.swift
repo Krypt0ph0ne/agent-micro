@@ -71,6 +71,10 @@ final class CodexPadLEDFeedbackService {
         setDictationHeld(isHeld, source: .keyboardReport)
     }
 
+    func showThreadAssignedReaction(profile: MacropadProfile) {
+        showMomentaryReaction(.threadAssigned, profile: profile)
+    }
+
     func showIdleLighting() {
         animationTask?.cancel()
         animationTask = nil

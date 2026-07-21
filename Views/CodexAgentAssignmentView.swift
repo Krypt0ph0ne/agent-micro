@@ -1,15 +1,56 @@
 import SwiftUI
 
+private enum ThreadFilterMode: Hashable {
+    case active, all
+    case project(String)
+
+    var title: String {
+        switch self {
+        case .active: "Aktiv"
+        case .all: "Alle"
+        case .project(let cwd): (cwd as NSString).lastPathComponent
+        }
+    }
+}
+
 struct CodexAgentAssignmentView: View {
     let appState: AppState
     let control: HardwareControl
     @State private var threadSearch = ""
+    @State private var filterMode: ThreadFilterMode = .active
+
+    /// How recent a thread must be to count as "active" alongside anything
+    /// currently running or waiting on input.
+    private static let activeRecencyWindow: TimeInterval = 24 * 60 * 60
+    private static let activeCap = 40
 
     private var assignment: AgentKeyAssignment? { appState.codexThreads.assignment(for: control) }
     private var status: CodexAgentStatus { appState.codexThreads.status(for: control) }
+
+    /// Distinct working directories present across all loaded threads,
+    /// offered as the "project" filter menu.
+    private var projects: [String] {
+        Array(Set(appState.codexThreads.threads.map(\.cwd).filter { !$0.isEmpty })).sorted()
+    }
+
+    private var modeFilteredThreads: [CodexThreadDescriptor] {
+        let threads = appState.codexThreads.threads
+        switch filterMode {
+        case .all:
+            return threads
+        case .project(let cwd):
+            return threads.filter { $0.cwd == cwd }
+        case .active:
+            let cutoff = Date().addingTimeInterval(-Self.activeRecencyWindow)
+            let running = threads.filter { $0.status == .running || $0.status == .needsAttention }
+            let recent = threads.filter { $0.status != .running && $0.status != .needsAttention && $0.updatedAt >= cutoff }
+            return Array((running + recent).prefix(Self.activeCap))
+        }
+    }
+
     private var filteredThreads: [CodexThreadDescriptor] {
         let query = threadSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        let threads = appState.codexThreads.threads
+        let threads = modeFilteredThreads
         guard !query.isEmpty else { return Array(threads.prefix(75)) }
         return Array(threads.filter {
             $0.displayTitle.localizedCaseInsensitiveContains(query)
@@ -46,16 +87,29 @@ struct CodexAgentAssignmentView: View {
                 }
             }
 
-            TextField("Threads & Subagenten durchsuchen", text: $threadSearch)
-                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 6) {
+                TextField("Threads & Subagenten durchsuchen", text: $threadSearch)
+                    .textFieldStyle(.roundedBorder)
+                filterMenu
+            }
 
             ScrollView {
                 LazyVStack(spacing: 4) {
                     if filteredThreads.isEmpty {
-                        ContentUnavailableView(
-                            appState.codexThreads.threads.isEmpty ? "Keine Threads geladen" : "Keine Treffer",
-                            systemImage: "rectangle.stack.badge.person.crop"
-                        )
+                        ContentUnavailableView {
+                            Label(
+                                appState.codexThreads.threads.isEmpty ? "Keine Threads geladen" : "Keine Treffer",
+                                systemImage: "rectangle.stack.badge.person.crop"
+                            )
+                        } description: {
+                            if case .active = filterMode, !appState.codexThreads.threads.isEmpty {
+                                Text("Keine kürzlich aktiven Threads.")
+                            }
+                        } actions: {
+                            if case .active = filterMode, !appState.codexThreads.threads.isEmpty {
+                                Button("Alle anzeigen") { filterMode = .all }
+                            }
+                        }
                         .frame(height: 96)
                     } else {
                         ForEach(filteredThreads) { thread in
@@ -88,6 +142,43 @@ struct CodexAgentAssignmentView: View {
         }
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Button {
+                filterMode = .active
+            } label: {
+                if case .active = filterMode { Label("Aktiv", systemImage: "checkmark") } else { Text("Aktiv") }
+            }
+            Button {
+                filterMode = .all
+            } label: {
+                if case .all = filterMode { Label("Alle", systemImage: "checkmark") } else { Text("Alle") }
+            }
+            if !projects.isEmpty {
+                Divider()
+                Menu("Projekt") {
+                    ForEach(projects, id: \.self) { cwd in
+                        Button {
+                            filterMode = .project(cwd)
+                        } label: {
+                            if filterMode == .project(cwd) {
+                                Label((cwd as NSString).lastPathComponent, systemImage: "checkmark")
+                            } else {
+                                Text((cwd as NSString).lastPathComponent)
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label(filterMode.title, systemImage: "line.3.horizontal.decrease.circle")
+                .labelStyle(.titleAndIcon)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Nach aktiven Threads oder Projekt filtern")
     }
 
     private func threadRow(_ thread: CodexThreadDescriptor) -> some View {

@@ -434,6 +434,79 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(unassigned.effect, .off)
     }
 
+    func testLEDReactionEventMapsAgentIdleSeparatelyFromUnassigned() {
+        XCTAssertEqual(LEDReactionEvent.event(for: .idle), .agentIdle)
+        XCTAssertNil(LEDReactionEvent.event(for: .unassigned))
+        XCTAssertEqual(LEDReactionEvent.event(for: .running), .agentRunning)
+        XCTAssertEqual(LEDReactionEvent.event(for: .needsAttention), .agentNeedsAttention)
+        XCTAssertEqual(LEDReactionEvent.event(for: .completed), .agentCompleted)
+        XCTAssertEqual(LEDReactionEvent.event(for: .failed), .agentFailed)
+        XCTAssertEqual(LEDReactionEvent.event(for: .interrupted), .agentInterrupted)
+    }
+
+    func testAgentIdleReactionDefaultsToARangePulseAndCanFallBackToBaseLighting() {
+        let profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        let idleReaction = profile.reaction(for: .agentIdle)
+        XCTAssertEqual(idleReaction.effect, .pulse)
+        XCTAssertTrue(idleReaction.disablesIdle)
+        XCTAssertGreaterThan(idleReaction.minBrightness, 0, "Should breathe within a range rather than the firmware's native 0-sweep")
+
+        var mutable = profile
+        mutable.setReaction(LEDReactionConfiguration(
+            event: .agentIdle, effect: .off, red: 0, green: 0, blue: 0, brightness: 0, periodMilliseconds: 1_000
+        ))
+        XCTAssertEqual(mutable.reaction(for: .agentIdle).effect, .off, "Switching to .off is how a profile opts back into plain idle lighting")
+    }
+
+    @MainActor
+    func testQuickAssignFiresOnlyAfterHoldThresholdOnAnUnassignedButton() {
+        var assignedControls: Set<HardwareControl> = []
+        let candidate = CodexThreadDescriptor(
+            id: "thread-recent", title: "Recent", preview: "", cwd: "/tmp",
+            parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
+        )
+        var assignedThread: CodexThreadDescriptor?
+        var assignedControl: HardwareControl?
+        var simulatedNow = Date()
+
+        let service = CodexQuickAssignService(
+            isEnabled: { true },
+            isAlreadyAssigned: { assignedControls.contains($0) },
+            isTapHoldConfigured: { _ in false },
+            candidateThread: { candidate },
+            now: { simulatedNow }
+        )
+        service.onAssign = { thread, control in
+            assignedThread = thread
+            assignedControl = control
+            assignedControls.insert(control)
+        }
+
+        func event(_ phase: CodexPadPhysicalEvent.Phase) -> CodexPadPhysicalEvent {
+            CodexPadPhysicalEvent(sequence: 0, control: HardwareControl.key1.reportedControlIndex, phase: phase)
+        }
+
+        // A quick tap (well under the threshold) must not assign anything.
+        service.handle(event(.pressed))
+        simulatedNow.addTimeInterval(0.2)
+        service.handle(event(.released))
+        XCTAssertNil(assignedThread)
+
+        // Holding past the threshold assigns the most recent unassigned thread.
+        service.handle(event(.pressed))
+        simulatedNow.addTimeInterval(Double(CodexQuickAssignService.holdThresholdMilliseconds) / 1_000 + 0.1)
+        service.handle(event(.released))
+        XCTAssertEqual(assignedThread?.id, "thread-recent")
+        XCTAssertEqual(assignedControl, .key1)
+
+        // Once assigned, holding the same button again must not reassign it.
+        assignedThread = nil
+        service.handle(event(.pressed))
+        simulatedNow.addTimeInterval(Double(CodexQuickAssignService.holdThresholdMilliseconds) / 1_000 + 0.1)
+        service.handle(event(.released))
+        XCTAssertNil(assignedThread)
+    }
+
     @MainActor
     func testAllSixCodexAgentAssignmentsPersistLocally() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-agent-store-\(UUID().uuidString)")

@@ -70,7 +70,9 @@ enum LEDEffect: UInt8, Codable, CaseIterable, Identifiable, Hashable {
 enum LEDReactionEvent: String, Codable, CaseIterable, Identifiable, Hashable {
     case dictation
     case messageSent
+    case threadAssigned
     case agentRunning
+    case agentIdle
     case agentCompleted
     case agentNeedsAttention
     case agentFailed
@@ -82,7 +84,9 @@ enum LEDReactionEvent: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .dictation: "Diktat halten"
         case .messageSent: "Nachricht gesendet"
+        case .threadAssigned: "Thread zugewiesen"
         case .agentRunning: "Agent läuft"
+        case .agentIdle: "Agent frei"
         case .agentCompleted: "Agent fertig"
         case .agentNeedsAttention: "Eingabe erforderlich"
         case .agentFailed: "Agent fehlgeschlagen"
@@ -94,7 +98,9 @@ enum LEDReactionEvent: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .dictation: "Solange die Taste gedrückt ist"
         case .messageSent: "Kurzes Feedback beim Senden"
+        case .threadAssigned: "Kurzes Feedback nach Halten-zum-Zuweisen"
         case .agentRunning: "Während ein Thread arbeitet"
+        case .agentIdle: "Zugewiesener Thread ohne offene Aufgabe"
         case .agentCompleted: "Wenn ein Thread abschließt"
         case .agentNeedsAttention: "Agent wartet auf dich"
         case .agentFailed: "Thread mit Fehler beendet"
@@ -104,9 +110,9 @@ enum LEDReactionEvent: String, Codable, CaseIterable, Identifiable, Hashable {
 
     var isAgentEvent: Bool {
         switch self {
-        case .agentRunning, .agentCompleted, .agentNeedsAttention, .agentFailed, .agentInterrupted:
+        case .agentRunning, .agentIdle, .agentCompleted, .agentNeedsAttention, .agentFailed, .agentInterrupted:
             true
-        case .dictation, .messageSent:
+        case .dictation, .messageSent, .threadAssigned:
             false
         }
     }
@@ -114,11 +120,12 @@ enum LEDReactionEvent: String, Codable, CaseIterable, Identifiable, Hashable {
     static func event(for status: CodexAgentStatus) -> LEDReactionEvent? {
         switch status {
         case .running: .agentRunning
+        case .idle: .agentIdle
         case .needsAttention: .agentNeedsAttention
         case .completed: .agentCompleted
         case .failed: .agentFailed
         case .interrupted: .agentInterrupted
-        case .unassigned, .idle: nil
+        case .unassigned: nil
         }
     }
 }
@@ -183,7 +190,9 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
     static let defaults: [LEDReactionConfiguration] = [
         .init(event: .dictation, effect: .steady, red: 255, green: 255, blue: 255, brightness: 255, periodMilliseconds: 900, disablesIdle: false),
         .init(event: .messageSent, effect: .flash, red: 255, green: 69, blue: 58, brightness: 255, periodMilliseconds: 450, disablesIdle: false),
+        .init(event: .threadAssigned, effect: .flash, red: 48, green: 209, blue: 88, brightness: 255, periodMilliseconds: 450, disablesIdle: false),
         .init(event: .agentRunning, effect: .pulse, red: 10, green: 132, blue: 255, brightness: 255, periodMilliseconds: 1_000, disablesIdle: true),
+        .init(event: .agentIdle, effect: .pulse, red: 48, green: 209, blue: 88, brightness: 180, periodMilliseconds: 2_200, disablesIdle: true, minBrightness: 40),
         .init(event: .agentCompleted, effect: .flash, red: 48, green: 209, blue: 88, brightness: 230, periodMilliseconds: 650, disablesIdle: true),
         .init(event: .agentNeedsAttention, effect: .blink, red: 255, green: 159, blue: 10, brightness: 255, periodMilliseconds: 800, disablesIdle: true),
         .init(event: .agentFailed, effect: .blink, red: 255, green: 69, blue: 58, brightness: 255, periodMilliseconds: 500, disablesIdle: true),
