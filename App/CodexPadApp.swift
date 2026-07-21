@@ -8,8 +8,10 @@ struct CodexPadApp: App {
 
     var body: some Scene {
         WindowGroup("CodexPad", id: "main") {
-            MainWindowView(appState: appState)
-                .frame(width: 440)
+            WindowBridgeView(id: "main") {
+                MainWindowView(appState: appState)
+                    .frame(width: 440)
+            }
         }
         .windowResizability(.contentSize)
         .commands {
@@ -25,9 +27,21 @@ struct CodexPadApp: App {
     }
 }
 
+@MainActor
 final class CodexPadAppDelegate: NSObject, NSApplicationDelegate {
+    private let statusItemController = CodexPadStatusItemController()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        statusItemController.install()
+    }
+
+    /// Closing the main window used to quit CodexPad, which meant the Codex
+    /// bridge connection, HID listening and hold-to-assign all stopped with
+    /// it. The menu bar item is now the way back in, so the app stays alive
+    /// in the background instead.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 }
