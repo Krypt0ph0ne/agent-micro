@@ -44,6 +44,7 @@ final class AppState {
         let codexThreads = self.codexThreads
         self.quickAssign = CodexQuickAssignService(
             isEnabled: { UserDefaults.standard.bool(forKey: CodexQuickAssignService.enabledDefaultsKey) },
+            isDesignatedAgentControl: { profiles.selectedProfile.action(for: $0).kind == .codexAgent },
             isTapHoldConfigured: { profiles.selectedProfile.binding(for: $0).isTapHold },
             clipboardThread: {
                 guard let clipboardText = NSPasteboard.general.string(forType: .string),

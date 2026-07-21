@@ -6,10 +6,14 @@ import Observation
 /// the button is currently unassigned or already holds a different thread:
 /// `CodexThreadStore.assign` replaces any existing assignment for that
 /// control outright, so a hold on an assigned key is a one-step reassignment
-/// rather than an unassign-then-assign dance. Deliberately separate from
-/// `CodexPadTapHoldService`: that service only fires for controls with an
-/// explicitly configured hold action, whereas Belegung has none, and the two
-/// must never fight over the same press.
+/// rather than an unassign-then-assign dance.
+///
+/// Fires right when the hold threshold elapses — not on release — so the
+/// confirmation LED lands while the button is still held down and the
+/// release simply ends the press. Only ever acts on a control the user has
+/// already turned into a Codex agent key at least once (`kind == .codexAgent`);
+/// every other control's hold is left alone, e.g. a dictation key's own
+/// hold-to-record must never be reinterpreted as a reassignment.
 @MainActor
 @Observable
 final class CodexQuickAssignService {
@@ -22,9 +26,14 @@ final class CodexQuickAssignService {
     /// trigger is more disruptive here.
     static let holdThresholdMilliseconds = 900
 
-    private var pressStartTimes: [HardwareControl: Date] = [:]
+    private struct PendingPress {
+        let cancel: () -> Void
+    }
+
+    private var pendingPresses: [HardwareControl: PendingPress] = [:]
 
     private let isEnabled: () -> Bool
+    private let isDesignatedAgentControl: (HardwareControl) -> Bool
     private let isTapHoldConfigured: (HardwareControl) -> Bool
     /// A thread explicitly identified via a copied session ID, if the
     /// clipboard currently holds one — takes priority over `fallbackThread`
@@ -33,7 +42,10 @@ final class CodexQuickAssignService {
     /// The best guess absent a clipboard hint: the most recently active
     /// thread not already bound to another key.
     private let fallbackThread: () -> CodexThreadDescriptor?
-    private let now: () -> Date
+    /// Schedules `fire` after `interval` seconds and returns a closure that
+    /// cancels it. Real presses use a `Timer`; tests inject a fake so they
+    /// can trigger or cancel the fire deterministically without sleeping.
+    private let schedule: @MainActor (TimeInterval, @escaping () -> Void) -> () -> Void
 
     /// Set after `init` (rather than passed in) so callers don't need `self`
     /// to be fully initialized yet — matches `CodexPadEventService.onPhysicalEvent`
@@ -42,16 +54,25 @@ final class CodexQuickAssignService {
 
     init(
         isEnabled: @escaping () -> Bool,
+        isDesignatedAgentControl: @escaping (HardwareControl) -> Bool,
         isTapHoldConfigured: @escaping (HardwareControl) -> Bool,
         clipboardThread: @escaping () -> CodexThreadDescriptor? = { nil },
         fallbackThread: @escaping () -> CodexThreadDescriptor?,
-        now: @escaping () -> Date = Date.init
+        schedule: @escaping @MainActor (TimeInterval, @escaping () -> Void) -> () -> Void = CodexQuickAssignService.timerSchedule
     ) {
         self.isEnabled = isEnabled
+        self.isDesignatedAgentControl = isDesignatedAgentControl
         self.isTapHoldConfigured = isTapHoldConfigured
         self.clipboardThread = clipboardThread
         self.fallbackThread = fallbackThread
-        self.now = now
+        self.schedule = schedule
+    }
+
+    private static func timerSchedule(interval: TimeInterval, fire: @escaping () -> Void) -> () -> Void {
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { _ in
+            fire()
+        }
+        return { timer.invalidate() }
     }
 
     /// Codex lets you copy a session's UUID (e.g. from its own UI); this
@@ -71,17 +92,30 @@ final class CodexQuickAssignService {
 
         switch event.phase {
         case .pressed:
-            guard isEnabled(), !isTapHoldConfigured(control) else { return }
-            pressStartTimes[control] = now()
+            cancelPending(control)
+            guard isEnabled(), isDesignatedAgentControl(control), !isTapHoldConfigured(control) else { return }
+            let cancel = schedule(Double(Self.holdThresholdMilliseconds) / 1_000) { [weak self] in
+                self?.fireAssign(control)
+            }
+            pendingPresses[control] = PendingPress(cancel: cancel)
         case .released:
-            guard let start = pressStartTimes.removeValue(forKey: control) else { return }
-            guard isEnabled(), !isTapHoldConfigured(control) else { return }
-            let heldMilliseconds = now().timeIntervalSince(start) * 1_000
-            guard heldMilliseconds >= Double(Self.holdThresholdMilliseconds) else { return }
-            guard let thread = clipboardThread() ?? fallbackThread() else { return }
-            onAssign?(thread, control)
+            // Releasing before the threshold elapses is the "just a tap"
+            // case: cancel the pending fire so nothing gets assigned. If the
+            // threshold already fired, `fireAssign` has already cleared the
+            // entry, so this is a no-op — the release doesn't undo it.
+            cancelPending(control)
         case .triggered:
             break
         }
+    }
+
+    private func cancelPending(_ control: HardwareControl) {
+        pendingPresses.removeValue(forKey: control)?.cancel()
+    }
+
+    private func fireAssign(_ control: HardwareControl) {
+        pendingPresses.removeValue(forKey: control)
+        guard let thread = clipboardThread() ?? fallbackThread() else { return }
+        onAssign?(thread, control)
     }
 }

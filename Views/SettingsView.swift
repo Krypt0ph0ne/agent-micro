@@ -63,9 +63,9 @@ struct SettingsView: View {
                         set: { appState.loginItem.setEnabled($0) }
                     )
                 )
-                Toggle("Halten weist automatisch zu (oder ordnet neu)", isOn: $quickAssignEnabled)
+                Toggle("Halten ordnet bereits belegte Agent-Tasten neu zu", isOn: $quickAssignEnabled)
 
-                Text("Nutzt eine in Codex kopierte Sitzungs-ID aus der Zwischenablage, sonst den zuletzt aktiven Thread. CodexPad bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit das auch ohne offenes Fenster funktioniert.")
+                Text("Gilt nur für Tasten, die schon einmal einem Codex-Thread zugeordnet wurden. Nutzt eine in Codex kopierte Sitzungs-ID aus der Zwischenablage, sonst den zuletzt aktiven Thread. CodexPad bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit das auch ohne offenes Fenster funktioniert.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
