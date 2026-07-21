@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct CodexPadApp: App {
     @NSApplicationDelegateAdaptor(CodexPadAppDelegate.self) private var appDelegate
-    @State private var appState = AppState()
+    private var appState: AppState { appDelegate.appState }
 
     var body: some Scene {
         WindowGroup("CodexPad", id: "main") {
@@ -29,12 +29,13 @@ struct CodexPadApp: App {
 
 @MainActor
 final class CodexPadAppDelegate: NSObject, NSApplicationDelegate {
+    let appState = AppState()
     private let statusItemController = CodexPadStatusItemController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        statusItemController.install()
+        statusItemController.install(appState: appState)
     }
 
     /// Closing the main window used to quit CodexPad, which meant the Codex
