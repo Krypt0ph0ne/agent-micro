@@ -4,6 +4,7 @@ struct SettingsView: View {
     let appState: AppState
     @State private var resultText: String?
     @State private var showDiagnostics = false
+    @AppStorage(CodexQuickAssignService.enabledDefaultsKey) private var quickAssignEnabled = true
 
     var body: some View {
         @Bindable var profiles = appState.profiles
@@ -52,6 +53,21 @@ struct SettingsView: View {
                     Spacer()
                     Button("Diagnose öffnen") { showDiagnostics = true }
                 }
+            }
+
+            Section("Hintergrund") {
+                Toggle(
+                    "Bei Anmeldung starten",
+                    isOn: Binding(
+                        get: { appState.loginItem.isEnabled },
+                        set: { appState.loginItem.setEnabled($0) }
+                    )
+                )
+                Toggle("Halten ordnet bereits belegte Agent-Tasten neu zu", isOn: $quickAssignEnabled)
+
+                Text("Gilt nur für Tasten, die schon einmal einem Codex-Thread zugeordnet wurden. Nutzt eine in Codex kopierte Sitzungs-ID aus der Zwischenablage, sonst den zuletzt aktiven Thread. CodexPad bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit das auch ohne offenes Fenster funktioniert.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Sicherheit") {
