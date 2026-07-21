@@ -63,9 +63,9 @@ struct SettingsView: View {
                         set: { appState.loginItem.setEnabled($0) }
                     )
                 )
-                Toggle("Halten weist automatisch den letzten aktiven Thread zu", isOn: $quickAssignEnabled)
+                Toggle("Halten weist automatisch zu (oder ordnet neu)", isOn: $quickAssignEnabled)
 
-                Text("CodexPad bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit Belegungen auch ohne offenes Fenster funktionieren.")
+                Text("Nutzt eine in Codex kopierte Sitzungs-ID aus der Zwischenablage, sonst den zuletzt aktiven Thread. CodexPad bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit das auch ohne offenes Fenster funktioniert.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
