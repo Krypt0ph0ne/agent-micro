@@ -46,7 +46,7 @@ final class NDJSONLineReader: @unchecked Sendable {
 /// server-initiated approval and user-input requests are intentionally never answered.
 @MainActor
 @Observable
-final class CodexEventBridge: @unchecked Sendable {
+final class CodexEventBridge: @unchecked Sendable, AgentBridge {
     private enum RequestPurpose {
         case initialize
         case listThreads

@@ -65,8 +65,12 @@ private enum CodexDismissibleArea: String {
 /// the Model Picker's "Modell" submenu with arrow keys instead.
 @MainActor
 @Observable
-final class CodexReasoningAutomationService {
+final class CodexReasoningAutomationService: EncoderAutomationService {
     private let logger = Logger(subsystem: "com.codexpad.app", category: "encoder")
+    /// True while the Codex profile is selected; both this service and
+    /// `ClaudeReasoningAutomationService` listen to the same private F22–F24
+    /// HID triggers, so only the one matching the active profile may act.
+    private let isActiveProfile: () -> Bool
     private static let preferenceKey = "CodexPad.encoderAutomationEnabled"
     private static let migrationKey = "CodexPad.simpleEncoderV5"
     /// The dial must be held this long before a press starts driving the
@@ -95,7 +99,8 @@ final class CodexReasoningAutomationService {
         }
     }
 
-    init() {
+    init(isActiveProfile: @escaping () -> Bool) {
+        self.isActiveProfile = isActiveProfile
         self.hasAccessibilityPermission = AXIsProcessTrusted()
         self.hasInputMonitoringPermission = CGPreflightListenEventAccess()
         if !UserDefaults.standard.bool(forKey: Self.migrationKey) {
@@ -161,7 +166,7 @@ final class CodexReasoningAutomationService {
     /// read from the same protocol for consistency, since it is unaffected by
     /// whichever macro happens to be flashed for the dial.
     func handlePhysicalEvent(_ event: CodexPadPhysicalEvent) {
-        guard let control = HardwareControl(reportedControlIndex: event.control) else { return }
+        guard isActiveProfile(), let control = HardwareControl(reportedControlIndex: event.control) else { return }
         switch control {
         case .encoderPress:
             switch event.phase {
@@ -183,6 +188,17 @@ final class CodexReasoningAutomationService {
     private func beginEncoderHold() {
         encoderHoldTimer?.invalidate()
         encoderHoldFired = false
+        // A fresh press physically implies the previous one was released —
+        // the hardware cannot report two `.pressed` events in a row without a
+        // `.released` in between. If `isModelListOpen` is still true here, a
+        // `.released` firmware report was dropped last time, leaving this
+        // flag stuck and silently blocking `fireEncoderHold()` from ever
+        // reopening the picker again. Force it closed so every new press
+        // starts from a clean slate.
+        if isModelListOpen {
+            isModelListOpen = false
+            Self.postKey(UInt16(kVK_Escape))
+        }
         encoderHoldTimer = Timer.scheduledTimer(withTimeInterval: Self.modelListHoldThresholdSeconds, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.fireEncoderHold() }
         }
@@ -376,7 +392,7 @@ final class CodexReasoningAutomationService {
     }
 
     private func handleHIDValue(usagePage: Int, usage: Int, value: Int) {
-        guard usagePage == 0x07, [0x68, 0x69, 0x6A, 0x71, 0x73].contains(usage) else { return }
+        guard isActiveProfile(), usagePage == 0x07, [0x68, 0x69, 0x6A, 0x71, 0x73].contains(usage) else { return }
 
         // The encoder press (F23) needs both edges to measure hold duration,
         // which this generic keyboard-HID path cannot reliably deliver on the

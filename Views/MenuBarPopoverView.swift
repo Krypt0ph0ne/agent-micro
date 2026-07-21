@@ -57,6 +57,11 @@ struct MenuBarPopoverView: View {
                 connected: appState.codexThreads.connectionState.isConnected,
                 help: appState.codexThreads.connectionError ?? appState.codexThreads.connectionState.title
             )
+            ConnectionStatus(
+                title: "Claude",
+                connected: appState.claudeThreads.connectionState.isConnected,
+                help: appState.claudeThreads.connectionError ?? appState.claudeThreads.connectionState.title
+            )
             ConnectionStatus(title: "Pad", connected: appState.device.state.isSupportedConnection)
         }
         .padding(.horizontal, 12)
@@ -154,11 +159,11 @@ private struct MenuBarSelectedControlPanel: View {
     private var binding: ControlBinding { profile.binding(for: control) }
     private var action: KeyboardAction { binding.action }
 
-    private var assignment: AgentKeyAssignment? { appState.codexThreads.assignment(for: control) }
-    private var status: CodexAgentStatus { appState.codexThreads.status(for: control) }
+    private var assignment: AgentKeyAssignment? { appState.activeAgentThreads.assignment(for: control) }
+    private var status: CodexAgentStatus { appState.activeAgentThreads.status(for: control) }
 
     private var activeThreads: [CodexThreadDescriptor] {
-        let threads = appState.codexThreads.threads
+        let threads = appState.activeAgentThreads.threads
         let cutoff = Date().addingTimeInterval(-Self.activeRecencyWindow)
         let running = threads.filter { $0.status == .running || $0.status == .needsAttention }
         let recent = threads.filter { $0.status != .running && $0.status != .needsAttention && $0.updatedAt >= cutoff }
@@ -168,7 +173,7 @@ private struct MenuBarSelectedControlPanel: View {
     /// Already-working shortcuts only: a fixed keybinding Codex listens for
     /// out of the box, no extra "bind this trigger in Codex" step required.
     private var readyActions: [CodexActionDefinition] {
-        appState.catalog.actions.filter { $0.execution == .keyboardShortcut && $0.deviceMacro != nil }
+        appState.activeCatalog.actions.filter { $0.execution == .keyboardShortcut && $0.deviceMacro != nil }
     }
 
     private func filteredActions(forHold: Bool) -> [CodexActionDefinition] {
@@ -205,16 +210,16 @@ private struct MenuBarSelectedControlPanel: View {
             Image(systemName: control.icon)
                 .foregroundStyle(.tint)
                 .frame(width: 20)
-            if action.kind == .codexAgent {
+            if action.kind.isAgent {
                 Circle()
                     .fill(statusColor)
                     .frame(width: 8, height: 8)
             }
-            Text(action.kind == .codexAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.label)
+            Text(action.kind.isAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.label)
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
             Spacer(minLength: 4)
-            if action.kind == .codexAgent {
+            if action.kind.isAgent {
                 reassignMenu
             }
             Button(editing == .tap ? "Fertig" : "Ändern") {
@@ -292,13 +297,13 @@ private struct MenuBarSelectedControlPanel: View {
         return Button {
             if forHold {
                 appState.profiles.setHoldAction(
-                    appState.catalog.keyboardAction(id: item.id),
+                    appState.activeCatalog.keyboardAction(id: item.id),
                     thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds,
                     for: control
                 )
             } else {
-                appState.codexThreads.removeAssignment(for: control)
-                appState.profiles.assignCodexAction(id: item.id, to: control)
+                appState.removeActiveAgentAssignment(for: control)
+                appState.profiles.assignAction(id: item.id, from: appState.activeCatalog, to: control)
             }
             collapse()
         } label: {
@@ -327,15 +332,12 @@ private struct MenuBarSelectedControlPanel: View {
     }
 
     private func chooseAgent() {
-        appState.codexThreads.removeAssignment(for: control)
-        appState.profiles.updateAction(
-            KeyboardAction(kind: .codexAgent, label: "Codex Agent auswählen", icon: "terminal.fill"),
-            for: control
-        )
+        appState.removeActiveAgentAssignment(for: control)
+        appState.assignAgentPlaceholder(to: control)
     }
 
     private func chooseDisabled() {
-        appState.codexThreads.removeAssignment(for: control)
+        appState.removeActiveAgentAssignment(for: control)
         appState.profiles.updateAction(.disabled, for: control)
     }
 
@@ -343,7 +345,7 @@ private struct MenuBarSelectedControlPanel: View {
         Menu {
             if assignment != nil {
                 Button(role: .destructive) {
-                    appState.removeCodexAssignment(for: control)
+                    appState.removeAgentAssignment(for: control)
                 } label: {
                     Label("Zuordnung entfernen", systemImage: "trash")
                 }
@@ -354,7 +356,7 @@ private struct MenuBarSelectedControlPanel: View {
             } else {
                 ForEach(activeThreads) { thread in
                     Button {
-                        appState.assignCodexThread(thread, to: control)
+                        appState.assignAgentThread(thread, to: control)
                     } label: {
                         if assignment?.threadID == thread.id {
                             Label(thread.displayTitle, systemImage: "checkmark")
@@ -373,7 +375,8 @@ private struct MenuBarSelectedControlPanel: View {
     }
 
     private var encoderRow: some View {
-        @Bindable var automation = appState.reasoningAutomation
+        let automation = appState.activeReasoningAutomation
+        let isEnabled = Binding(get: { automation.isEnabled }, set: { automation.isEnabled = $0 })
         return HStack(spacing: 8) {
             Image(systemName: "dial.medium")
                 .foregroundStyle(.tint)
@@ -382,7 +385,7 @@ private struct MenuBarSelectedControlPanel: View {
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
             Spacer(minLength: 4)
-            Toggle("", isOn: $automation.isEnabled)
+            Toggle("", isOn: isEnabled)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)

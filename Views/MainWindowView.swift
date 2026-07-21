@@ -49,12 +49,14 @@ struct MainWindowView: View {
         }
         .task {
             appState.refreshDevice()
-            appState.startCodexBridge()
+            appState.startAgentBridges()
             appState.reasoningAutomation.refreshPermissions()
+            appState.claudeReasoningAutomation.refreshPermissions()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 appState.reasoningAutomation.refreshPermissions()
+            appState.claudeReasoningAutomation.refreshPermissions()
             }
         }
     }
@@ -78,6 +80,11 @@ struct MainWindowView: View {
                 title: "Codex",
                 connected: appState.codexThreads.connectionState.isConnected,
                 help: appState.codexThreads.connectionError ?? appState.codexThreads.connectionState.title
+            )
+            ConnectionStatus(
+                title: "Claude",
+                connected: appState.claudeThreads.connectionState.isConnected,
+                help: appState.claudeThreads.connectionError ?? appState.claudeThreads.connectionState.title
             )
             ConnectionStatus(title: "Pad", connected: appState.device.state.isSupportedConnection)
         }

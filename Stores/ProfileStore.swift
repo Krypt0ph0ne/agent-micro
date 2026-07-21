@@ -34,8 +34,10 @@ enum ProfileFileCodec {
 final class ProfileStore {
     private static let selectedProfileDefaultsKey = "CodexPad.selectedProfileID"
     private static let keyboardLayoutDefaultsKey = "CodexPad.keyboardLayout"
+    private static let dictationSourceDefaultsKey = "CodexPad.dictationSource"
     private let persistenceURL: URL
     private let catalog: CodexActionCatalog
+    private let claudeCatalog: CodexActionCatalog
 
     private(set) var profiles: [MacropadProfile]
     var keyboardLayout: KeyboardLayout {
@@ -43,6 +45,15 @@ final class ProfileStore {
             guard keyboardLayout != oldValue else { return }
             UserDefaults.standard.set(keyboardLayout.rawValue, forKey: Self.keyboardLayoutDefaultsKey)
             hasUnsyncedChanges = true
+        }
+    }
+    /// Which app's dictation chord the "Diktieren"-tagged control resolves
+    /// to across every built-in profile, independent of which one is active.
+    var dictationSource: DictationSource {
+        didSet {
+            guard dictationSource != oldValue else { return }
+            UserDefaults.standard.set(dictationSource.rawValue, forKey: Self.dictationSourceDefaultsKey)
+            applyDictationSource(dictationSource)
         }
     }
     var selectedProfileID: UUID {
@@ -54,21 +65,38 @@ final class ProfileStore {
     private(set) var hasUnsyncedChanges = false
     private(set) var lastPersistenceError: String?
 
-    init(catalog: CodexActionCatalog, persistenceURL: URL? = nil) {
+    init(catalog: CodexActionCatalog, claudeCatalog: CodexActionCatalog, persistenceURL: URL? = nil) {
         self.catalog = catalog
+        self.claudeCatalog = claudeCatalog
         self.keyboardLayout = UserDefaults.standard.string(forKey: Self.keyboardLayoutDefaultsKey)
             .flatMap(KeyboardLayout.init(rawValue:)) ?? .automatic
+        let dictationSource = UserDefaults.standard.string(forKey: Self.dictationSourceDefaultsKey)
+            .flatMap(DictationSource.init(rawValue:)) ?? .codex
+        self.dictationSource = dictationSource
         let baseDirectory = persistenceURL?.deletingLastPathComponent() ?? Self.applicationSupportDirectory()
         self.persistenceURL = persistenceURL ?? baseDirectory.appendingPathComponent("Profiles.json")
-        let loaded = Self.load(from: self.persistenceURL)
-        let seed = loaded ?? [ProfileFactory.codex(catalog: catalog), ProfileFactory.macOS(), ProfileFactory.safe()]
-        let builtIns = Self.ensureBuiltInProfiles(in: seed, catalog: catalog)
-        let encoderMigrated = Self.migrateLegacyCodexReasoningBindings(in: builtIns)
-        let initial = Self.migrateLegacyDictationBindings(in: encoderMigrated, catalog: catalog)
+        let loadedRaw = Self.load(from: self.persistenceURL)
+        let loaded = loadedRaw.map { Self.pruneToKeepOnly(Self.keptBuiltInNames, in: $0) }
+        let didPrune = loadedRaw.map { $0 != loaded } ?? false
+        if didPrune, let loadedRaw {
+            Self.backupBeforePruning(loadedRaw, persistenceURL: self.persistenceURL)
+        }
+        let seed = loaded ?? [ProfileFactory.codex(catalog: catalog), ProfileFactory.claude(catalog: claudeCatalog)]
+        let builtIns = Self.ensureBuiltInProfiles(in: seed, catalog: catalog, claudeCatalog: claudeCatalog)
+        let taggedApps = Self.migrateAutomationAppTags(in: builtIns)
+        let refreshedClaude = Self.migrateStaleClaudeCatalogBindings(in: taggedApps, claudeCatalog: claudeCatalog)
+        let encoderMigrated = Self.migrateLegacyCodexReasoningBindings(in: refreshedClaude)
+        let dictationTagged = Self.migrateLegacyDictationBindings(in: encoderMigrated, catalog: catalog)
+        let initial = Self.applyDictationSource(dictationSource, to: dictationTagged, catalog: catalog, claudeCatalog: claudeCatalog)
         self.profiles = initial
         let codexID = initial.first(where: { $0.name == "Codex" })?.id
-        self.selectedProfileID = codexID ?? initial.first?.id ?? UUID()
-        if loaded == nil || initial != seed { persist() }
+        let persistedID = UserDefaults.standard.string(forKey: Self.selectedProfileDefaultsKey).flatMap(UUID.init(uuidString:))
+        if let persistedID, initial.contains(where: { $0.id == persistedID }) {
+            self.selectedProfileID = persistedID
+        } else {
+            self.selectedProfileID = codexID ?? initial.first?.id ?? UUID()
+        }
+        if loadedRaw == nil || initial != seed || didPrune { persist() }
     }
 
     var selectedProfile: MacropadProfile {
@@ -122,18 +150,24 @@ final class ProfileStore {
         replace(profile)
     }
 
-    func assignCodexAction(id: String, to control: HardwareControl) {
+    /// Resolves `id` against an arbitrary catalog (Codex's or Claude's) and
+    /// writes the resulting shortcut to `control`.
+    func assignAction(id: String, from catalog: CodexActionCatalog, to control: HardwareControl) {
         guard let action = catalog.keyboardAction(id: id) else { return }
         updateAction(action, for: control)
     }
 
-    /// Binds a configurable Codex action that has no default keybinding by
-    /// giving it a dedicated trigger chord the pad sends straight to Codex.
+    func assignCodexAction(id: String, to control: HardwareControl) {
+        assignAction(id: id, from: catalog, to: control)
+    }
+
+    /// Binds a configurable action that has no default keybinding by giving
+    /// it a dedicated trigger chord the pad sends straight to the target app.
     /// `slot` chooses whether the trigger becomes the tap or the hold action,
     /// so the wizard offers the same configurable actions in both places.
-    func assignConfigurableCodexAction(_ definition: CodexActionDefinition, trigger: String, to control: HardwareControl, slot: ActionSlot = .tap) {
+    func assignConfigurableCodexAction(_ definition: CodexActionDefinition, trigger: String, to control: HardwareControl, slot: ActionSlot = .tap, kind: ActionKind = .codexShortcut) {
         let action = KeyboardAction(
-            kind: .codexShortcut,
+            kind: kind,
             label: definition.title,
             icon: definition.icon,
             deviceMacro: trigger,
@@ -269,9 +303,79 @@ final class ProfileStore {
         return try? ProfileFileCodec.decode(data)
     }
 
-    private static func ensureBuiltInProfiles(in profiles: [MacropadProfile], catalog: CodexActionCatalog) -> [MacropadProfile] {
-        guard !profiles.contains(where: { $0.name == "Codex · Reasoning triggers" }) else { return profiles }
-        return profiles + [ProfileFactory.codexReasoningTriggers(catalog: catalog)]
+    /// Felix wants the profile list trimmed to exactly these two — everything
+    /// else (macOS, Sichere F13–21, Codex · Reasoning triggers, any custom
+    /// profile) is dropped on load.
+    static let keptBuiltInNames: Set<String> = ["Codex", "Claude"]
+
+    /// Drops every profile whose name isn't in `names`. Backed up by the
+    /// caller first since this is a real, one-way deletion of whatever the
+    /// user had — including custom profiles. Falls back to the untouched
+    /// list if filtering would leave nothing at all.
+    private static func pruneToKeepOnly(_ names: Set<String>, in profiles: [MacropadProfile]) -> [MacropadProfile] {
+        let kept = profiles.filter { names.contains($0.name) }
+        return kept.isEmpty ? profiles : kept
+    }
+
+    /// Writes the untouched, pre-prune profile list to a timestamped sibling
+    /// file so trimming down to Codex/Claude is recoverable if unwanted.
+    private static func backupBeforePruning(_ profiles: [MacropadProfile], persistenceURL: URL) {
+        guard let data = try? ProfileFileCodec.encode(profiles) else { return }
+        let backupURL = persistenceURL.deletingLastPathComponent()
+            .appendingPathComponent("Profiles.before-prune-\(Int(Date().timeIntervalSince1970)).json")
+        try? data.write(to: backupURL, options: .atomic)
+    }
+
+    private static func ensureBuiltInProfiles(in profiles: [MacropadProfile], catalog: CodexActionCatalog, claudeCatalog: CodexActionCatalog) -> [MacropadProfile] {
+        var result = profiles
+        if !result.contains(where: { $0.name == "Codex" }) {
+            result.append(ProfileFactory.codex(catalog: catalog))
+        }
+        if !result.contains(where: { $0.name == "Claude" }) {
+            result.append(ProfileFactory.claude(catalog: claudeCatalog))
+        }
+        return result
+    }
+
+    /// The Claude action catalog's ids changed after the initial ship (the
+    /// CLI-keybinding guesses like "interrupt"/"toggle-todos"/"model-picker-
+    /// toggle" were replaced by Felix's confirmed Claude Desktop shortcuts).
+    /// Detects a built-in "Claude" profile still carrying any of those
+    /// retired ids and resets its bindings to the current defaults; a
+    /// profile the user has since rebound entirely away from every retired id
+    /// is left alone.
+    private static func migrateStaleClaudeCatalogBindings(in profiles: [MacropadProfile], claudeCatalog: CodexActionCatalog) -> [MacropadProfile] {
+        let retiredIDs: Set<String> = [
+            "interrupt", "toggle-todos", "toggle-transcript", "kill-agents", "background-task",
+            "history-search", "open-artifact", "model-picker-toggle", "thinking-toggle",
+            "fast-mode-toggle", "effort-decrease", "effort-increase", "model-cycle"
+        ]
+        return profiles.map { profile in
+            guard profile.isBuiltIn, profile.name == "Claude" else { return profile }
+            let hasRetiredBinding = profile.controls.contains { binding in
+                guard let id = binding.action.codexActionID else { return false }
+                return retiredIDs.contains(id)
+            }
+            guard hasRetiredBinding else { return profile }
+            var refreshed = ProfileFactory.claude(catalog: claudeCatalog)
+            refreshed.id = profile.id
+            refreshed.createdAt = profile.createdAt
+            return refreshed
+        }
+    }
+
+    /// Backfills `automationApp` for built-in Codex profiles saved before that
+    /// field existed. Never touches a renamed or user-duplicated profile.
+    private static func migrateAutomationAppTags(in profiles: [MacropadProfile]) -> [MacropadProfile] {
+        profiles.map { profile in
+            guard profile.isBuiltIn, profile.automationApp == nil,
+                  profile.name == "Codex" || profile.name == "Codex · Reasoning triggers" || profile.name == "Claude" else {
+                return profile
+            }
+            var migrated = profile
+            migrated.automationApp = profile.name == "Claude" ? .claude : .codex
+            return migrated
+        }
     }
 
     /// Only migrates the exact historic built-in defaults, never a custom edit.
@@ -337,5 +441,42 @@ final class ProfileStore {
             }
             return changed ? migrated : profile
         }
+    }
+
+    /// Rewrites the dictation binding on every built-in profile to whichever
+    /// app's chord `source` resolves to. Detects the binding purely by its
+    /// catalog id, so a control the user repurposed for something else is
+    /// never touched — same rule as `migrateLegacyDictationBindings`.
+    private static func applyDictationSource(
+        _ source: DictationSource,
+        to profiles: [MacropadProfile],
+        catalog: CodexActionCatalog,
+        claudeCatalog: CodexActionCatalog
+    ) -> [MacropadProfile] {
+        profiles.map { profile in
+            guard profile.isBuiltIn else { return profile }
+            var migrated = profile
+            var changed = false
+            for control in HardwareControl.buttons {
+                guard migrated.action(for: control).codexActionID == "dictation" else { continue }
+                let resolvedCatalog: CodexActionCatalog
+                switch source {
+                case .codex: resolvedCatalog = catalog
+                case .claude: resolvedCatalog = claudeCatalog
+                case .followProfile: resolvedCatalog = profile.automationApp == .claude ? claudeCatalog : catalog
+                }
+                guard let resolved = resolvedCatalog.keyboardAction(id: "dictation") else { continue }
+                migrated.setAction(resolved, for: control)
+                changed = true
+            }
+            return changed ? migrated : profile
+        }
+    }
+
+    /// Applies `applyDictationSource` to the live profile list and persists
+    /// the result, for when the user changes the setting after launch.
+    private func applyDictationSource(_ source: DictationSource) {
+        profiles = Self.applyDictationSource(source, to: profiles, catalog: catalog, claudeCatalog: claudeCatalog)
+        commitChange()
     }
 }
