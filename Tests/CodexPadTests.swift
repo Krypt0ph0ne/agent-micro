@@ -60,6 +60,8 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(claudeCatalog.keyboardAction(id: "next-session")?.deviceMacro, "cmd-shift-rightbracket")
         XCTAssertEqual(claudeCatalog.keyboardAction(id: "previous-session")?.deviceMacro, "cmd-shift-leftbracket")
         XCTAssertEqual(claudeCatalog.keyboardAction(id: "stop-response")?.deviceMacro, "esc")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "send-message")?.deviceMacro, "enter")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "send-message")?.kind, .claudeShortcut)
         XCTAssertEqual(claudeCatalog.keyboardAction(id: "toggle-diff")?.deviceMacro, "cmd-shift-d")
         XCTAssertEqual(claudeCatalog.keyboardAction(id: "toggle-preview")?.deviceMacro, "cmd-shift-p")
         XCTAssertEqual(claudeCatalog.keyboardAction(id: "toggle-terminal")?.deviceMacro, "ctrl-grave")

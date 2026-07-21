@@ -101,11 +101,15 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             case .triggered: break
             }
         case .encoderLeft:
-            guard event.phase == .triggered else { return }
-            driveModelMenuHighlight(.previous)
-        case .encoderRight:
+            // Swapped vs. the naive left=previous/right=next assumption:
+            // confirmed by hand that this hardware reports the physical
+            // rotation directions inverted relative to the encoderLeft/Right
+            // labels, so left is wired to `.next` here to match reality.
             guard event.phase == .triggered else { return }
             driveModelMenuHighlight(.next)
+        case .encoderRight:
+            guard event.phase == .triggered else { return }
+            driveModelMenuHighlight(.previous)
         case .key1, .key2, .key3, .key4, .key5, .key6:
             break
         }
@@ -178,10 +182,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func driveModelMenuHighlight(_ step: CodexModelListStep) {
         guard encoderHoldFired, isModelMenuOpen else { return }
         guard readyClaudeApplication() != nil else { return }
-        // Inverted vs. the naive Down=next/Up=previous assumption: confirmed
-        // by hand that Claude's own menus are ordered such that stepping
-        // "forward" through them is an Up-arrow motion, not Down.
-        let keyCode = step == .next ? UInt16(kVK_UpArrow) : UInt16(kVK_DownArrow)
+        let keyCode = step == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
         status = step == .next ? "Nächstes Modell" : "Vorheriges Modell"
         enqueue { Self.postKey(keyCode) }
     }
@@ -243,10 +244,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func stepEffort(_ direction: CodexModelListStep) {
         guard let claude = readyClaudeApplication() else { return }
         claude.activate(options: [.activateAllWindows])
-        // Inverted vs. the naive Down=increase/Up=decrease assumption:
-        // confirmed by hand that turning the dial "up" in effort actually
-        // needs an Up-arrow press in Claude's Effort menu, not Down.
-        let keyCode = direction == .next ? UInt16(kVK_UpArrow) : UInt16(kVK_DownArrow)
+        let keyCode = direction == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
         status = direction == .next ? "Aufwand erhöhen" : "Aufwand verringern"
         if !isEffortMenuOpen {
             isEffortMenuOpen = true
@@ -373,13 +371,15 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         guard inputDebouncer.accepts(usage: usage, at: now) else { return }
         recordInput(usage: usage, value: value)
 
+        // Swapped vs. the naive F22=previous/F24=next assumption, matching
+        // the same left/right inversion applied in `handlePhysicalEvent`.
         switch usage {
         case 0x71: // F22: rotate left — suppressed mid-hold, see driveModelMenuHighlight.
             guard !encoderHoldFired else { break }
-            stepEffort(.previous)
+            stepEffort(.next)
         case 0x73: // F24: rotate right, same guard as above.
             guard !encoderHoldFired else { break }
-            stepEffort(.next)
+            stepEffort(.previous)
         default:
             break
         }
