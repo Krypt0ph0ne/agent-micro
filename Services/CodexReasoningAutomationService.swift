@@ -188,6 +188,17 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     private func beginEncoderHold() {
         encoderHoldTimer?.invalidate()
         encoderHoldFired = false
+        // A fresh press physically implies the previous one was released —
+        // the hardware cannot report two `.pressed` events in a row without a
+        // `.released` in between. If `isModelListOpen` is still true here, a
+        // `.released` firmware report was dropped last time, leaving this
+        // flag stuck and silently blocking `fireEncoderHold()` from ever
+        // reopening the picker again. Force it closed so every new press
+        // starts from a clean slate.
+        if isModelListOpen {
+            isModelListOpen = false
+            Self.postKey(UInt16(kVK_Escape))
+        }
         encoderHoldTimer = Timer.scheduledTimer(withTimeInterval: Self.modelListHoldThresholdSeconds, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.fireEncoderHold() }
         }

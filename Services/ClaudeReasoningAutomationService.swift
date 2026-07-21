@@ -115,6 +115,18 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         autoCloseTimer?.invalidate()
         encoderHoldTimer?.invalidate()
         encoderHoldFired = false
+        // A fresh press physically implies the previous one was released —
+        // the hardware cannot report two `.pressed` events in a row without a
+        // `.released` in between. If `isModelMenuOpen` is still true here, a
+        // `.released` firmware report was dropped last time, leaving this
+        // flag stuck and silently blocking `fireEncoderHold()` from ever
+        // reopening the menu again (the actual bug behind "works once, then
+        // never again until the automation toggle is switched off and on").
+        // Force it closed so every new press starts from a clean slate.
+        if isModelMenuOpen {
+            isModelMenuOpen = false
+            enqueue { Self.postKey(UInt16(kVK_Escape)) }
+        }
         encoderHoldTimer = Timer.scheduledTimer(withTimeInterval: Self.modelListHoldThresholdSeconds, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.fireEncoderHold() }
         }
@@ -166,7 +178,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func driveModelMenuHighlight(_ step: CodexModelListStep) {
         guard encoderHoldFired, isModelMenuOpen else { return }
         guard readyClaudeApplication() != nil else { return }
-        let keyCode = step == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
+        // Inverted vs. the naive Down=next/Up=previous assumption: confirmed
+        // by hand that Claude's own menus are ordered such that stepping
+        // "forward" through them is an Up-arrow motion, not Down.
+        let keyCode = step == .next ? UInt16(kVK_UpArrow) : UInt16(kVK_DownArrow)
         status = step == .next ? "Nächstes Modell" : "Vorheriges Modell"
         enqueue { Self.postKey(keyCode) }
     }
@@ -228,7 +243,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func stepEffort(_ direction: CodexModelListStep) {
         guard let claude = readyClaudeApplication() else { return }
         claude.activate(options: [.activateAllWindows])
-        let keyCode = direction == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
+        // Inverted vs. the naive Down=increase/Up=decrease assumption:
+        // confirmed by hand that turning the dial "up" in effort actually
+        // needs an Up-arrow press in Claude's Effort menu, not Down.
+        let keyCode = direction == .next ? UInt16(kVK_UpArrow) : UInt16(kVK_DownArrow)
         status = direction == .next ? "Aufwand erhöhen" : "Aufwand verringern"
         if !isEffortMenuOpen {
             isEffortMenuOpen = true
