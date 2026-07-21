@@ -458,8 +458,29 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(mutable.reaction(for: .agentIdle).effect, .off, "Switching to .off is how a profile opts back into plain idle lighting")
     }
 
+    /// A fake `schedule` that hands the caller manual control over when (or
+    /// whether) a pending hold fires, instead of waiting on a real `Timer`.
     @MainActor
-    func testQuickAssignFiresOnlyAfterHoldThresholdAndReassignsAnAlreadyBoundButton() {
+    private final class FakeScheduler {
+        private(set) var pendingFires: [() -> Void] = []
+        private(set) var cancelCount = 0
+
+        func schedule(interval: TimeInterval, fire: @escaping () -> Void) -> () -> Void {
+            pendingFires.append(fire)
+            let index = pendingFires.count - 1
+            return { [weak self] in
+                self?.cancelCount += 1
+                self?.pendingFires[index] = {}
+            }
+        }
+
+        func fireLatest() {
+            pendingFires.last?()
+        }
+    }
+
+    @MainActor
+    func testQuickAssignFiresAtTheThresholdAndReassignsAnAlreadyBoundAgentButton() {
         func thread(_ id: String) -> CodexThreadDescriptor {
             CodexThreadDescriptor(
                 id: id, title: id, preview: "", cwd: "/tmp",
@@ -469,13 +490,14 @@ final class CodexPadTests: XCTestCase {
         var nextCandidate = thread("thread-recent")
         var assignedThread: CodexThreadDescriptor?
         var assignedControl: HardwareControl?
-        var simulatedNow = Date()
+        let scheduler = FakeScheduler()
 
         let service = CodexQuickAssignService(
             isEnabled: { true },
+            isDesignatedAgentControl: { _ in true },
             isTapHoldConfigured: { _ in false },
             fallbackThread: { nextCandidate },
-            now: { simulatedNow }
+            schedule: scheduler.schedule
         )
         service.onAssign = { thread, control in
             assignedThread = thread
@@ -486,27 +508,55 @@ final class CodexPadTests: XCTestCase {
             CodexPadPhysicalEvent(sequence: 0, control: HardwareControl.key1.reportedControlIndex, phase: phase)
         }
 
-        // A quick tap (well under the threshold) must not assign anything.
+        // Releasing before the threshold fires must cancel the pending hold.
         service.handle(event(.pressed))
-        simulatedNow.addTimeInterval(0.2)
         service.handle(event(.released))
+        XCTAssertEqual(scheduler.cancelCount, 1)
         XCTAssertNil(assignedThread)
 
-        // Holding past the threshold on an unassigned button assigns it.
+        // The assignment happens as soon as the threshold elapses — while
+        // still held — not only once the button is released.
         service.handle(event(.pressed))
-        simulatedNow.addTimeInterval(Double(CodexQuickAssignService.holdThresholdMilliseconds) / 1_000 + 0.1)
-        service.handle(event(.released))
+        scheduler.fireLatest()
         XCTAssertEqual(assignedThread?.id, "thread-recent")
         XCTAssertEqual(assignedControl, .key1)
+
+        // The later release must not undo or repeat the assignment.
+        assignedThread = nil
+        service.handle(event(.released))
+        XCTAssertNil(assignedThread)
 
         // Holding the same, already-assigned button again reassigns it in one
         // step rather than requiring an unassign first.
         nextCandidate = thread("thread-newer")
         service.handle(event(.pressed))
-        simulatedNow.addTimeInterval(Double(CodexQuickAssignService.holdThresholdMilliseconds) / 1_000 + 0.1)
-        service.handle(event(.released))
+        scheduler.fireLatest()
         XCTAssertEqual(assignedThread?.id, "thread-newer")
         XCTAssertEqual(assignedControl, .key1)
+    }
+
+    @MainActor
+    func testQuickAssignIgnoresControlsNeverDesignatedAsAgentKeys() {
+        var assignedThread: CodexThreadDescriptor?
+        let scheduler = FakeScheduler()
+        let service = CodexQuickAssignService(
+            isEnabled: { true },
+            isDesignatedAgentControl: { _ in false },
+            isTapHoldConfigured: { _ in false },
+            fallbackThread: { CodexThreadDescriptor(
+                id: "thread-recent", title: "Recent", preview: "", cwd: "/tmp",
+                parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
+            ) },
+            schedule: scheduler.schedule
+        )
+        service.onAssign = { thread, _ in assignedThread = thread }
+
+        // A dictation key (never assigned to a Codex thread) must not be
+        // hijacked by its own long hold-to-record gesture.
+        service.handle(CodexPadPhysicalEvent(sequence: 0, control: HardwareControl.key4.reportedControlIndex, phase: .pressed))
+        XCTAssertTrue(scheduler.pendingFires.isEmpty, "Must never schedule a fire for a non-agent control")
+        service.handle(CodexPadPhysicalEvent(sequence: 0, control: HardwareControl.key4.reportedControlIndex, phase: .released))
+        XCTAssertNil(assignedThread)
     }
 
     func testExtractThreadIDFindsAUUIDInArbitraryClipboardText() {
@@ -533,21 +583,21 @@ final class CodexPadTests: XCTestCase {
             parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
         )
         var assignedThread: CodexThreadDescriptor?
-        var simulatedNow = Date()
+        let scheduler = FakeScheduler()
 
         let service = CodexQuickAssignService(
             isEnabled: { true },
+            isDesignatedAgentControl: { _ in true },
             isTapHoldConfigured: { _ in false },
             clipboardThread: { clipboardPick },
             fallbackThread: { recencyPick },
-            now: { simulatedNow }
+            schedule: scheduler.schedule
         )
         service.onAssign = { thread, _ in assignedThread = thread }
 
         let control = HardwareControl.key2
         service.handle(CodexPadPhysicalEvent(sequence: 0, control: control.reportedControlIndex, phase: .pressed))
-        simulatedNow.addTimeInterval(Double(CodexQuickAssignService.holdThresholdMilliseconds) / 1_000 + 0.1)
-        service.handle(CodexPadPhysicalEvent(sequence: 0, control: control.reportedControlIndex, phase: .released))
+        scheduler.fireLatest()
 
         XCTAssertEqual(assignedThread?.id, "thread-from-clipboard")
     }
