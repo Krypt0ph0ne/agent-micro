@@ -22,7 +22,8 @@ struct DiagnosticsView: View {
                 CodexPadProtocolCard(appState: appState)
                 InputMonitorCard(appState: appState)
                 LEDDiagnosticsCard(appState: appState)
-                CodexBridgeDiagnosticsCard(appState: appState)
+                AgentBridgeDiagnosticsCard(title: "Codex Event Bridge", icon: "bolt.horizontal.circle", store: appState.codexThreads)
+                AgentBridgeDiagnosticsCard(title: "Claude Agent Bridge", icon: "bolt.horizontal.circle", store: appState.claudeThreads)
 
                 DisclosureGroup("Prozess- und App-Logs", isExpanded: $logsExpanded) {
                     LazyVStack(alignment: .leading, spacing: 8) {
@@ -68,25 +69,27 @@ struct DiagnosticsView: View {
     }
 }
 
-private struct CodexBridgeDiagnosticsCard: View {
-    let appState: AppState
+private struct AgentBridgeDiagnosticsCard: View {
+    let title: String
+    let icon: String
+    let store: CodexThreadStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Codex Event Bridge", systemImage: "bolt.horizontal.circle")
+                Label(title, systemImage: icon)
                     .font(.headline)
                 Spacer()
-                Button("Threads laden") { appState.codexThreads.refresh() }
-                Button("Neu verbinden") { appState.codexThreads.reconnect() }
+                Button("Threads laden") { store.refresh() }
+                Button("Neu verbinden") { store.reconnect() }
             }
-            LabeledContent("App Server", value: appState.codexThreads.connectionState.title)
-            LabeledContent("Geladene Threads", value: "\(appState.codexThreads.threads.count)")
-            LabeledContent("Tastenzuordnungen", value: "\(appState.codexThreads.assignments.count) / 6")
+            LabeledContent("Verbindung", value: store.connectionState.title)
+            LabeledContent("Geladene Threads", value: "\(store.threads.count)")
+            LabeledContent("Tastenzuordnungen", value: "\(store.assignments.count) / 6")
             Text("Approval- und Nutzereingabe-Requests werden ausschließlich als Status beobachtet und nie beantwortet.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if let error = appState.codexThreads.connectionError {
+            if let error = store.connectionError {
                 Text(error).font(.caption.monospaced()).foregroundStyle(.red).textSelection(.enabled)
             }
         }
