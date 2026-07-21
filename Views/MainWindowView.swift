@@ -184,7 +184,7 @@ private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
-private struct ConnectionStatus: View {
+struct ConnectionStatus: View {
     let title: String
     let connected: Bool
     var help: String? = nil
