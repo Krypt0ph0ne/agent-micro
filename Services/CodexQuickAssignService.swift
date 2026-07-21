@@ -1,11 +1,15 @@
 import Foundation
 import Observation
 
-/// Assigns a Codex thread to an unbound button just by holding it — the
-/// "no need to keep the CodexPad window open" path for Belegung. Deliberately
-/// separate from `CodexPadTapHoldService`: that service only fires for
-/// controls with an explicitly configured hold action, whereas an unassigned
-/// button has none, and the two must never fight over the same press.
+/// Assigns a Codex thread to a button just by holding it — the "no need to
+/// keep the CodexPad window open" path for Belegung. Works the same whether
+/// the button is currently unassigned or already holds a different thread:
+/// `CodexThreadStore.assign` replaces any existing assignment for that
+/// control outright, so a hold on an assigned key is a one-step reassignment
+/// rather than an unassign-then-assign dance. Deliberately separate from
+/// `CodexPadTapHoldService`: that service only fires for controls with an
+/// explicitly configured hold action, whereas Belegung has none, and the two
+/// must never fight over the same press.
 @MainActor
 @Observable
 final class CodexQuickAssignService {
@@ -21,9 +25,14 @@ final class CodexQuickAssignService {
     private var pressStartTimes: [HardwareControl: Date] = [:]
 
     private let isEnabled: () -> Bool
-    private let isAlreadyAssigned: (HardwareControl) -> Bool
     private let isTapHoldConfigured: (HardwareControl) -> Bool
-    private let candidateThread: () -> CodexThreadDescriptor?
+    /// A thread explicitly identified via a copied session ID, if the
+    /// clipboard currently holds one — takes priority over `fallbackThread`
+    /// since it's a deliberate choice made in Codex itself, not a guess.
+    private let clipboardThread: () -> CodexThreadDescriptor?
+    /// The best guess absent a clipboard hint: the most recently active
+    /// thread not already bound to another key.
+    private let fallbackThread: () -> CodexThreadDescriptor?
     private let now: () -> Date
 
     /// Set after `init` (rather than passed in) so callers don't need `self`
@@ -33,16 +42,25 @@ final class CodexQuickAssignService {
 
     init(
         isEnabled: @escaping () -> Bool,
-        isAlreadyAssigned: @escaping (HardwareControl) -> Bool,
         isTapHoldConfigured: @escaping (HardwareControl) -> Bool,
-        candidateThread: @escaping () -> CodexThreadDescriptor?,
+        clipboardThread: @escaping () -> CodexThreadDescriptor? = { nil },
+        fallbackThread: @escaping () -> CodexThreadDescriptor?,
         now: @escaping () -> Date = Date.init
     ) {
         self.isEnabled = isEnabled
-        self.isAlreadyAssigned = isAlreadyAssigned
         self.isTapHoldConfigured = isTapHoldConfigured
-        self.candidateThread = candidateThread
+        self.clipboardThread = clipboardThread
+        self.fallbackThread = fallbackThread
         self.now = now
+    }
+
+    /// Codex lets you copy a session's UUID (e.g. from its own UI); this
+    /// pulls one back out of arbitrary clipboard text so a hold can act on
+    /// "whatever chat I just copied the ID of", not just guess by recency.
+    nonisolated static func extractThreadID(from clipboardText: String) -> String? {
+        let pattern = #"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"#
+        guard let range = clipboardText.range(of: pattern, options: .regularExpression) else { return nil }
+        return String(clipboardText[range])
     }
 
     func handle(_ event: CodexPadPhysicalEvent) {
@@ -53,14 +71,14 @@ final class CodexQuickAssignService {
 
         switch event.phase {
         case .pressed:
-            guard isEnabled(), !isAlreadyAssigned(control), !isTapHoldConfigured(control) else { return }
+            guard isEnabled(), !isTapHoldConfigured(control) else { return }
             pressStartTimes[control] = now()
         case .released:
             guard let start = pressStartTimes.removeValue(forKey: control) else { return }
-            guard isEnabled(), !isAlreadyAssigned(control), !isTapHoldConfigured(control) else { return }
+            guard isEnabled(), !isTapHoldConfigured(control) else { return }
             let heldMilliseconds = now().timeIntervalSince(start) * 1_000
             guard heldMilliseconds >= Double(Self.holdThresholdMilliseconds) else { return }
-            guard let thread = candidateThread() else { return }
+            guard let thread = clipboardThread() ?? fallbackThread() else { return }
             onAssign?(thread, control)
         case .triggered:
             break

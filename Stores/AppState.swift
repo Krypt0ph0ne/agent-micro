@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -43,9 +44,14 @@ final class AppState {
         let codexThreads = self.codexThreads
         self.quickAssign = CodexQuickAssignService(
             isEnabled: { UserDefaults.standard.bool(forKey: CodexQuickAssignService.enabledDefaultsKey) },
-            isAlreadyAssigned: { codexThreads.assignment(for: $0) != nil },
             isTapHoldConfigured: { profiles.selectedProfile.binding(for: $0).isTapHold },
-            candidateThread: {
+            clipboardThread: {
+                guard let clipboardText = NSPasteboard.general.string(forType: .string),
+                      let id = CodexQuickAssignService.extractThreadID(from: clipboardText)
+                else { return nil }
+                return codexThreads.threads.first { $0.id == id }
+            },
+            fallbackThread: {
                 let assignedThreadIDs = Set(codexThreads.assignments.map(\.threadID))
                 return codexThreads.threads.first { !assignedThreadIDs.contains($0.id) }
             }

@@ -459,27 +459,27 @@ final class CodexPadTests: XCTestCase {
     }
 
     @MainActor
-    func testQuickAssignFiresOnlyAfterHoldThresholdOnAnUnassignedButton() {
-        var assignedControls: Set<HardwareControl> = []
-        let candidate = CodexThreadDescriptor(
-            id: "thread-recent", title: "Recent", preview: "", cwd: "/tmp",
-            parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
-        )
+    func testQuickAssignFiresOnlyAfterHoldThresholdAndReassignsAnAlreadyBoundButton() {
+        func thread(_ id: String) -> CodexThreadDescriptor {
+            CodexThreadDescriptor(
+                id: id, title: id, preview: "", cwd: "/tmp",
+                parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
+            )
+        }
+        var nextCandidate = thread("thread-recent")
         var assignedThread: CodexThreadDescriptor?
         var assignedControl: HardwareControl?
         var simulatedNow = Date()
 
         let service = CodexQuickAssignService(
             isEnabled: { true },
-            isAlreadyAssigned: { assignedControls.contains($0) },
             isTapHoldConfigured: { _ in false },
-            candidateThread: { candidate },
+            fallbackThread: { nextCandidate },
             now: { simulatedNow }
         )
         service.onAssign = { thread, control in
             assignedThread = thread
             assignedControl = control
-            assignedControls.insert(control)
         }
 
         func event(_ phase: CodexPadPhysicalEvent.Phase) -> CodexPadPhysicalEvent {
@@ -492,19 +492,64 @@ final class CodexPadTests: XCTestCase {
         service.handle(event(.released))
         XCTAssertNil(assignedThread)
 
-        // Holding past the threshold assigns the most recent unassigned thread.
+        // Holding past the threshold on an unassigned button assigns it.
         service.handle(event(.pressed))
         simulatedNow.addTimeInterval(Double(CodexQuickAssignService.holdThresholdMilliseconds) / 1_000 + 0.1)
         service.handle(event(.released))
         XCTAssertEqual(assignedThread?.id, "thread-recent")
         XCTAssertEqual(assignedControl, .key1)
 
-        // Once assigned, holding the same button again must not reassign it.
-        assignedThread = nil
+        // Holding the same, already-assigned button again reassigns it in one
+        // step rather than requiring an unassign first.
+        nextCandidate = thread("thread-newer")
         service.handle(event(.pressed))
         simulatedNow.addTimeInterval(Double(CodexQuickAssignService.holdThresholdMilliseconds) / 1_000 + 0.1)
         service.handle(event(.released))
-        XCTAssertNil(assignedThread)
+        XCTAssertEqual(assignedThread?.id, "thread-newer")
+        XCTAssertEqual(assignedControl, .key1)
+    }
+
+    func testExtractThreadIDFindsAUUIDInArbitraryClipboardText() {
+        XCTAssertEqual(
+            CodexQuickAssignService.extractThreadID(from: "019f5a19-e864-7543-bbca-c6ffdca652ac"),
+            "019f5a19-e864-7543-bbca-c6ffdca652ac"
+        )
+        XCTAssertEqual(
+            CodexQuickAssignService.extractThreadID(from: "Session: 019F5A19-E864-7543-BBCA-C6FFDCA652AC (copied)"),
+            "019F5A19-E864-7543-BBCA-C6FFDCA652AC"
+        )
+        XCTAssertNil(CodexQuickAssignService.extractThreadID(from: "not a session id"))
+        XCTAssertNil(CodexQuickAssignService.extractThreadID(from: ""))
+    }
+
+    @MainActor
+    func testQuickAssignPrefersAClipboardThreadOverTheRecencyFallback() {
+        let clipboardPick = CodexThreadDescriptor(
+            id: "thread-from-clipboard", title: "Copied", preview: "", cwd: "/tmp",
+            parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
+        )
+        let recencyPick = CodexThreadDescriptor(
+            id: "thread-recent", title: "Recent", preview: "", cwd: "/tmp",
+            parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
+        )
+        var assignedThread: CodexThreadDescriptor?
+        var simulatedNow = Date()
+
+        let service = CodexQuickAssignService(
+            isEnabled: { true },
+            isTapHoldConfigured: { _ in false },
+            clipboardThread: { clipboardPick },
+            fallbackThread: { recencyPick },
+            now: { simulatedNow }
+        )
+        service.onAssign = { thread, _ in assignedThread = thread }
+
+        let control = HardwareControl.key2
+        service.handle(CodexPadPhysicalEvent(sequence: 0, control: control.reportedControlIndex, phase: .pressed))
+        simulatedNow.addTimeInterval(Double(CodexQuickAssignService.holdThresholdMilliseconds) / 1_000 + 0.1)
+        service.handle(CodexPadPhysicalEvent(sequence: 0, control: control.reportedControlIndex, phase: .released))
+
+        XCTAssertEqual(assignedThread?.id, "thread-from-clipboard")
     }
 
     @MainActor
