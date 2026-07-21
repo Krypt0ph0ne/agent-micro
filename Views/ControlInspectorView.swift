@@ -36,10 +36,10 @@ struct ControlInspectorView: View {
                         }
                         .labelsHidden()
 
-                        if action.wrappedValue.kind == .codexShortcut {
-                            Picker("Codex-Aktion", selection: codexActionIDBinding(for: action)) {
+                        if action.wrappedValue.kind.isAppShortcut {
+                            Picker("Aktion", selection: codexActionIDBinding(for: action)) {
                                 Text("Auswählen").tag("")
-                                ForEach(appState.catalog.actions.filter(\.isDirectlyAssignable)) { entry in
+                                ForEach(appState.activeCatalog.actions.filter(\.isDirectlyAssignable)) { entry in
                                     Text(entry.title).tag(entry.id)
                                 }
                             }
@@ -53,7 +53,7 @@ struct ControlInspectorView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        if action.wrappedValue.kind == .codexDeepLink {
+                        if action.wrappedValue.kind.isAppDeepLink {
                             TextField("Deep Link", text: deepLinkBinding(for: action))
                                 .textFieldStyle(.roundedBorder)
                             Text("Deep Links benötigen künftig einen bewusst aktivierten lokalen F13–F21-Listener; der direkte Geräteupload wird hierfür blockiert.")
@@ -108,8 +108,8 @@ struct ControlInspectorView: View {
         Binding(
             get: { action.wrappedValue.codexActionID ?? "" },
             set: { id in
-                guard !id.isEmpty, let definition = appState.catalog.action(id: id) else { return }
-                guard let mapped = appState.catalog.keyboardAction(id: definition.id) else { return }
+                guard !id.isEmpty, let definition = appState.activeCatalog.action(id: id) else { return }
+                guard let mapped = appState.activeCatalog.keyboardAction(id: definition.id) else { return }
                 action.wrappedValue = mapped
             }
         )

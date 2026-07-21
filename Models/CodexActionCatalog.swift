@@ -47,10 +47,15 @@ struct CodexActionCatalogDocument: Codable {
 
 struct CodexActionCatalog {
     let document: CodexActionCatalogDocument
+    /// Which app this catalog's shortcuts target; picks the `ActionKind`
+    /// (`.codexShortcut`/`.claudeShortcut`, `.codexDeepLink`/`.claudeDeepLink`)
+    /// resolved actions carry.
+    let app: AutomationApp
 
-    init(bundle: Bundle = .module) {
+    init(bundle: Bundle = .module, resourceName: String = "CodexActions", app: AutomationApp = .codex) {
+        self.app = app
         guard
-            let url = bundle.url(forResource: "CodexActions", withExtension: "json"),
+            let url = bundle.url(forResource: resourceName, withExtension: "json"),
             let data = try? Data(contentsOf: url),
             let document = try? JSONDecoder().decode(CodexActionCatalogDocument.self, from: data)
         else {
@@ -70,7 +75,7 @@ struct CodexActionCatalog {
     func keyboardAction(id: String) -> KeyboardAction? {
         guard let action = action(id: id), action.isDirectlyAssignable else { return nil }
         return KeyboardAction(
-            kind: .codexShortcut,
+            kind: app == .claude ? .claudeShortcut : .codexShortcut,
             label: action.title,
             icon: action.icon,
             deviceMacro: action.deviceMacro,
@@ -81,6 +86,6 @@ struct CodexActionCatalog {
 
     func deferredAction(id: String) -> KeyboardAction? {
         guard let action = action(id: id), action.execution == .deepLink, let deepLink = action.deepLink else { return nil }
-        return KeyboardAction(kind: .codexDeepLink, label: action.title, icon: action.icon, codexActionID: action.id, deepLink: deepLink)
+        return KeyboardAction(kind: app == .claude ? .claudeDeepLink : .codexDeepLink, label: action.title, icon: action.icon, codexActionID: action.id, deepLink: deepLink)
     }
 }

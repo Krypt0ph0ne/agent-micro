@@ -39,6 +39,141 @@ final class CodexPadTests: XCTestCase {
         XCTAssertTrue(yaml.contains("cw: 'f24'"))
     }
 
+    func testClaudeProfileUsesReasoningTriggersByDefaultAndTargetsClaude() {
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+        let profile = ProfileFactory.claude(catalog: claudeCatalog)
+        XCTAssertEqual(profile.name, "Claude")
+        XCTAssertTrue(profile.isBuiltIn)
+        XCTAssertEqual(profile.automationApp, .claude)
+        XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f22")
+        XCTAssertEqual(profile.action(for: .encoderPress).deviceMacro, "f23")
+        XCTAssertEqual(profile.action(for: .encoderRight).deviceMacro, "f24")
+        XCTAssertEqual(profile.action(for: .encoderRight).codexActionID, "encoder-effort-increase")
+    }
+
+    func testClaudeActionsMapToConfirmedKeybindings() {
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "dictation")?.deviceMacro, "space")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "dictation")?.kind, .claudeShortcut)
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "new-session")?.deviceMacro, "cmd-n")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "close-session")?.deviceMacro, "cmd-w")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "next-session")?.deviceMacro, "cmd-shift-rightbracket")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "previous-session")?.deviceMacro, "cmd-shift-leftbracket")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "stop-response")?.deviceMacro, "esc")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "toggle-diff")?.deviceMacro, "cmd-shift-d")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "toggle-preview")?.deviceMacro, "cmd-shift-p")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "toggle-terminal")?.deviceMacro, "ctrl-grave")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "close-panel")?.deviceMacro, "cmd-backslash")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "open-side-chat")?.deviceMacro, "cmd-semicolon")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "cycle-mode")?.deviceMacro, "ctrl-o")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "open-permission-mode")?.deviceMacro, "cmd-shift-m")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "open-model-menu")?.deviceMacro, "cmd-shift-i")
+        XCTAssertEqual(claudeCatalog.keyboardAction(id: "open-effort-menu")?.deviceMacro, "cmd-shift-e")
+        // The numbered menu-item shortcut documents the gesture but has no
+        // fixed device macro, since it's only meaningful once a menu is open.
+        XCTAssertNil(claudeCatalog.keyboardAction(id: "select-menu-item"))
+        XCTAssertEqual(claudeCatalog.action(id: "select-menu-item")?.execution, .configurableShortcut)
+    }
+
+    @MainActor
+    func testDictationSourceRewritesBothProfilesAndDefaultsToCodex() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-dictation-\(UUID().uuidString)")
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+        // `dictationSource` persists through UserDefaults.standard across test
+        // runs on the same machine; clear it first so the "default is .codex"
+        // assertion below is deterministic rather than depending on whatever a
+        // previous run last left behind.
+        UserDefaults.standard.removeObject(forKey: "CodexPad.dictationSource")
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
+        defer { UserDefaults.standard.removeObject(forKey: "CodexPad.dictationSource") }
+
+        func dictationMacro(in profileName: String) -> String? {
+            store.profiles.first(where: { $0.name == profileName })?.controls
+                .first(where: { $0.action.codexActionID == "dictation" })?.action.deviceMacro
+        }
+
+        XCTAssertEqual(store.dictationSource, .codex)
+        XCTAssertEqual(dictationMacro(in: "Codex"), "cmd-f17")
+        XCTAssertEqual(dictationMacro(in: "Claude"), "cmd-f17", "default source is Codex-global, so the fresh Claude profile is rewritten to match")
+
+        store.dictationSource = .claude
+        XCTAssertEqual(dictationMacro(in: "Codex"), "space")
+        XCTAssertEqual(dictationMacro(in: "Claude"), "space")
+
+        store.dictationSource = .followProfile
+        XCTAssertEqual(dictationMacro(in: "Codex"), "cmd-f17")
+        XCTAssertEqual(dictationMacro(in: "Claude"), "space")
+    }
+
+    @MainActor
+    func testExistingCodexProfilesAreBackfilledWithAnAutomationAppTag() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-tag-migration-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+
+        // Simulate a profile persisted before `automationApp` existed.
+        var legacy = ProfileFactory.codex(catalog: catalog)
+        legacy.automationApp = nil
+        try ProfileFileCodec.encode([legacy]).write(to: url)
+
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
+        XCTAssertEqual(store.profiles.first(where: { $0.name == "Codex" })?.automationApp, .codex)
+        XCTAssertEqual(store.profiles.first(where: { $0.name == "Claude" })?.automationApp, .claude, "a Claude profile should be auto-added for pre-existing installs")
+    }
+
+    @MainActor
+    func testLoadingPrunesEverythingExceptCodexAndClaudeAndBacksUpFirst() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-prune-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+
+        // A cluttered real-world profile list: the two we want, plus the
+        // stock extras and a hand-made custom profile.
+        var customDuplicate = ProfileFactory.claude(catalog: claudeCatalog)
+        customDuplicate.name = "Claude Code"
+        customDuplicate.id = UUID()
+        let cluttered = [
+            ProfileFactory.codex(catalog: catalog),
+            customDuplicate,
+            ProfileFactory.macOS(),
+            ProfileFactory.safe(),
+            ProfileFactory.codexReasoningTriggers(catalog: catalog),
+            ProfileFactory.claude(catalog: claudeCatalog)
+        ]
+        try ProfileFileCodec.encode(cluttered).write(to: url)
+
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
+        XCTAssertEqual(Set(store.profiles.map(\.name)), ["Codex", "Claude"])
+
+        let backups = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("Profiles.before-prune-") }
+        XCTAssertEqual(backups.count, 1, "the untouched original list should be backed up exactly once before pruning")
+        let backedUp = try ProfileFileCodec.decode(Data(contentsOf: backups[0]))
+        XCTAssertEqual(backedUp.count, cluttered.count, "the backup should contain everything, including the dropped custom profile")
+
+        // Re-loading the already-pruned file must not create another backup.
+        _ = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
+        let backupsAfterReload = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("Profiles.before-prune-") }
+        XCTAssertEqual(backupsAfterReload.count, 1)
+    }
+
+    func testActionKindAgentAndCatalogHelpersCoverBothApps() {
+        XCTAssertTrue(ActionKind.codexAgent.isAgent)
+        XCTAssertTrue(ActionKind.claudeAgent.isAgent)
+        XCTAssertFalse(ActionKind.disabled.isAgent)
+        XCTAssertTrue(ActionKind.codexShortcut.isAppShortcut)
+        XCTAssertTrue(ActionKind.claudeShortcut.isAppShortcut)
+        XCTAssertTrue(ActionKind.codexDeepLink.isAppDeepLink)
+        XCTAssertTrue(ActionKind.claudeDeepLink.isAppDeepLink)
+    }
+
     func testEncoderAutomationUsesDirectCodexShortcuts() {
         XCTAssertEqual(CodexEncoderCommand.decreaseEffort.directShortcutKeyCode, UInt16(kVK_F18))
         XCTAssertEqual(CodexEncoderCommand.increaseEffort.directShortcutKeyCode, UInt16(kVK_F19))
@@ -770,7 +905,8 @@ final class CodexPadTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-profile-store-\(UUID().uuidString)")
         let url = directory.appendingPathComponent("Profiles.json")
         let catalog = CodexActionCatalog()
-        let store = ProfileStore(catalog: catalog, persistenceURL: url)
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
         let settings = HardwareControl.buttons.map {
             KeyLEDConfiguration(control: $0, effect: .steady, red: 12, green: 34, blue: 56, brightness: 200, periodMilliseconds: 700)
         }
@@ -789,7 +925,7 @@ final class CodexPadTests: XCTestCase {
         })
         XCTAssertEqual(store.selectedProfile.reaction(for: .agentFailed).effect, .flash)
 
-        let restored = ProfileStore(catalog: catalog, persistenceURL: url)
+        let restored = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
         restored.selectedProfileID = store.selectedProfileID
         XCTAssertEqual(restored.selectedProfile.led.setting(for: .key6).blue, 56)
         XCTAssertEqual(restored.selectedProfile.reaction(for: .agentFailed).red, 99)
@@ -803,6 +939,7 @@ final class CodexPadTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("Profiles.json")
         let catalog = CodexActionCatalog()
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
 
         // Simulate a profile persisted before the F22/F24 fix: the direct
         // F18/F19 shortcuts bypass CodexReasoningAutomationService entirely,
@@ -822,7 +959,7 @@ final class CodexPadTests: XCTestCase {
         )
         try ProfileFileCodec.encode([stale]).write(to: url)
 
-        let store = ProfileStore(catalog: catalog, persistenceURL: url)
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
         XCTAssertEqual(store.selectedProfile.action(for: .encoderLeft).deviceMacro, "f22")
         XCTAssertEqual(store.selectedProfile.action(for: .encoderPress).deviceMacro, "f23")
         XCTAssertEqual(store.selectedProfile.action(for: .encoderRight).deviceMacro, "f24")

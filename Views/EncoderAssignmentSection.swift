@@ -9,11 +9,13 @@ import SwiftUI
 struct EncoderAssignmentSection: View {
     let appState: AppState
 
-    private var automation: CodexReasoningAutomationService { appState.reasoningAutomation }
+    private var automation: any EncoderAutomationService { appState.activeReasoningAutomation }
+
+    private var isEnabled: Binding<Bool> {
+        Binding(get: { automation.isEnabled }, set: { automation.isEnabled = $0 })
+    }
 
     var body: some View {
-        @Bindable var automation = appState.reasoningAutomation
-
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "dial.medium")
@@ -22,7 +24,7 @@ struct EncoderAssignmentSection: View {
                     .font(.headline)
                 ContextInfoButton(title: "Drehrad-Gesten", message: infoMessage)
                 Spacer()
-                Toggle("", isOn: $automation.isEnabled)
+                Toggle("", isOn: isEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.mini)
@@ -35,7 +37,7 @@ struct EncoderAssignmentSection: View {
             )
             row(
                 icon: "cube",
-                gesture: "Halten (>\(CodexReasoningAutomationService.modelListHoldThresholdMilliseconds) ms) + drehen",
+                gesture: "Halten (>\(ClaudeReasoningAutomationService.modelListHoldThresholdMilliseconds) ms) + drehen",
                 value: "Modell wechseln, Loslassen übernimmt"
             )
 

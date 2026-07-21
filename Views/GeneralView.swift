@@ -18,6 +18,20 @@ struct GeneralView: View {
                     Button("Löschen", role: .destructive) { appState.profiles.deleteSelected() }
                 }
             }
+            Section("Diktat") {
+                Picker("Diktierquelle", selection: Binding(
+                    get: { appState.profiles.dictationSource },
+                    set: { appState.profiles.dictationSource = $0 }
+                )) {
+                    ForEach(DictationSource.allCases) { source in
+                        Text(source.title).tag(source)
+                    }
+                }
+                Text(appState.profiles.dictationSource.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section("Import & Export") {
                 HStack {
                     Button("Aktuelles Profil exportieren") {
@@ -33,8 +47,23 @@ struct GeneralView: View {
                 }
                 if let resultText { Text(resultText).font(.caption).foregroundStyle(.secondary) }
             }
+            Section("Claude Live-Status") {
+                Toggle("Live-Status für Claude-Agenten", isOn: Binding(
+                    get: { appState.claudeAgentBridge.isHooksStatusEnabled },
+                    set: { appState.claudeAgentBridge.setHooksStatusEnabled($0) }
+                ))
+                Text("Standardmäßig aus. `claude agents --json` liefert nur eine Liste laufender Sessions, keinen Live-Status. Aktivieren trägt fünf Hook-Einträge (Notification, Stop, SubagentStop, UserPromptSubmit, PreToolUse) in dein globales ~/.claude/settings.json ein, die nur eine Statuszeile pro Ereignis protokollieren – sie greifen nie in eine laufende Session ein und beeinflussen kein Ergebnis. Diese Hooks gelten für jede Claude-Code-Session auf diesem Rechner, nicht nur für am Pad zugewiesene Agenten. Vorhandene eigene Hooks für diese Ereignisse bleiben unverändert; Deaktivieren entfernt ausschließlich die von CodexPad eingetragenen Einträge wieder.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let hooksStatusError = appState.claudeAgentBridge.hooksStatusError {
+                    Text(hooksStatusError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
             Section("Sicherheitsmodell") {
-                Text("CodexPad speichert Profile und Agent-Zuordnungen ausschließlich unter Application Support/CodexPad. Der Event-Bridge-Service startet den lokalen Codex App Server über stdio, beobachtet Thread-, Turn-, Approval- und Nutzereingabe-Ereignisse und beantwortet Approval-Anfragen niemals. Tastendrücke öffnen ausschließlich den offiziellen Codex-Thread-Link; Mausautomation wird nicht verwendet.")
+                Text("CodexPad speichert Profile und Agent-Zuordnungen ausschließlich unter Application Support/CodexPad. Der Event-Bridge-Service startet den lokalen Codex App Server über stdio, beobachtet Thread-, Turn-, Approval- und Nutzereingabe-Ereignisse und beantwortet Approval-Anfragen niemals. Tastendrücke öffnen ausschließlich den offiziellen Codex-Thread-Link bzw. Claude-Resume-Link; Mausautomation wird nicht verwendet.")
                     .fixedSize(horizontal: false, vertical: true)
             }
             Section("LED") {

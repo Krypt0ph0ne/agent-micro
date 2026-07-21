@@ -14,8 +14,10 @@ struct CodexAssignmentWizardView: View {
     @State private var trigger = ""
     @State private var search = ""
 
+    private var appName: String { appState.profiles.selectedProfile.automationApp?.displayName ?? "Codex" }
+
     private var configurableActions: [CodexActionDefinition] {
-        appState.catalog.actions.filter { $0.execution == .configurableShortcut }
+        appState.activeCatalog.actions.filter { $0.execution == .configurableShortcut }
     }
 
     private var filtered: [CodexActionDefinition] {
@@ -46,14 +48,14 @@ struct CodexAssignmentWizardView: View {
             HStack(spacing: 8) {
                 Image(systemName: "wand.and.stars")
                     .foregroundStyle(.tint)
-                Text("Codex-Aktion einrichten")
+                Text("\(appName)-Aktion einrichten")
                     .font(.title3.weight(.semibold))
                 Spacer()
                 Label("\(control.shortTitle)\(slot == .hold ? " · Halten" : "")", systemImage: control.icon)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text("Diese Aktionen haben in Codex keine Standardtaste. Der Assistent vergibt einen eindeutigen Trigger, den das Pad direkt sendet – du weist ihn danach einmalig in Codex zu.")
+            Text("Diese Aktionen haben in \(appName) keine Standardtaste. Der Assistent vergibt einen eindeutigen Trigger, den das Pad direkt sendet – du weist ihn danach einmalig in \(appName) zu.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -148,8 +150,9 @@ struct CodexAssignmentWizardView: View {
                 Spacer()
                 Button("Abbrechen") { dismiss() }
                 Button("Zuweisen") {
-                    if slot == .tap { appState.codexThreads.removeAssignment(for: control) }
-                    appState.profiles.assignConfigurableCodexAction(action, trigger: trigger, to: control, slot: slot)
+                    if slot == .tap { appState.removeActiveAgentAssignment(for: control) }
+                    let kind: ActionKind = appState.profiles.selectedProfile.automationApp == .claude ? .claudeShortcut : .codexShortcut
+                    appState.profiles.assignConfigurableCodexAction(action, trigger: trigger, to: control, slot: slot, kind: kind)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -186,11 +189,11 @@ struct CodexAssignmentWizardView: View {
 
     private func instructions(for action: CodexActionDefinition) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("So in Codex zuweisen")
+            Text("So in \(appName) zuweisen")
                 .font(.caption.weight(.semibold))
-            step(1, "Öffne in Codex ", trailing: "Settings › Keyboard Shortcuts.")
-            step(2, "Suche den Eintrag ", trailing: "„\(action.title)".appending("."))
-            step(3, "Klicke ihn an und drücke die Tastenkombination ", trailing: CodexTriggerPool.displayLabel(for: trigger) + ".")
+            step(1, "Öffne in \(appName) ", trailing: appName == "Claude" ? "die Datei ~/.claude/keybindings.json." : "Settings › Keyboard Shortcuts.")
+            step(2, appName == "Claude" ? "Trage die Aktions-ID ein: " : "Suche den Eintrag ", trailing: appName == "Claude" ? "„\(action.codexCommandID ?? action.id)".appending(".") : "„\(action.title)".appending("."))
+            step(3, appName == "Claude" ? "…gebunden an die Tastenkombination " : "Klicke ihn an und drücke die Tastenkombination ", trailing: CodexTriggerPool.displayLabel(for: trigger) + ".")
             step(4, "Danach in CodexPad ", trailing: "Übertragen klicken, um den Trigger auf das Pad zu laden.")
         }
         .padding(12)
