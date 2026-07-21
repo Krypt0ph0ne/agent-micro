@@ -13,13 +13,14 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 block {
                     SettingsGroup(title: "Profil") {
-                        SettingsRow {
+                        SettingsRow(label: "Profil") {
                             Picker("Profil", selection: $profiles.selectedProfileID) {
                                 ForEach(profiles.profiles) { profile in
                                     Text(profile.name).tag(profile.id)
                                 }
                             }
                             .labelsHidden()
+                            .fixedSize()
                         }
                         Divider().padding(.leading, 12)
                         SettingsRow(label: "Name") {
@@ -166,9 +167,10 @@ private struct SettingsGroup<Content: View>: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 content
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
@@ -187,6 +189,7 @@ private struct SettingsRow<Content: View>: View {
             }
             content
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
     }
