@@ -25,6 +25,15 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     /// How long the Effort menu stays open after the last plain-rotate step
     /// before CodexPad closes it again on its own.
     private static let autoCloseIdleSeconds: TimeInterval = 1.6
+    /// Minimum real gap enforced between any two posted key events. Unlike
+    /// Codex's plain rotate (a direct, stateless shortcut), Claude's effort
+    /// and model steps depend on a menu actually being open first, so a fast
+    /// rotation firing an "open menu" keystroke and an "arrow" keystroke back
+    /// to back — each scheduled from its own independent timer — could have
+    /// the arrow land before the open shortcut actually took effect. All key
+    /// posts now go through `enqueue`, a single serial queue, so ordering and
+    /// spacing are guaranteed regardless of how fast the dial is turned.
+    private static let keySpacingSeconds: TimeInterval = 0.09
 
     /// True while the Claude profile is selected; both this service and
     /// `CodexReasoningAutomationService` listen to the same private F22–F24
@@ -41,6 +50,8 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private var autoCloseTimer: Timer?
     private var encoderHoldTimer: Timer?
     private var encoderHoldFired = false
+    private var pendingKeyActions: [() -> Void] = []
+    private var isProcessingKeyActions = false
 
     private(set) var status = "Deaktiviert"
     private(set) var lastInput = "Noch kein Drehrad-Signal empfangen"
@@ -119,7 +130,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         claude.activate(options: [.activateAllWindows])
         isModelMenuOpen = true
         status = "Modellmenü offen: drehen wählt, loslassen übernimmt."
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+        enqueue {
             Self.postKey(UInt16(kVK_ANSI_I), flags: [.maskCommand, .maskShift])
         }
     }
@@ -142,8 +153,8 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         guard let claude = readyClaudeApplication() else { return }
         claude.activate(options: [.activateAllWindows])
         status = "Modell übernehmen …"
-        Self.postKey(UInt16(kVK_Return))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+        enqueue { Self.postKey(UInt16(kVK_Return)) }
+        enqueue { [weak self] in
             Self.postKey(UInt16(kVK_Escape))
             self?.status = "Übernommen."
         }
@@ -157,7 +168,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         guard readyClaudeApplication() != nil else { return }
         let keyCode = step == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
         status = step == .next ? "Nächstes Modell" : "Vorheriges Modell"
-        Self.postKey(keyCode)
+        enqueue { Self.postKey(keyCode) }
     }
 
     /// Testing hooks for the assignment panel: skip the hold-timer wait so a
@@ -184,6 +195,30 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         encoderHoldFired = false
         isModelMenuOpen = false
         isEffortMenuOpen = false
+        pendingKeyActions.removeAll()
+        isProcessingKeyActions = false
+    }
+
+    /// Appends a key-posting action to the serial queue instead of firing it
+    /// immediately. Every action runs strictly after the previous one, with a
+    /// real `keySpacingSeconds` gap in between, so an "open menu" shortcut
+    /// enqueued a moment ago is guaranteed to have already landed before a
+    /// later arrow-key action from a fast follow-up rotation runs.
+    private func enqueue(_ action: @escaping () -> Void) {
+        pendingKeyActions.append(action)
+        processQueueIfNeeded()
+    }
+
+    private func processQueueIfNeeded() {
+        guard !isProcessingKeyActions, !pendingKeyActions.isEmpty else { return }
+        isProcessingKeyActions = true
+        let next = pendingKeyActions.removeFirst()
+        next()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.keySpacingSeconds) { [weak self] in
+            guard let self else { return }
+            self.isProcessingKeyActions = false
+            self.processQueueIfNeeded()
+        }
     }
 
     /// Plain (unheld) rotation: Claude only exposes effort stepping while the
@@ -195,17 +230,14 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         claude.activate(options: [.activateAllWindows])
         let keyCode = direction == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
         status = direction == .next ? "Aufwand erhöhen" : "Aufwand verringern"
-        if isEffortMenuOpen {
-            Self.postKey(keyCode)
-        } else {
+        if !isEffortMenuOpen {
             isEffortMenuOpen = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                Self.postKey(UInt16(kVK_ANSI_E), flags: [.maskCommand, .maskShift])
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    Self.postKey(keyCode)
-                }
-            }
+            enqueue { Self.postKey(UInt16(kVK_ANSI_E), flags: [.maskCommand, .maskShift]) }
         }
+        // Enqueued strictly after the open shortcut above (same serial
+        // queue), so this always lands after the menu is actually open, even
+        // if the dial is rotated faster than the queue can drain.
+        enqueue { Self.postKey(keyCode) }
         scheduleAutoClose()
     }
 
@@ -219,8 +251,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func autoCloseEffortMenu() {
         guard isEffortMenuOpen, !isModelMenuOpen else { return }
         isEffortMenuOpen = false
-        Self.postKey(UInt16(kVK_Escape))
-        status = "Denkaufwand-Menü geschlossen."
+        enqueue { [weak self] in
+            Self.postKey(UInt16(kVK_Escape))
+            self?.status = "Denkaufwand-Menü geschlossen."
+        }
     }
 
     func toggleEffortMenu() {
@@ -230,7 +264,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         if isEffortMenuOpen {
             isEffortMenuOpen = false
             status = "Schließen: Denkaufwand-Menü"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            enqueue { [weak self] in
                 Self.postKey(UInt16(kVK_Escape))
                 self?.status = "Denkaufwand-Menü geschlossen."
             }
@@ -238,7 +272,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         }
         isEffortMenuOpen = true
         status = "Öffnen: Denkaufwand-Menü"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+        enqueue { [weak self] in
             Self.postKey(UInt16(kVK_ANSI_E), flags: [.maskCommand, .maskShift])
             self?.status = "Denkaufwand-Menü offen: erneut drücken zum Schließen."
         }
@@ -259,6 +293,11 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             return nil
         }
         guard let claude = claudeApplication else {
+            // Claude isn't running (or was quit/relaunched since we last
+            // opened a menu): whatever we assumed about its UI state no
+            // longer holds, so drop it rather than risk sending arrow keys
+            // into a menu that isn't there.
+            resetState()
             status = "Claude läuft nicht."
             return nil
         }
