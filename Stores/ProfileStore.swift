@@ -35,6 +35,8 @@ final class ProfileStore {
     private static let selectedProfileDefaultsKey = "CodexPad.selectedProfileID"
     private static let keyboardLayoutDefaultsKey = "CodexPad.keyboardLayout"
     private static let dictationSourceDefaultsKey = "CodexPad.dictationSource"
+    private static let layerSwitchControlDefaultsKey = "CodexPad.layerSwitchControl"
+    static let defaultLayerSwitchControl: HardwareControl = .key3
     private let persistenceURL: URL
     private let catalog: CodexActionCatalog
     private let claudeCatalog: CodexActionCatalog
@@ -45,6 +47,7 @@ final class ProfileStore {
             guard keyboardLayout != oldValue else { return }
             UserDefaults.standard.set(keyboardLayout.rawValue, forKey: Self.keyboardLayoutDefaultsKey)
             hasUnsyncedChanges = true
+            onChange?()
         }
     }
     /// Which app's dictation chord the "Diktieren"-tagged control resolves
@@ -61,9 +64,25 @@ final class ProfileStore {
             UserDefaults.standard.set(selectedProfileID.uuidString, forKey: Self.selectedProfileDefaultsKey)
         }
     }
+    /// The one key permanently reserved for holding-to-switch between the
+    /// Codex and Claude built-in profiles, across whichever one is active.
+    /// Encoded app-only (no macro) on upload — see `CodexPadPacketEncoder`
+    /// — so it never also fires a leftover assigned shortcut.
+    var layerSwitchControl: HardwareControl {
+        didSet {
+            guard layerSwitchControl != oldValue else { return }
+            UserDefaults.standard.set(layerSwitchControl.rawValue, forKey: Self.layerSwitchControlDefaultsKey)
+            hasUnsyncedChanges = true
+            onChange?()
+        }
+    }
     /// Changes are persisted locally immediately; this means not yet synchronized to hardware.
     private(set) var hasUnsyncedChanges = false
     private(set) var lastPersistenceError: String?
+    /// Fired whenever a change is committed (including the `keyboardLayout`
+    /// `didSet` below), so `AppState` can debounce an automatic hardware
+    /// sync without `ProfileStore` needing to know `DeviceService` exists.
+    var onChange: (() -> Void)?
 
     init(catalog: CodexActionCatalog, claudeCatalog: CodexActionCatalog, persistenceURL: URL? = nil) {
         self.catalog = catalog
@@ -73,6 +92,8 @@ final class ProfileStore {
         let dictationSource = UserDefaults.standard.string(forKey: Self.dictationSourceDefaultsKey)
             .flatMap(DictationSource.init(rawValue:)) ?? .codex
         self.dictationSource = dictationSource
+        self.layerSwitchControl = UserDefaults.standard.string(forKey: Self.layerSwitchControlDefaultsKey)
+            .flatMap(HardwareControl.init(rawValue:)) ?? Self.defaultLayerSwitchControl
         let baseDirectory = persistenceURL?.deletingLastPathComponent() ?? Self.applicationSupportDirectory()
         self.persistenceURL = persistenceURL ?? baseDirectory.appendingPathComponent("Profiles.json")
         let loadedRaw = Self.load(from: self.persistenceURL)
@@ -102,6 +123,15 @@ final class ProfileStore {
     var selectedProfile: MacropadProfile {
         get { profiles.first(where: { $0.id == selectedProfileID }) ?? profiles[0] }
         set { replace(newValue) }
+    }
+
+    /// Flips between the Codex and Claude built-in profiles — the only two
+    /// that exist by design (see `keptBuiltInNames`) — for the layer-switch
+    /// hold gesture. A no-op if either is missing (shouldn't happen).
+    func switchToOtherBuiltInProfile() {
+        let targetApp: AutomationApp = selectedProfile.automationApp == .claude ? .codex : .claude
+        guard let target = profiles.first(where: { $0.automationApp == targetApp }) else { return }
+        selectedProfileID = target.id
     }
 
     func actionBinding(for control: HardwareControl) -> Binding<KeyboardAction> {
@@ -274,6 +304,7 @@ final class ProfileStore {
     private func commitChange() {
         hasUnsyncedChanges = true
         persist()
+        onChange?()
     }
 
     private func persist() {

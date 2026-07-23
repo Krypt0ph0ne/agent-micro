@@ -5,6 +5,9 @@ enum CodexActionExecution: String, Codable, Hashable {
     case configurableShortcut
     case deepLink
     case unavailable
+    /// Answers something CodexPad itself is tracking (e.g. a pending
+    /// approval) — reported to the app only, no keyboard macro sent.
+    case hostEvent
 
     var title: String {
         switch self {
@@ -12,6 +15,7 @@ enum CodexActionExecution: String, Codable, Hashable {
         case .configurableShortcut: "In Codex konfigurierbar"
         case .deepLink: "Codex Deep Link"
         case .unavailable: "Nicht stabil verfügbar"
+        case .hostEvent: "Nur an CodexPad melden"
         }
     }
 }
@@ -32,9 +36,10 @@ struct CodexActionDefinition: Codable, Hashable, Identifiable {
     var availabilityNote: String?
 
     /// A configurable action can be assigned when the pad emits a dedicated
-    /// trigger which Codex can bind in its Keyboard Shortcuts settings.
+    /// trigger which Codex can bind in its Keyboard Shortcuts settings. A
+    /// host event needs no macro at all — it's answered entirely in-app.
     var isDirectlyAssignable: Bool {
-        (execution == .keyboardShortcut || execution == .configurableShortcut) && deviceMacro != nil
+        execution == .hostEvent || ((execution == .keyboardShortcut || execution == .configurableShortcut) && deviceMacro != nil)
     }
 }
 
@@ -74,6 +79,9 @@ struct CodexActionCatalog {
 
     func keyboardAction(id: String) -> KeyboardAction? {
         guard let action = action(id: id), action.isDirectlyAssignable else { return nil }
+        if action.execution == .hostEvent {
+            return KeyboardAction(kind: .hostEvent, label: action.title, icon: action.icon, codexActionID: action.id)
+        }
         return KeyboardAction(
             kind: app == .claude ? .claudeShortcut : .codexShortcut,
             label: action.title,

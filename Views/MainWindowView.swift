@@ -140,7 +140,8 @@ struct MainWindowView: View {
     private func validate() {
         let result = appState.device.validate(
             profile: appState.profiles.selectedProfile,
-            keyboardLayout: appState.profiles.keyboardLayout
+            keyboardLayout: appState.profiles.keyboardLayout,
+            layerSwitchControl: appState.profiles.layerSwitchControl
         )
         showFeedback(
             message: result?.succeeded == true ? "Konfiguration gültig" : "Validierung fehlgeschlagen",
@@ -151,7 +152,8 @@ struct MainWindowView: View {
     private func upload() {
         let result = appState.device.upload(
             profile: appState.profiles.selectedProfile,
-            keyboardLayout: appState.profiles.keyboardLayout
+            keyboardLayout: appState.profiles.keyboardLayout,
+            layerSwitchControl: appState.profiles.layerSwitchControl
         )
         if result?.succeeded == true {
             appState.profiles.markSynchronized()

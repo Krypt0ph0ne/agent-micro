@@ -1,4 +1,3 @@
-import ApplicationServices
 import Foundation
 import Observation
 
@@ -19,15 +18,17 @@ final class CodexPadTapHoldService {
     }
 
     private let profileProvider: () -> MacropadProfile
+    private let permissionMonitor: PermissionMonitor
     private var pressStates: [HardwareControl: PressState] = [:]
 
     /// Last resolved action, surfaced in Diagnostics/Settings for confidence.
     private(set) var lastResolvedAction = "Noch keine Tipp-/Halte-Aktion ausgelöst"
 
     /// Synthesizing keystrokes into other apps needs the Accessibility grant.
-    var hasAccessibilityPermission: Bool { AXIsProcessTrusted() }
+    var hasAccessibilityPermission: Bool { permissionMonitor.hasAccessibilityPermission }
 
-    init(profileProvider: @escaping () -> MacropadProfile) {
+    init(permissionMonitor: PermissionMonitor, profileProvider: @escaping () -> MacropadProfile) {
+        self.permissionMonitor = permissionMonitor
         self.profileProvider = profileProvider
     }
 
