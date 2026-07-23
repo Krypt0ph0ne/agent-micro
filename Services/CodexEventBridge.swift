@@ -79,6 +79,14 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
 
     var onThreads: (([CodexThreadDescriptor]) -> Void)?
     var onStatus: ((String, CodexAgentStatus) -> Void)?
+    /// Fired for the two binary-decision approval kinds only (command
+    /// execution, file change) — see `handleEvent`. The other elicitation
+    /// kinds (permissions grant, free-form user input, MCP elicitation)
+    /// stay on the read-only path below; they don't fit a yes/no answer.
+    var onApprovalRequested: ((PendingApproval) -> Void)?
+    /// Fired when a tracked approval resolves some other way (e.g. answered
+    /// directly in the Codex CLI), by `PendingApproval.id`.
+    var onApprovalResolved: ((String) -> Void)?
 
     func start() {
         guard process == nil else { return }
@@ -353,8 +361,25 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
                   let status = StatusMapper.turnStatus(turn["status"] as? String) else { return }
             pendingElicitations[threadID] = nil
             onStatus?(threadID, status)
-        case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval",
-             "applyPatchApproval", "execCommandApproval", "item/tool/requestUserInput", "mcpServer/elicitation/request":
+        case "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
+             "applyPatchApproval", "execCommandApproval":
+            guard let threadID = params["threadId"] as? String else { return }
+            let opaqueID = requestID.map(String.init(describing:)) ?? UUID().uuidString
+            pendingElicitations[threadID, default: []].insert(opaqueID)
+            onStatus?(threadID, .needsAttention)
+            guard let rpcID = JSONRPCID(requestID) else {
+                logger.error("Approval request for thread \(threadID, privacy: .public) has no usable id; cannot answer it")
+                return
+            }
+            let kind: ApprovalKind = (method == "item/fileChange/requestApproval" || method == "applyPatchApproval") ? .fileChange : .command
+            onApprovalRequested?(PendingApproval(
+                id: opaqueID,
+                source: .codex(threadID: threadID, requestID: rpcID, method: method),
+                kind: kind,
+                summary: Self.summary(for: kind, params: params),
+                receivedAt: .now
+            ))
+        case "item/permissions/requestApproval", "item/tool/requestUserInput", "mcpServer/elicitation/request":
             guard let threadID = params["threadId"] as? String else { return }
             let opaqueID = requestID.map(String.init(describing:)) ?? UUID().uuidString
             pendingElicitations[threadID, default: []].insert(opaqueID)
@@ -363,12 +388,58 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         case "serverRequest/resolved":
             guard let threadID = params["threadId"] as? String else { return }
             let opaqueID = params["requestId"].map(String.init(describing:))
-            if let opaqueID { pendingElicitations[threadID]?.remove(opaqueID) }
+            if let opaqueID {
+                pendingElicitations[threadID]?.remove(opaqueID)
+                onApprovalResolved?(opaqueID)
+            }
             if pendingElicitations[threadID]?.isEmpty != false { onStatus?(threadID, .running) }
         case "error":
             lastError = params["message"] as? String ?? "Codex App Server meldet einen Fehler."
         default:
             break
+        }
+    }
+
+    /// Answers a Codex-origin approval for real: writes a JSON-RPC response
+    /// back over the same stdio pipe, matching the exact shape each approval
+    /// method expects (confirmed against the live `codex app-server`
+    /// protocol schema — the legacy `execCommandApproval`/`applyPatchApproval`
+    /// pair uses the shared `ReviewDecision` enum's plain-string cases, the
+    /// v2 `item/.../requestApproval` pair uses its own smaller decision enum).
+    func respond(to approval: PendingApproval, decision: ApprovalDecision) {
+        guard case .codex(let threadID, let requestID, let method) = approval.source else { return }
+        guard let result = Self.responseResult(method: method, decision: decision) else {
+            logger.error("No known response shape for Codex approval method \(method, privacy: .public)")
+            return
+        }
+        writeJSON(["id": requestID.jsonValue, "result": result])
+        pendingElicitations[threadID]?.remove(approval.id)
+        if pendingElicitations[threadID]?.isEmpty != false { onStatus?(threadID, .running) }
+        logger.notice("Answered Codex approval (\(method, privacy: .public)) for thread \(threadID, privacy: .public): \(decision == .accept ? "accept" : "decline", privacy: .public)")
+    }
+
+    private static func responseResult(method: String, decision: ApprovalDecision) -> [String: Any]? {
+        switch method {
+        case "execCommandApproval", "applyPatchApproval":
+            return ["decision": decision == .accept ? "approved" : "denied"]
+        case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
+            return ["decision": decision == .accept ? "accept" : "decline"]
+        default:
+            return nil
+        }
+    }
+
+    private static func summary(for kind: ApprovalKind, params: [String: Any]) -> String {
+        switch kind {
+        case .command:
+            if let command = params["command"] as? String, !command.isEmpty { return command }
+            if let commandArray = params["command"] as? [String], !commandArray.isEmpty { return commandArray.joined(separator: " ") }
+            return "Befehl ausführen"
+        case .fileChange:
+            if let fileChanges = params["fileChanges"] as? [String: Any], !fileChanges.isEmpty {
+                return fileChanges.keys.sorted().joined(separator: ", ")
+            }
+            return "Dateien ändern"
         }
     }
 

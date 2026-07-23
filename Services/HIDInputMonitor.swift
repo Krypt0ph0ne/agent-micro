@@ -1,4 +1,3 @@
-import ApplicationServices
 import Foundation
 import IOKit.hid
 import Observation
@@ -54,11 +53,16 @@ struct HIDInputDebouncer {
 @Observable
 final class HIDInputMonitor {
     private var manager: IOHIDManager?
+    private let permissionMonitor: PermissionMonitor
     private(set) var isMonitoring = false
     private(set) var status = "Nicht gestartet"
     private(set) var events: [HIDInputEvent] = []
 
-    var hasInputMonitoringPermission: Bool { CGPreflightListenEventAccess() }
+    var hasInputMonitoringPermission: Bool { permissionMonitor.hasInputMonitoringPermission }
+
+    init(permissionMonitor: PermissionMonitor) {
+        self.permissionMonitor = permissionMonitor
+    }
 
     func start(vendorID: Int = 0x1189, productID: Int = 0x8890) {
         stop()

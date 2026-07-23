@@ -33,6 +33,11 @@ final class CodexPadEventService: @unchecked Sendable {
     private(set) var status = "Noch nicht verbunden"
     var onPhysicalEvent: ((CodexPadPhysicalEvent) -> Void)?
     var onFirmwareStatus: ((CodexPadFirmwareStatus) -> Void)?
+    /// Rate-limits `reconnectDevice()`: a genuinely absent device (mid USB
+    /// replug) would otherwise retrigger a full manager/device teardown and
+    /// reopen on every single failed LED write.
+    private var lastReconnectAttempt = Date.distantPast
+    private static let reconnectCooldownSeconds: TimeInterval = 2
 
     deinit {
         statusTimer?.invalidate()
@@ -102,15 +107,43 @@ final class CodexPadEventService: @unchecked Sendable {
             return
         }
 
-        // The long-lived event interface can disappear briefly during USB
-        // reconnects. Reopen Raw HID for this batch instead of dropping the
-        // visual state transition.
+        // A failing write on the long-lived connection means more than this
+        // one LED batch is broken: `device` also carries every encoder
+        // press/release and rotation input report via
+        // `IOHIDDeviceRegisterInputReportCallback`, so a silently-dead write
+        // path silently kills physical encoder input too. Previously this
+        // just fell back to a one-off Raw HID connection for the write,
+        // which kept the LEDs animating (masking the problem) while the
+        // primary connection stayed dead forever — the Drehrad press/hold
+        // gestures then stop working with no visible symptom. Reconnect the
+        // primary connection instead so reads recover, not just this write.
+        reconnectDeviceIfNeeded()
+
+        if let device, sendLEDs(validPackets, to: device) {
+            return
+        }
+
+        // Still down right after a reconnect attempt (or cooling down from a
+        // recent one): reopen Raw HID for just this batch instead of
+        // dropping the visual state transition.
         let fallbackResult = CodexPadHIDClient().send(validPackets)
         if !fallbackResult.succeeded {
             logger.error("LED fallback failed: \(fallbackResult.failureDescription, privacy: .public)")
         } else {
             logger.info("LED batch recovered through a fresh Raw HID connection")
         }
+    }
+
+    /// Tears down and reopens the primary manager/device, restoring both the
+    /// LED output path and the encoder input-report callback. Rate-limited
+    /// so a genuinely absent device doesn't thrash open/close on every write.
+    private func reconnectDeviceIfNeeded() {
+        guard manager != nil else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastReconnectAttempt) > Self.reconnectCooldownSeconds else { return }
+        lastReconnectAttempt = now
+        logger.error("Primary HID connection unhealthy; reconnecting")
+        refresh(enabled: true)
     }
 
     private func sendLEDs(_ packets: [[UInt8]], to device: IOHIDDevice) -> Bool {
