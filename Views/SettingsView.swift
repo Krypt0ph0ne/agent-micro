@@ -9,96 +9,130 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var profiles = appState.profiles
 
-        Form {
-            Section("Profil") {
-                TextField(
-                    "Name",
-                    text: Binding(
-                        get: { profiles.selectedProfile.name },
-                        set: { profiles.renameSelected(to: $0) }
-                    )
-                )
-
-                HStack {
-                    Button("Neu") { profiles.newProfile() }
-                        .frame(maxWidth: .infinity)
-                    Button("Duplizieren") { profiles.duplicateSelected() }
-                        .frame(maxWidth: .infinity)
-                    Button("Löschen", role: .destructive) { profiles.deleteSelected() }
-                        .frame(maxWidth: .infinity)
-                }
-            }
-
-            Section("Tastaturlayout") {
-                Picker("Tastaturlayout", selection: $profiles.keyboardLayout) {
-                    ForEach(KeyboardLayout.allCases) { layout in
-                        Text(layout.title).tag(layout)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                block {
+                    SettingsGroup(title: "Profil") {
+                        SettingsRow(label: "Profil") {
+                            Picker("Profil", selection: $profiles.selectedProfileID) {
+                                ForEach(profiles.profiles) { profile in
+                                    Text(profile.name).tag(profile.id)
+                                }
+                            }
+                            .labelsHidden()
+                            .fixedSize()
+                        }
+                        Divider().padding(.leading, 12)
+                        SettingsRow(label: "Name") {
+                            TextField(
+                                "",
+                                text: Binding(
+                                    get: { profiles.selectedProfile.name },
+                                    set: { profiles.renameSelected(to: $0) }
+                                )
+                            )
+                            .textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing)
+                        }
+                        Divider().padding(.leading, 12)
+                        SettingsRow {
+                            HStack(spacing: 8) {
+                                Spacer()
+                                Button("Neu") { profiles.newProfile() }
+                                Button("Duplizieren") { profiles.duplicateSelected() }
+                                Button("Löschen", role: .destructive) { profiles.deleteSelected() }
+                                    .disabled(profiles.profiles.count <= 1)
+                            }
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
 
-                Text(profiles.keyboardLayout.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Gerät") {
-                Text("Der Helper öffnet nur ein bestätigtes USB-HID-Gerät. Für die Entwicklung läuft die App absichtlich unsandboxed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack {
-                    Button("Gerät erneut suchen") { appState.refreshDevice() }
-                    Spacer()
-                    Button("Diagnose öffnen") { showDiagnostics = true }
-                }
-            }
-
-            Section("Hintergrund") {
-                Toggle(
-                    "Bei Anmeldung starten",
-                    isOn: Binding(
-                        get: { appState.loginItem.isEnabled },
-                        set: { appState.loginItem.setEnabled($0) }
-                    )
-                )
-                Toggle("Halten ordnet bereits belegte Agent-Tasten neu zu", isOn: $quickAssignEnabled)
-
-                Text("Gilt nur für Tasten, die schon einmal einem Codex-Thread zugeordnet wurden. Nutzt eine in Codex kopierte Sitzungs-ID aus der Zwischenablage, sonst den zuletzt aktiven Thread. CodexPad bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit das auch ohne offenes Fenster funktioniert.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Sicherheit") {
-                Text("Profile und Agent-Zuordnungen bleiben lokal unter Application Support. Codex-Approvals (Befehl ausführen, Datei ändern) können beantwortet werden, indem du „Genehmigen“/„Ablehnen“ wie jede andere Aktion einer Taste zuweist (Belegungs-Panel); alle anderen Ereignisse werden nur beobachtet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Import & Export") {
-                HStack {
-                    Button("Exportieren") { exportProfile() }
-                        .frame(maxWidth: .infinity)
-                    Button("Importieren") { importProfile() }
-                        .frame(maxWidth: .infinity)
+                block {
+                    SettingsGroup(title: "Tastaturlayout") {
+                        SettingsRow {
+                            Picker("Tastaturlayout", selection: $profiles.keyboardLayout) {
+                                ForEach(KeyboardLayout.allCases) { layout in
+                                    Text(layout.title).tag(layout)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                        }
+                    }
+                    caption(profiles.keyboardLayout.detail)
                 }
 
-                if let resultText {
-                    Text(resultText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                block {
+                    SettingsGroup(title: "Gerät") {
+                        SettingsRow {
+                            Text("Erkanntes USB-HID-Gerät")
+                            Spacer()
+                            Button("Erneut suchen") { appState.refreshDevice() }
+                        }
+                        Divider().padding(.leading, 12)
+                        SettingsRow {
+                            Text("Diagnose")
+                            Spacer()
+                            Button("Öffnen") { showDiagnostics = true }
+                        }
+                    }
+                    caption("Der Helper öffnet nur ein bestätigtes USB-HID-Gerät. Für die Entwicklung läuft die App absichtlich unsandboxed.")
                 }
+
+                block {
+                    SettingsGroup(title: "Hintergrund") {
+                        SettingsRow {
+                            Toggle(
+                                "Bei Anmeldung starten",
+                                isOn: Binding(
+                                    get: { appState.loginItem.isEnabled },
+                                    set: { appState.loginItem.setEnabled($0) }
+                                )
+                            )
+                        }
+                        Divider().padding(.leading, 12)
+                        SettingsRow {
+                            Toggle("Halten ordnet bereits belegte Agent-Tasten neu zu", isOn: $quickAssignEnabled)
+                        }
+                    }
+                    caption("Gilt nur für Tasten, die schon einmal einem Codex-Thread zugeordnet wurden. Nutzt eine in Codex kopierte Sitzungs-ID aus der Zwischenablage, sonst den zuletzt aktiven Thread. CodexPad bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit das auch ohne offenes Fenster funktioniert.")
+                }
+
+                block {
+                    SettingsGroup(title: "Import & Export") {
+                        SettingsRow {
+                            Spacer()
+                            Button("Exportieren") { exportProfile() }
+                            Button("Importieren") { importProfile() }
+                        }
+                    }
+                    if let resultText {
+                        caption(resultText)
+                    }
+                }
+
+                caption("Profile und Agent-Zuordnungen bleiben lokal unter Application Support. Codex-Approvals (Befehl ausführen, Datei ändern) können beantwortet werden, indem du „Genehmigen“/„Ablehnen“ wie jede andere Aktion einer Taste zuweist (Belegungs-Panel); alle anderen Ereignisse werden nur beobachtet.")
             }
+            .padding(20)
         }
-        .formStyle(.grouped)
-        .controlSize(.small)
-        .frame(width: 460, height: 560)
+        .frame(width: 460, height: 600)
         .sheet(isPresented: $showDiagnostics) {
             DiagnosticsView(appState: appState)
                 .frame(minWidth: 720, minHeight: 520)
         }
+    }
+
+    private func block(@ViewBuilder _ content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 6, content: content)
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+            .textSelection(.enabled)
     }
 
     private func exportProfile() {
@@ -119,5 +153,44 @@ struct SettingsView: View {
             resultText = "Import fehlgeschlagen: \(error.localizedDescription)"
         }
     }
+}
 
+/// A rounded, titled container that mirrors macOS System Settings groups —
+/// a small secondary-style header above a card of divided rows.
+private struct SettingsGroup<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 0) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+}
+
+/// A single row inside a `SettingsGroup`, sized like a System Settings list row.
+private struct SettingsRow<Content: View>: View {
+    var label: String?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack {
+            if let label {
+                Text(label)
+                Spacer()
+            }
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+    }
 }
