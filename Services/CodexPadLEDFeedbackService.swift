@@ -75,10 +75,40 @@ final class CodexPadLEDFeedbackService {
         showMomentaryReaction(.threadAssigned, profile: profile)
     }
 
+    /// One-shot green/red reaction fired the moment an approval is answered.
+    func showApprovalResolvedReaction(decision: ApprovalDecision, profile: MacropadProfile) {
+        showMomentaryReaction(decision == .accept ? .approvalAccepted : .approvalDeclined, profile: profile)
+    }
+
     func showIdleLighting() {
         animationTask?.cancel()
         animationTask = nil
         renderAgentLighting(previousStatuses: agentStatuses)
+    }
+
+    /// A brief all-keys white flash confirming the layer-switch hold gesture
+    /// fired — not a per-profile configurable reaction, just a system blip.
+    func flashLayerSwitchConfirmation(profile: MacropadProfile) {
+        activeProfile = profile
+        animationTask?.cancel()
+        logger.info("Layer switch confirmation flash")
+        let flashDurationMilliseconds = 350
+        sendWholePad { control in
+            KeyLEDConfiguration(control: control, effect: .steady, red: 255, green: 255, blue: 255, brightness: 255, periodMilliseconds: flashDurationMilliseconds)
+        }
+        animationTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(flashDurationMilliseconds))
+            } catch {
+                return
+            }
+            if self.isDictationHeld {
+                self.showDictationReaction()
+            } else {
+                self.showIdleLighting()
+            }
+        }
     }
 
     func showAgentStatuses(_ statuses: [HardwareControl: CodexAgentStatus], profile: MacropadProfile) {
@@ -140,17 +170,28 @@ final class CodexPadLEDFeedbackService {
     }
 
     private func renderAgentLighting(previousStatuses: [HardwareControl: CodexAgentStatus] = [:]) {
+        // Several independent callers reach this (status updates, flash
+        // restores) and none of them own the LEDs while a momentary
+        // animation is mid-flight — sending here too would race the
+        // animation's own ticks and read as wild flicker. Deferring is safe:
+        // every animation ends by calling back into
+        // showIdleLighting()/showDictationReaction(), which re-renders from
+        // whatever the latest state turned out to be.
+        guard animationTask == nil else { return }
         guard let profile = activeProfile else { return }
-        let suppressIdle = agentStatuses.values.contains { status in
-            guard let event = LEDReactionEvent.event(for: status) else { return false }
-            let reaction = profile.reaction(for: event)
-            // A one-shot flash is no longer active after its timer fires. It
-            // must restore idle even while the thread remains completed.
-            return reaction.effect != .off && reaction.effect != .flash && reaction.disablesIdle
-        }
         let settings = HardwareControl.buttons.map { control -> KeyLEDConfiguration in
             let status = agentStatuses[control] ?? .unassigned
-            let idleSetting = baseSetting(for: control, profile: profile, suppressed: suppressIdle)
+            // Suppression only applies to this key's own idle color — a
+            // different key's active agent animation must not blank an
+            // unrelated key's resting light.
+            let suppressThisKey: Bool = {
+                guard let event = LEDReactionEvent.event(for: status) else { return false }
+                let reaction = profile.reaction(for: event)
+                // A one-shot flash is no longer active after its timer fires. It
+                // must restore idle even while the thread remains completed.
+                return reaction.effect != .off && reaction.effect != .flash && reaction.disablesIdle
+            }()
+            let idleSetting = baseSetting(for: control, profile: profile, suppressed: suppressThisKey)
             guard let event = LEDReactionEvent.event(for: status) else {
                 statusFlashTasks[control]?.cancel()
                 statusFlashTasks[control] = nil

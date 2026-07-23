@@ -20,13 +20,14 @@ enum CodexPadPacketError: LocalizedError, Equatable {
 struct CodexPadPacketEncoder {
     static let packetSize = 32
 
-    func packets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI) throws -> [[UInt8]] {
+    func packets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI, layerSwitchControl: HardwareControl? = nil) throws -> [[UInt8]] {
         try HardwareControl.allCases.map { control -> [UInt8] in
             let binding = profile.binding(for: control)
-            // Tap-vs-hold controls are driven by CodexPad: the firmware only
-            // reports the physical edges while the app synthesizes the resolved
-            // tap or hold action, so nothing is bound on the device itself.
-            if binding.isTapHold {
+            // Tap-vs-hold controls, and the reserved layer-switch key, are
+            // driven by CodexPad itself: the firmware only reports the
+            // physical edges while the app synthesizes the resolved
+            // behavior, so nothing is bound on the device itself.
+            if binding.isTapHold || control == layerSwitchControl {
                 return appOnlyPacket(control: control)
             }
             return try bindingPacket(action: binding.action, control: control, layout: layout)
@@ -52,8 +53,8 @@ struct CodexPadPacketEncoder {
     /// flashed baseline therefore falls back to a classic 0→brightness pulse;
     /// the configured floor only actually breathes while CodexPad is running
     /// and driving it live, via `CodexPadLEDFeedbackService`.
-    func uploadPackets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI) throws -> [[UInt8]] {
-        try packets(profile: profile, layout: layout)
+    func uploadPackets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI, layerSwitchControl: HardwareControl? = nil) throws -> [[UInt8]] {
+        try packets(profile: profile, layout: layout, layerSwitchControl: layerSwitchControl)
             + HardwareControl.buttons.map {
                 ledPacket(setting: profile.baseLighting(for: $0))
             }
