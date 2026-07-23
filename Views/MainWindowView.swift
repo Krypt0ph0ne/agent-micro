@@ -9,10 +9,11 @@ struct MainWindowView: View {
     }
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openWindow) private var openWindow
     let appState: AppState
-    @State private var showDiagnostics = false
     @State private var actionFeedback: ActionFeedback?
     @State private var feedbackTask: Task<Void, Never>?
+    @State private var isPresentingLayerManagement = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,7 +33,7 @@ struct MainWindowView: View {
                 .help("Gerät erneut suchen")
                 .disabled(appState.device.isBusy)
 
-                Button { showDiagnostics = true } label: {
+                Button { openWindow(id: "diagnostics") } label: {
                     Image(systemName: "stethoscope")
                 }
                 .help("Diagnose öffnen")
@@ -42,10 +43,6 @@ struct MainWindowView: View {
                 }
                 .help("Einstellungen öffnen")
             }
-        }
-        .sheet(isPresented: $showDiagnostics) {
-            DiagnosticsView(appState: appState)
-                .frame(minWidth: 720, minHeight: 520)
         }
         .task {
             appState.refreshDevice()
@@ -71,8 +68,10 @@ struct MainWindowView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
-            .frame(maxWidth: 180, alignment: .leading)
+            .frame(maxWidth: 130, alignment: .leading)
             .controlSize(.small)
+
+            layerPicker
 
             Spacer(minLength: 8)
 
@@ -91,6 +90,41 @@ struct MainWindowView: View {
         .padding(.horizontal, 12)
         .frame(height: 40)
         .background(.bar)
+    }
+
+    /// Sits next to the Codex/Claude profile picker: which layer (alternate
+    /// key/encoder assignment set) of the selected profile is active, plus
+    /// access to add/rename/delete layers and their blink-confirmation color.
+    private var layerPicker: some View {
+        let profile = appState.profiles.selectedProfile
+        return HStack(spacing: 2) {
+            Picker(
+                "Layer",
+                selection: Binding(
+                    get: { profile.activeLayerID },
+                    set: { appState.profiles.selectLayer($0) }
+                )
+            ) {
+                ForEach(profile.layers) { layer in
+                    Text(layer.name).tag(layer.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .frame(maxWidth: 110, alignment: .leading)
+
+            Button {
+                isPresentingLayerManagement = true
+            } label: {
+                Image(systemName: "square.stack.3d.up")
+            }
+            .buttonStyle(.borderless)
+            .help("Layer verwalten")
+        }
+        .sheet(isPresented: $isPresentingLayerManagement) {
+            LayerManagementView(appState: appState)
+        }
     }
 
     private var actionBar: some View {
@@ -140,8 +174,7 @@ struct MainWindowView: View {
     private func validate() {
         let result = appState.device.validate(
             profile: appState.profiles.selectedProfile,
-            keyboardLayout: appState.profiles.keyboardLayout,
-            layerSwitchControl: appState.profiles.layerSwitchControl
+            keyboardLayout: appState.profiles.keyboardLayout
         )
         showFeedback(
             message: result?.succeeded == true ? "Konfiguration gültig" : "Validierung fehlgeschlagen",
@@ -152,8 +185,7 @@ struct MainWindowView: View {
     private func upload() {
         let result = appState.device.upload(
             profile: appState.profiles.selectedProfile,
-            keyboardLayout: appState.profiles.keyboardLayout,
-            layerSwitchControl: appState.profiles.layerSwitchControl
+            keyboardLayout: appState.profiles.keyboardLayout
         )
         if result?.succeeded == true {
             appState.profiles.markSynchronized()

@@ -194,7 +194,7 @@ struct CodexAssignmentWizardView: View {
             step(1, "Öffne in \(appName) ", trailing: appName == "Claude" ? "die Datei ~/.claude/keybindings.json." : "Settings › Keyboard Shortcuts.")
             step(2, appName == "Claude" ? "Trage die Aktions-ID ein: " : "Suche den Eintrag ", trailing: appName == "Claude" ? "„\(action.codexCommandID ?? action.id)".appending(".") : "„\(action.title)".appending("."))
             step(3, appName == "Claude" ? "…gebunden an die Tastenkombination " : "Klicke ihn an und drücke die Tastenkombination ", trailing: CodexTriggerPool.displayLabel(for: trigger) + ".")
-            step(4, "Danach in CodexPad ", trailing: "Übertragen klicken, um den Trigger auf das Pad zu laden.")
+            step(4, "Danach in Agent Micro ", trailing: "Übertragen klicken, um den Trigger auf das Pad zu laden.")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

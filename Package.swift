@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "CodexPad",
+    name: "AgentMicro",
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "CodexPad", targets: ["CodexPad"]),

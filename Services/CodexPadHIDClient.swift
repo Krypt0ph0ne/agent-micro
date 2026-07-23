@@ -25,11 +25,11 @@ struct CodexPadHIDClient {
         defer { IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone)) }
 
         guard let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>, let device = devices.first else {
-            return failure("CodexPad Raw-HID-Interface FF60:0061 wurde nicht gefunden.")
+            return failure("Agent Micro Raw-HID-Interface FF60:0061 wurde nicht gefunden.")
         }
         let openResult = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
         guard openResult == kIOReturnSuccess else {
-            return failure(String(format: "CodexPad Raw-HID konnte nicht geöffnet werden: 0x%08X", openResult))
+            return failure(String(format: "Agent Micro Raw-HID konnte nicht geöffnet werden: 0x%08X", openResult))
         }
         defer { IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone)) }
 
@@ -44,7 +44,7 @@ struct CodexPadHIDClient {
         }
         return ProcessResult(
             exitCode: 0,
-            stdout: "\(packets.count) CodexPad-HID-Paket(e) erfolgreich übertragen.",
+            stdout: "\(packets.count) Agent-Micro-HID-Paket(e) erfolgreich übertragen.",
             stderr: "",
             timedOut: false,
             launchError: nil

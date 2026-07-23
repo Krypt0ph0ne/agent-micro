@@ -1,14 +1,5 @@
 import SwiftUI
 
-/// Whether onboarding reserves a hardware key for holding-to-switch between
-/// the Codex and Claude profiles, or leaves switching to the app only.
-/// Shared between `OnboardingView` (which applies the final choice to
-/// `ProfileStore.layerSwitchControl` on finish) and the step views below.
-enum LayerSwitchChoice: Equatable {
-    case key(HardwareControl)
-    case appOnly
-}
-
 // MARK: - Permissions
 
 /// First real step of both the quick and guided path: the same permission
@@ -25,7 +16,7 @@ struct OnboardingPermissionsStep: View {
         OnboardingStepChrome(
             icon: "lock.shield",
             title: "Zwei Berechtigungen",
-            subtitle: "Damit CodexPad Tasten und Drehrad empfangen und Shortcuts an Codex/Claude senden kann, braucht macOS diese Freigaben.",
+            subtitle: "Damit Agent Micro Tasten und Drehrad empfangen und Shortcuts an Codex/Claude senden kann, braucht macOS diese Freigaben.",
             continueTitle: isQuickMode ? "Los geht's" : "Weiter",
             onBack: onBack,
             onContinue: onContinue
@@ -33,12 +24,12 @@ struct OnboardingPermissionsStep: View {
             VStack(spacing: 10) {
                 permissionRow(
                     title: "Bedienungshilfen",
-                    detail: "Damit CodexPad Tastenkombinationen an Codex/Claude senden kann.",
+                    detail: "Damit Agent Micro Tastenkombinationen an Codex/Claude senden kann.",
                     isGranted: monitor.hasAccessibilityPermission
                 )
                 permissionRow(
                     title: "Input Monitoring",
-                    detail: "Damit CodexPad die Tasten und das Drehrad überhaupt empfängt.",
+                    detail: "Damit Agent Micro die Tasten und das Drehrad überhaupt empfängt.",
                     isGranted: monitor.hasInputMonitoringPermission
                 )
                 if !bothGranted {
@@ -80,7 +71,7 @@ struct OnboardingAgentChoiceStep: View {
         OnboardingStepChrome(
             icon: "person.2.badge.gearshape",
             title: "Welche Agents nutzt du?",
-            subtitle: "Das steuert, welche Profile im Menü auftauchen und ob eine Umschalt-Taste zwischen ihnen sinnvoll ist.",
+            subtitle: "Das steuert, welche Profile im Menü auftauchen.",
             continueDisabled: selected.isEmpty,
             onBack: onBack,
             onContinue: onContinue
@@ -91,7 +82,7 @@ struct OnboardingAgentChoiceStep: View {
                 OnboardingChoiceCard(
                     icon: "arrow.left.arrow.right",
                     title: "Beide",
-                    subtitle: "Codex- und Claude-Profil sind beide aktiv, mit einer Umschalt-Möglichkeit dazwischen.",
+                    subtitle: "Codex- und Claude-Profil sind beide aktiv; weise irgendeiner Taste die Aktion „Profil wechseln“ zu, um zwischen ihnen zu springen.",
                     isSelected: isBoth
                 ) { selected = Set(AutomationApp.allCases) }
             }
@@ -109,63 +100,64 @@ struct OnboardingAgentChoiceStep: View {
     }
 }
 
-// MARK: - Switch button
+// MARK: - Layers
 
-/// Shown only when both agents are selected. Deliberately has no default —
-/// `onContinue` stays disabled until the user picks one of the two options,
-/// so nobody ends up with a silently-assigned reserved key.
-struct OnboardingSwitchButtonStep: View {
-    @Binding var choice: LayerSwitchChoice?
+/// Purely explanatory — layers themselves are created/edited later via the
+/// layer picker next to the profile picker, not here. Shows the two example
+/// layers every built-in profile ships with, so the concept isn't abstract.
+struct OnboardingLayersStep: View {
+    let profile: MacropadProfile
     let onBack: () -> Void
     let onContinue: () -> Void
 
-    private var isKeyChoice: Bool {
-        if case .key = choice { return true }
-        return false
-    }
-
-    private var selectedKey: HardwareControl {
-        if case .key(let control) = choice { return control }
-        return ProfileStore.defaultLayerSwitchControl
-    }
-
-    private var highlightBinding: Binding<HardwareControl> {
-        Binding(get: { selectedKey }, set: { choice = .key($0) })
-    }
-
     var body: some View {
         OnboardingStepChrome(
-            icon: "arrow.left.arrow.right.circle",
-            title: "Zwischen Codex und Claude wechseln",
-            subtitle: "Eine Taste kann fürs Umschalten reserviert werden, oder du wechselst nur über die App. Klicke eine Taste an, um sie zu wählen.",
-            continueDisabled: choice == nil,
+            icon: "square.stack.3d.up",
+            title: "Layer pro Profil",
+            subtitle: "Jedes Profil kann mehrere Layer mit unterschiedlichen Tastenbelegungen haben. Weise einer Taste die Aktion „Layer wechseln“ zu, um zwischen ihnen zu springen – das Pad blinkt kurz in der Farbe des neuen Layers, damit du auch ohne Blick in die App weißt, welcher aktiv ist.",
             onBack: onBack,
             onContinue: onContinue
         ) {
-            VStack(spacing: 12) {
-                OnboardingChoiceCard(
-                    icon: "hand.tap.fill",
-                    title: "Taste zum Halten wählen",
-                    subtitle: "Halten (>400 ms) wechselt das Profil.",
-                    isSelected: isKeyChoice
-                ) { choice = .key(selectedKey) }
-
-                if isKeyChoice {
-                    OnboardingSwitchKeyPad(selected: highlightBinding)
-                        .padding(.vertical, 6)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+            VStack(spacing: 10) {
+                ForEach(profile.layers) { layer in
+                    layerCard(layer)
                 }
-
-                OnboardingChoiceCard(
-                    icon: "square.grid.2x2",
-                    title: "Nur über die App wechseln",
-                    subtitle: "Keine Taste ist reserviert; das Umschalten läuft über Menüleiste bzw. Hauptfenster.",
-                    isSelected: choice == .appOnly
-                ) { choice = .appOnly }
+                Text("Codex und Claude starten schon mit zwei Beispiel-Layern; weitere legst du über das Stapel-Symbol neben der Profilauswahl an. Zwischen Codex und Claude selbst wechselst du genauso einfach über die Aktion „Profil wechseln“.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(OnboardingPalette.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isKeyChoice)
-            .frame(maxWidth: 440)
+            .frame(maxWidth: 420)
         }
+    }
+
+    private func layerCard(_ layer: ProfileLayer) -> some View {
+        HStack(spacing: 14) {
+            Circle()
+                .fill(Color(
+                    red: Double(layer.blinkRed) / 255,
+                    green: Double(layer.blinkGreen) / 255,
+                    blue: Double(layer.blinkBlue) / 255
+                ))
+                .frame(width: 14, height: 14)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(layer.name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(OnboardingPalette.textPrimary)
+                Text(layer.controls.prefix(3).map(\.action.label).joined(separator: " · "))
+                    .font(.system(size: 11))
+                    .foregroundStyle(OnboardingPalette.textSecondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Text("blinkt \(layer.blinkCount)×")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(OnboardingPalette.textSecondary)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(OnboardingPalette.cardBackground))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(OnboardingPalette.cardBorder, lineWidth: 1))
     }
 }
 
@@ -432,7 +424,6 @@ struct OnboardingMicrophoneStep: View {
 
 struct OnboardingSummaryStep: View {
     let selectedAgents: Set<AutomationApp>
-    let switchChoice: String?
     let micSource: DictationSource
     let onBack: () -> Void
     let onFinish: () -> Void
@@ -454,9 +445,6 @@ struct OnboardingSummaryStep: View {
         ) {
             VStack(spacing: 10) {
                 summaryRow(icon: "person.2.fill", title: "Agents", value: agentsSummary)
-                if let switchChoice {
-                    summaryRow(icon: "arrow.left.arrow.right", title: "Umschalten", value: switchChoice)
-                }
                 summaryRow(icon: "mic.fill", title: "Mikrofon", value: micSource.title)
             }
             .frame(maxWidth: 420)

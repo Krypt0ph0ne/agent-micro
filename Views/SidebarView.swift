@@ -23,7 +23,7 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $selection) {
-            Section("CodexPad") {
+            Section("Agent Micro") {
                 ForEach(SidebarSection.allCases) { item in
                     Label(item.title, systemImage: item.icon).tag(item)
                 }

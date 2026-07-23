@@ -9,15 +9,21 @@ struct TapHoldSection: View {
     @State private var holdSearch = ""
     @State private var isPresentingHoldTextSubmission = false
     @State private var isPresentingHoldWizard = false
+    @State private var isPresentingHoldLayerSwitchPicker = false
 
     private var binding: ControlBinding {
         appState.profiles.selectedProfile.binding(for: control)
     }
 
-    /// Both slots must be app-synthesizable keyboard actions. Media, mouse and
-    /// agent bindings cannot be re-emitted by the app, so tap-vs-hold is hidden.
+    /// The tap side must either be an app-synthesizable keyboard action, or
+    /// one of the host-dispatched app actions (`.layerSwitch`/`.profileSwitch`)
+    /// — both slots then resolve through `CodexPadTapHoldService.onAppAction`
+    /// instead of keystroke synthesis. Media, mouse and agent bindings cannot
+    /// be re-emitted by the app, so tap-vs-hold stays hidden for those.
     private var tapSupportsHold: Bool {
         KeystrokeSynthesizer.canSynthesize(binding.action.deviceMacro)
+            || binding.action.kind == .layerSwitch
+            || binding.action.kind == .profileSwitch
     }
 
     private var assignableActions: [CodexActionDefinition] {
@@ -73,6 +79,15 @@ struct TapHoldSection: View {
         }
         .sheet(isPresented: $isPresentingHoldWizard) {
             CodexAssignmentWizardView(appState: appState, control: control, slot: .hold)
+        }
+        .sheet(isPresented: $isPresentingHoldLayerSwitchPicker) {
+            LayerSwitchModePickerSheet { mode in
+                appState.profiles.setHoldAction(
+                    .layerSwitch(mode: mode),
+                    thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds,
+                    for: control
+                )
+            }
         }
     }
 
@@ -130,6 +145,20 @@ struct TapHoldSection: View {
                     isChoosingHold = false
                 }
                 .help("Konfigurierbare Codex-Aktion mit eigenem Trigger als Halten-Aktion einrichten")
+                Button("Layer", systemImage: "square.stack.3d.up") {
+                    isPresentingHoldLayerSwitchPicker = true
+                    isChoosingHold = false
+                }
+                .help("Zwischen den Layern dieses Profils wechseln")
+                Button("Profil", systemImage: "arrow.left.arrow.right") {
+                    appState.profiles.setHoldAction(
+                        .profileSwitch,
+                        thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds,
+                        for: control
+                    )
+                    isChoosingHold = false
+                }
+                .help("Zwischen Codex und Claude wechseln")
             }
             .controlSize(.small)
 
@@ -197,7 +226,7 @@ struct TapHoldSection: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Bedienungshilfen nötig")
                     .font(.caption.weight(.semibold))
-                Text("Tippen/Halten sendet die Aktionen selbst. Erlaube CodexPad die Bedienungshilfen, sonst bleibt die Zweitbelegung wirkungslos.")
+                Text("Tippen/Halten sendet die Aktionen selbst. Erlaube Agent Micro die Bedienungshilfen, sonst bleibt die Zweitbelegung wirkungslos.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -244,15 +273,22 @@ struct TapHoldSection: View {
         )
     }
 
-    /// A useful starting hold action: the first synthesizable Codex shortcut
-    /// that differs from the current tap action.
+    /// A useful starting hold action. Pairs `.layerSwitch`/`.profileSwitch`
+    /// taps with their natural counterpart (the two are usually assigned
+    /// together on one key); otherwise falls back to the first synthesizable
+    /// Codex shortcut that differs from the current tap action.
     private func defaultHoldAction() -> KeyboardAction? {
+        switch binding.action.kind {
+        case .layerSwitch: return .profileSwitch
+        case .profileSwitch: return .layerSwitch(mode: .cycle)
+        default: break
+        }
         let tapID = binding.action.codexActionID
         let choice = assignableActions.first { $0.id != tapID } ?? assignableActions.first
         return choice.flatMap { appState.activeCatalog.keyboardAction(id: $0.id) }
     }
 
     private var infoMessage: String {
-        "Kurzes Tippen sendet die Haupt-Aktion, längeres Halten die Zweit-Aktion. CodexPad misst die Druckdauer und sendet die passende Tastenkombination selbst. Das benötigt die eigene CH552-Firmware (sie meldet die Druckflanken) und die Bedienungshilfen-Berechtigung. Nach dem Ändern einmal „Übertragen“ klicken."
+        "Kurzes Tippen sendet die Haupt-Aktion, längeres Halten die Zweit-Aktion. Agent Micro misst die Druckdauer und sendet die passende Tastenkombination selbst. Das benötigt die eigene CH552-Firmware (sie meldet die Druckflanken) und die Bedienungshilfen-Berechtigung. Nach dem Ändern einmal „Übertragen“ klicken."
     }
 }

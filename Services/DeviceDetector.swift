@@ -41,7 +41,7 @@ struct DeviceDetector {
             device: nil,
             candidates: candidates,
             rawIORegistry: result.stdout,
-            error: "Kein unterstütztes CodexPad gefunden. Sichtbare USB-Kennungen: \(summary.isEmpty ? "keine" : summary)."
+            error: "Kein unterstütztes Agent-Micro-Gerät gefunden. Sichtbare USB-Kennungen: \(summary.isEmpty ? "keine" : summary)."
         )
     }
 
@@ -81,7 +81,7 @@ struct DeviceDetector {
         if vendorID == 0x4249 && productID == 0x4287 {
             support = .supported
             capabilities = .codexPadCH552
-            summary = "Eigene CH552-CodexPad-Firmware erkannt. Sechs Tasten, Encoder und sechs einzeln steuerbare RGB-LEDs sind firmwarebestätigt."
+            summary = "Eigene CH552-Agent-Micro-Firmware erkannt. Sechs Tasten, Encoder und sechs einzeln steuerbare RGB-LEDs sind firmwarebestätigt."
         } else if vendorID == 0x1189 && productID == 0x8890 {
             support = .supported
             capabilities = .ch57x8890
@@ -89,7 +89,7 @@ struct DeviceDetector {
         } else if vendorID == 0x1189 && [0x8840, 0x8842].contains(productID) {
             support = .related
             capabilities = .unsupported
-            summary = "CH57x-Variante erkannt. Der gebündelte Helper kennt diese Kennung, CodexPad verifiziert Uploads jedoch derzeit nur für das getestete 3×2-Modell 0x8890."
+            summary = "CH57x-Variante erkannt. Der gebündelte Helper kennt diese Kennung, Agent Micro verifiziert Uploads jedoch derzeit nur für das getestete 3×2-Modell 0x8890."
         } else if vendorID == 0x1189 {
             support = .related
             capabilities = .unsupported
@@ -101,7 +101,7 @@ struct DeviceDetector {
         }
 
         return ConnectedDevice(
-            name: string(named: "USB Product Name", in: section) ?? string(named: "kUSBProductString", in: section) ?? ([0x1189, 0x4249].contains(vendorID) ? "CodexPad" : "USB-Gerät"),
+            name: string(named: "USB Product Name", in: section) ?? string(named: "kUSBProductString", in: section) ?? ([0x1189, 0x4249].contains(vendorID) ? "Agent Micro" : "USB-Gerät"),
             vendorID: vendorID,
             productID: productID,
             locationID: locationID,

@@ -210,13 +210,17 @@ final class CodexPadTests: XCTestCase {
         ) as! [String: Any]
         var profiles = document["profiles"] as! [[String: Any]]
         for profileIndex in profiles.indices {
-            var controls = profiles[profileIndex]["controls"] as! [[String: Any]]
-            for controlIndex in controls.indices {
-                var action = controls[controlIndex]["action"] as! [String: Any]
-                action.removeValue(forKey: "id")
-                controls[controlIndex]["action"] = action
+            var layers = profiles[profileIndex]["layers"] as! [[String: Any]]
+            for layerIndex in layers.indices {
+                var controls = layers[layerIndex]["controls"] as! [[String: Any]]
+                for controlIndex in controls.indices {
+                    var action = controls[controlIndex]["action"] as! [String: Any]
+                    action.removeValue(forKey: "id")
+                    controls[controlIndex]["action"] = action
+                }
+                layers[layerIndex]["controls"] = controls
             }
-            profiles[profileIndex]["controls"] = controls
+            profiles[profileIndex]["layers"] = layers
         }
         document["profiles"] = profiles
         try JSONSerialization.data(withJSONObject: document).write(to: url)

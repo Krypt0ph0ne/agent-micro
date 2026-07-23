@@ -81,7 +81,7 @@ struct MenuBarPopoverView: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
-            .help("CodexPad öffnen")
+            .help("Agent Micro öffnen")
 
             Button(action: onQuit) {
                 Image(systemName: "power")

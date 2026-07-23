@@ -81,7 +81,7 @@ final class HIDInputMonitor {
 
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard result == kIOReturnSuccess else {
-            status = "HID-Monitor konnte nicht geöffnet werden (IOReturn \(result)). Aktiviere bei Bedarf Input Monitoring für CodexPad."
+            status = "HID-Monitor konnte nicht geöffnet werden (IOReturn \(result)). Aktiviere bei Bedarf Input Monitoring für Agent Micro."
             IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
             return
         }
@@ -90,7 +90,7 @@ final class HIDInputMonitor {
         isMonitoring = true
         status = hasInputMonitoringPermission
             ? "Lauscht auf physische Tastendrücke des CH57x-Keyboards."
-            : "Lauscht auf physische Tastendrücke. Falls keine Ereignisse eintreffen, Input Monitoring für CodexPad erlauben."
+            : "Lauscht auf physische Tastendrücke. Falls keine Ereignisse eintreffen, Input Monitoring für Agent Micro erlauben."
     }
 
     func stop() {

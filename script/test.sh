@@ -8,5 +8,5 @@ cd "$ROOT_DIR"
 echo "Testing CH57x helper reference…"
 cargo test --manifest-path "$REFERENCE_DIR/Cargo.toml"
 
-echo "Testing CodexPad…"
+echo "Testing Agent Micro…"
 swift test

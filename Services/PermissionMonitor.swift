@@ -72,7 +72,7 @@ final class PermissionMonitor {
         if hasAccessibilityPermission, !accessibility {
             notifyRevoked(
                 title: "Bedienungshilfen entzogen",
-                body: "CodexPad kann keine Tastenkombinationen mehr senden. Bitte in Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen wieder erlauben."
+                body: "Agent Micro kann keine Tastenkombinationen mehr senden. Bitte in Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen wieder erlauben."
             )
         }
         if hasInputMonitoringPermission, !inputMonitoring {

@@ -21,7 +21,6 @@ struct DiagnosticsView: View {
                 DeviceDiagnosticsCard(appState: appState)
                 CodexPadProtocolCard(appState: appState)
                 InputMonitorCard(appState: appState)
-                LEDDiagnosticsCard(appState: appState)
                 AgentBridgeDiagnosticsCard(title: "Codex Event Bridge", icon: "bolt.horizontal.circle", store: appState.codexThreads)
                 AgentBridgeDiagnosticsCard(title: "Claude Agent Bridge", icon: "bolt.horizontal.circle", store: appState.claudeThreads)
 
@@ -104,7 +103,7 @@ private struct CodexPadProtocolCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("CodexPad-Protokoll", systemImage: "externaldrive.connected.to.line.below")
+                Label("Agent Micro-Protokoll", systemImage: "externaldrive.connected.to.line.below")
                     .font(.headline)
                 Spacer()
                 Button("Status abfragen") { appState.padEvents.requestStatus() }
@@ -193,7 +192,7 @@ private struct InputMonitorCard: View {
             }
             Text(monitor.status).font(.caption).foregroundStyle(.secondary)
             if !monitor.hasInputMonitoringPermission {
-                Text("Input Monitoring ist für vollständige globale Beobachtung wahrscheinlich erforderlich. CodexPad liest Ereignisse nur passiv und kann sie nicht blockieren.")
+                Text("Input Monitoring ist für vollständige globale Beobachtung wahrscheinlich erforderlich. Agent Micro liest Ereignisse nur passiv und kann sie nicht blockieren.")
                     .font(.caption).foregroundStyle(.orange)
             }
             if monitor.events.isEmpty {
@@ -205,26 +204,6 @@ private struct InputMonitorCard: View {
                         .padding(.vertical, 2)
                 }
             }
-        }
-        .padding(14)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-private struct LEDDiagnosticsCard: View {
-    let appState: AppState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("LED-Test", systemImage: "lightbulb") .font(.headline)
-            Text("Das 0x8890-Protokoll bestätigt drei globale, dauerhaft gespeicherte Patterns (Aus, 1, 2). Die Farben und Effekte sind vom Pad vorgegeben; per-Key-RGB und Helligkeit werden nicht unterstützt.")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("Aus") { appState.device.setLEDMode(0) }
-                Button("Pattern 1") { appState.device.setLEDMode(1) }
-                Button("Pattern 2") { appState.device.setLEDMode(2) }
-            }
-            .disabled(!appState.device.state.isSupportedConnection || appState.device.isBusy)
         }
         .padding(14)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
