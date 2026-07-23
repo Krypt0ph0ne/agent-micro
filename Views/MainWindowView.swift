@@ -65,7 +65,7 @@ struct MainWindowView: View {
         @Bindable var profiles = appState.profiles
         return HStack(spacing: 10) {
             Picker("Profil", selection: $profiles.selectedProfileID) {
-                ForEach(profiles.profiles) { profile in
+                ForEach(profiles.visibleProfiles) { profile in
                     Text(profile.name).tag(profile.id)
                 }
             }

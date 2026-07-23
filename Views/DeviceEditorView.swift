@@ -17,7 +17,6 @@ struct DeviceEditorView: View {
                 profile: appState.profiles.selectedProfile,
                 selectedControl: $selectedControl
             )
-            .frame(height: 146)
 
             Picker("Editor", selection: $mode) {
                 ForEach(EditorMode.allCases) { Text($0.rawValue).tag($0) }

@@ -128,6 +128,35 @@ final class CodexPadTests: XCTestCase {
     }
 
     @MainActor
+    func testLegacyGreenIdleReactionIsMigratedToWhiteButCustomRecolorIsLeftAlone() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-idle-color-migration-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+
+        // Codex keeps the original shipped green; Claude simulates a user
+        // who already recolored idle themselves (should be left untouched).
+        var codexLegacyGreen = ProfileFactory.codex(catalog: catalog)
+        codexLegacyGreen.setReaction(.init(event: .agentIdle, effect: .pulse, red: 48, green: 209, blue: 88, brightness: 180, periodMilliseconds: 2_200, disablesIdle: true, minBrightness: 40))
+        var claudeCustomized = ProfileFactory.claude(catalog: claudeCatalog)
+        claudeCustomized.setReaction(.init(event: .agentIdle, effect: .pulse, red: 10, green: 20, blue: 30, brightness: 180, periodMilliseconds: 2_200, disablesIdle: true, minBrightness: 40))
+        try ProfileFileCodec.encode([codexLegacyGreen, claudeCustomized]).write(to: url)
+
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
+
+        let migratedIdle = store.profiles.first(where: { $0.name == "Codex" })!.reaction(for: .agentIdle)
+        XCTAssertEqual(migratedIdle.red, 255)
+        XCTAssertEqual(migratedIdle.green, 255)
+        XCTAssertEqual(migratedIdle.blue, 255)
+
+        let untouchedIdle = store.profiles.first(where: { $0.name == "Claude" })!.reaction(for: .agentIdle)
+        XCTAssertEqual(untouchedIdle.red, 10, "a custom recolor away from the original green must not be overwritten")
+        XCTAssertEqual(untouchedIdle.green, 20)
+        XCTAssertEqual(untouchedIdle.blue, 30)
+    }
+
+    @MainActor
     func testLoadingPrunesEverythingExceptCodexAndClaudeAndBacksUpFirst() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-prune-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -164,6 +193,64 @@ final class CodexPadTests: XCTestCase {
         let backupsAfterReload = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("Profiles.before-prune-") }
         XCTAssertEqual(backupsAfterReload.count, 1)
+    }
+
+    @MainActor
+    func testLegacyProfileWithoutKeyboardActionIDDecodesInsteadOfResettingToDefaults() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-legacy-action-id-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+
+        // Simulate a `Profiles.json` saved before `KeyboardAction.id` existed:
+        // every action object is missing the "id" key entirely.
+        var document = try JSONSerialization.jsonObject(
+            with: ProfileFileCodec.encode([ProfileFactory.codex(catalog: catalog), ProfileFactory.claude(catalog: claudeCatalog)])
+        ) as! [String: Any]
+        var profiles = document["profiles"] as! [[String: Any]]
+        for profileIndex in profiles.indices {
+            var controls = profiles[profileIndex]["controls"] as! [[String: Any]]
+            for controlIndex in controls.indices {
+                var action = controls[controlIndex]["action"] as! [String: Any]
+                action.removeValue(forKey: "id")
+                controls[controlIndex]["action"] = action
+            }
+            profiles[profileIndex]["controls"] = controls
+        }
+        document["profiles"] = profiles
+        try JSONSerialization.data(withJSONObject: document).write(to: url)
+
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
+        XCTAssertEqual(Set(store.profiles.map(\.name)), ["Codex", "Claude"], "legacy id-less actions must still decode, not fall back to a fresh factory seed")
+        XCTAssertEqual(store.profiles.first(where: { $0.name == "Codex" })?.action(for: .key2).codexActionID, "quick-chat")
+        XCTAssertNil(store.lastLoadWarning)
+    }
+
+    @MainActor
+    func testOneCorruptProfileIsSkippedWithoutDiscardingTheRestAndABackupIsWritten() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-partial-corruption-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+
+        var document = try JSONSerialization.jsonObject(
+            with: ProfileFileCodec.encode([ProfileFactory.codex(catalog: catalog), ProfileFactory.claude(catalog: claudeCatalog)])
+        ) as! [String: Any]
+        var profiles = document["profiles"] as! [[String: Any]]
+        // Corrupt only the Codex profile beyond recovery (required "name" key gone).
+        profiles[0].removeValue(forKey: "name")
+        document["profiles"] = profiles
+        try JSONSerialization.data(withJSONObject: document).write(to: url)
+
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
+        XCTAssertTrue(store.profiles.contains(where: { $0.name == "Claude" }), "the undamaged profile must survive")
+        XCTAssertNotNil(store.lastLoadWarning)
+
+        let backups = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("Profiles.corrupt-") }
+        XCTAssertEqual(backups.count, 1, "the raw corrupt file should be backed up before recovery")
     }
 
     func testActionKindAgentAndCatalogHelpersCoverBothApps() {
