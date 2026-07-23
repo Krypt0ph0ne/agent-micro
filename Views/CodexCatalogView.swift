@@ -59,7 +59,7 @@ struct CodexCatalogView: View {
 
     private func assign(_ action: CodexActionDefinition) {
         switch action.execution {
-        case .keyboardShortcut, .configurableShortcut:
+        case .keyboardShortcut, .configurableShortcut, .hostEvent:
             appState.profiles.assignAction(id: action.id, from: appState.activeCatalog, to: selectedControl)
         case .deepLink:
             guard let deferred = appState.activeCatalog.deferredAction(id: action.id) else { return }

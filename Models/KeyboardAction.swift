@@ -100,6 +100,28 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
         self.command = command
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, label, icon, deviceMacro, submittedText, codexActionID, deepLink, command
+    }
+
+    /// `id` was added after the first saved profiles shipped, so old
+    /// `Profiles.json` files have no `id` key per action. Without this,
+    /// synthesized `Decodable` would throw `keyNotFound` on every legacy
+    /// action, and `ProfileStore` swallows that error and silently resets
+    /// the whole file to factory defaults — wiping the user's key bindings.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        kind = try container.decode(ActionKind.self, forKey: .kind)
+        label = try container.decode(String.self, forKey: .label)
+        icon = try container.decodeIfPresent(String.self, forKey: .icon) ?? "command"
+        deviceMacro = try container.decodeIfPresent(String.self, forKey: .deviceMacro)
+        submittedText = try container.decodeIfPresent(String.self, forKey: .submittedText)
+        codexActionID = try container.decodeIfPresent(String.self, forKey: .codexActionID)
+        deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
+        command = try container.decodeIfPresent(String.self, forKey: .command)
+    }
+
     static let disabled = KeyboardAction(kind: .disabled, label: "Deaktiviert", icon: "minus.circle")
 
     /// Creates a hardware-compatible text action. The CH57x can send at most

@@ -35,6 +35,8 @@ struct ControlAssignmentPanel: View {
     var body: some View {
         if HardwareControl.encoderActions.contains(control) {
             EncoderAssignmentSection(appState: appState)
+        } else if control == appState.profiles.layerSwitchControl {
+            LayerSwitchAssignmentSection(appState: appState)
         } else {
             keyAssignmentBody
         }

@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import Carbon.HIToolbox
 import Foundation
 import IOKit.hid
@@ -88,10 +87,11 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     /// only drives menu navigation while this is true.
     private var encoderHoldFired = false
 
+    private let permissionMonitor: PermissionMonitor
     private(set) var status = "Deaktiviert"
     private(set) var lastInput = "Noch kein Drehrad-Signal empfangen"
-    private(set) var hasAccessibilityPermission: Bool
-    private(set) var hasInputMonitoringPermission: Bool
+    var hasAccessibilityPermission: Bool { permissionMonitor.hasAccessibilityPermission }
+    var hasInputMonitoringPermission: Bool { permissionMonitor.hasInputMonitoringPermission }
     var isEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: Self.preferenceKey)
@@ -99,10 +99,9 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         }
     }
 
-    init(isActiveProfile: @escaping () -> Bool) {
+    init(permissionMonitor: PermissionMonitor, isActiveProfile: @escaping () -> Bool) {
+        self.permissionMonitor = permissionMonitor
         self.isActiveProfile = isActiveProfile
-        self.hasAccessibilityPermission = AXIsProcessTrusted()
-        self.hasInputMonitoringPermission = CGPreflightListenEventAccess()
         if !UserDefaults.standard.bool(forKey: Self.migrationKey) {
             UserDefaults.standard.set(true, forKey: Self.preferenceKey)
             UserDefaults.standard.set(true, forKey: Self.migrationKey)
@@ -112,9 +111,8 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     }
 
     func requestPermissions() {
-        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-        _ = CGRequestListenEventAccess()
-        refreshPermissions()
+        permissionMonitor.requestPermissions()
+        updateMonitoring()
         if !hasInputMonitoringPermission || !hasAccessibilityPermission {
             status = "Berechtigungen fehlen noch. In den Systemeinstellungen CodexPad aktivieren und danach zur App zurückkehren."
         }
@@ -124,8 +122,7 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     /// them whenever CodexPad becomes active and reopen HID only after access
     /// was actually granted.
     func refreshPermissions() {
-        hasAccessibilityPermission = AXIsProcessTrusted()
-        hasInputMonitoringPermission = CGPreflightListenEventAccess()
+        permissionMonitor.refresh()
         updateMonitoring()
     }
 

@@ -24,6 +24,16 @@ final class AppState {
     let claudeThreads: CodexThreadStore
     let claudeQuickAssign: CodexQuickAssignService
     let loginItem: LoginItemService
+    let approvals: ApprovalCoordinator
+    let permissionMonitor: PermissionMonitor
+    /// Debounces `autoSync()` so a config change is pushed to the hardware
+    /// without the user having to press "Übertragen" — see `scheduleAutoSync()`.
+    private var autoSyncTask: Task<Void, Never>?
+    private static let autoSyncDelaySeconds: TimeInterval = 0.4
+    /// Fires the Codex⇄Claude layer switch once `profiles.layerSwitchControl`
+    /// has been held past the threshold — see `beginLayerSwitchHold()`.
+    private var layerSwitchHoldTask: Task<Void, Never>?
+    static let layerSwitchHoldThresholdSeconds: TimeInterval = 0.4
 
     init() {
         UserDefaults.standard.register(defaults: [CodexQuickAssignService.enabledDefaultsKey: true])
@@ -36,12 +46,14 @@ final class AppState {
         self.profiles = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog)
         let profiles = self.profiles
         self.device = DeviceService(diagnostics: diagnostics)
-        self.inputMonitor = HIDInputMonitor()
-        self.reasoningAutomation = CodexReasoningAutomationService(isActiveProfile: { profiles.selectedProfile.automationApp != .claude })
-        self.claudeReasoningAutomation = ClaudeReasoningAutomationService(isActiveProfile: { profiles.selectedProfile.automationApp == .claude })
+        let permissionMonitor = PermissionMonitor()
+        self.permissionMonitor = permissionMonitor
+        self.inputMonitor = HIDInputMonitor(permissionMonitor: permissionMonitor)
+        self.reasoningAutomation = CodexReasoningAutomationService(permissionMonitor: permissionMonitor, isActiveProfile: { profiles.selectedProfile.automationApp != .claude })
+        self.claudeReasoningAutomation = ClaudeReasoningAutomationService(permissionMonitor: permissionMonitor, isActiveProfile: { profiles.selectedProfile.automationApp == .claude })
         self.padEvents = CodexPadEventService()
         self.keyboardState = CodexPadKeyboardStateService()
-        self.tapHold = CodexPadTapHoldService { profiles.selectedProfile }
+        self.tapHold = CodexPadTapHoldService(permissionMonitor: permissionMonitor) { profiles.selectedProfile }
         let codexBridge = CodexEventBridge()
         self.codexBridge = codexBridge
         self.codexThreads = CodexThreadStore(bridge: codexBridge)
@@ -52,6 +64,12 @@ final class AppState {
         self.ledFeedback = CodexPadLEDFeedbackService { [padEvents] packets in
             padEvents.sendLEDs(packets)
         }
+        let ledFeedback = self.ledFeedback
+        self.approvals = ApprovalCoordinator(
+            codexBridge: codexBridge,
+            ledFeedback: ledFeedback,
+            currentProfile: { profiles.selectedProfile }
+        )
         let codexThreads = self.codexThreads
         let claudeThreads = self.claudeThreads
         self.quickAssign = CodexQuickAssignService(
@@ -103,12 +121,26 @@ final class AppState {
                 self.claudeQuickAssign.handle(event)
                 self.reasoningAutomation.handlePhysicalEvent(event)
                 self.claudeReasoningAutomation.handlePhysicalEvent(event)
-                if event.phase == .pressed || event.phase == .triggered,
-                   let control = HardwareControl(reportedControlIndex: event.control) {
-                    let kind = self.profiles.selectedProfile.action(for: control).kind
-                    if kind == .codexAgent {
+                guard let control = HardwareControl(reportedControlIndex: event.control) else { return }
+                if control == self.profiles.layerSwitchControl {
+                    switch event.phase {
+                    case .pressed: self.beginLayerSwitchHold()
+                    case .released: self.endLayerSwitchHold()
+                    case .triggered: break
+                    }
+                    return
+                }
+                guard event.phase == .pressed || event.phase == .triggered else { return }
+                let action = self.profiles.selectedProfile.action(for: control)
+                switch action.codexActionID {
+                case "approval-accept" where self.approvals.armed != nil:
+                    self.approvals.decide(.accept)
+                case "approval-decline" where self.approvals.armed != nil:
+                    self.approvals.decide(.decline)
+                default:
+                    if action.kind == .codexAgent {
                         _ = self.codexThreads.openAssignedThread(for: control)
-                    } else if kind == .claudeAgent {
+                    } else if action.kind == .claudeAgent {
                         _ = self.claudeThreads.openAssignedThread(for: control)
                     }
                 }
@@ -126,6 +158,52 @@ final class AppState {
         }
         codexThreads.onStatusChange = { [weak self] in self?.refreshAgentLEDs() }
         claudeThreads.onStatusChange = { [weak self] in self?.refreshAgentLEDs() }
+        profiles.onChange = { [weak self] in self?.scheduleAutoSync() }
+    }
+
+    /// Debounces a hardware sync so rapid successive edits (e.g. dragging a
+    /// color slider) collapse into a single upload ~400ms after the user
+    /// stops changing things, instead of flooding the HID interface with a
+    /// full 18-packet write per keystroke.
+    private func scheduleAutoSync() {
+        autoSyncTask?.cancel()
+        autoSyncTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.autoSyncDelaySeconds))
+            guard !Task.isCancelled, let self else { return }
+            self.autoSync()
+        }
+    }
+
+    /// Same upload the manual "Übertragen" button performs
+    /// (`MainWindowView.upload()`); the button stays available as a manual
+    /// "sync now" fallback for when this is still debouncing or a previous
+    /// attempt failed, with the existing `hasUnsyncedChanges`/diagnostics
+    /// error surfacing as the retry signal.
+    private func autoSync() {
+        guard profiles.hasUnsyncedChanges, device.state.isSupportedConnection, !device.isBusy else { return }
+        let result = device.upload(profile: profiles.selectedProfile, keyboardLayout: profiles.keyboardLayout, layerSwitchControl: profiles.layerSwitchControl)
+        if result?.succeeded == true {
+            profiles.markSynchronized()
+            refreshAgentLEDs()
+        }
+    }
+
+    /// `profiles.layerSwitchControl` is reserved and app-only (no macro) in
+    /// firmware — see `CodexPadPacketEncoder` — so holding it past the
+    /// threshold is the only thing it ever does.
+    private func beginLayerSwitchHold() {
+        layerSwitchHoldTask?.cancel()
+        layerSwitchHoldTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.layerSwitchHoldThresholdSeconds))
+            guard !Task.isCancelled, let self else { return }
+            self.profiles.switchToOtherBuiltInProfile()
+            self.ledFeedback.flashLayerSwitchConfirmation(profile: self.profiles.selectedProfile)
+        }
+    }
+
+    private func endLayerSwitchHold() {
+        layerSwitchHoldTask?.cancel()
+        layerSwitchHoldTask = nil
     }
 
     /// The action catalog matching whichever app the selected profile targets;

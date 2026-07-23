@@ -111,7 +111,7 @@ struct SettingsView: View {
                     }
                 }
 
-                caption("Profile und Agent-Zuordnungen bleiben lokal unter Application Support. Der Event-Bridge-Service beobachtet Ereignisse, beantwortet Approvals aber nie automatisch.")
+                caption("Profile und Agent-Zuordnungen bleiben lokal unter Application Support. Codex-Approvals (Befehl ausführen, Datei ändern) können beantwortet werden, indem du „Genehmigen“/„Ablehnen“ wie jede andere Aktion einer Taste zuweist (Belegungs-Panel); alle anderen Ereignisse werden nur beobachtet.")
             }
             .padding(20)
         }

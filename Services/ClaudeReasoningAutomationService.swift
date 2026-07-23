@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import Carbon.HIToolbox
 import Foundation
 import IOKit.hid
@@ -53,10 +52,11 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private var pendingKeyActions: [() -> Void] = []
     private var isProcessingKeyActions = false
 
+    private let permissionMonitor: PermissionMonitor
     private(set) var status = "Deaktiviert"
     private(set) var lastInput = "Noch kein Drehrad-Signal empfangen"
-    private(set) var hasAccessibilityPermission: Bool
-    private(set) var hasInputMonitoringPermission: Bool
+    var hasAccessibilityPermission: Bool { permissionMonitor.hasAccessibilityPermission }
+    var hasInputMonitoringPermission: Bool { permissionMonitor.hasInputMonitoringPermission }
     var isEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: Self.preferenceKey)
@@ -64,26 +64,23 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         }
     }
 
-    init(isActiveProfile: @escaping () -> Bool) {
+    init(permissionMonitor: PermissionMonitor, isActiveProfile: @escaping () -> Bool) {
+        self.permissionMonitor = permissionMonitor
         self.isActiveProfile = isActiveProfile
-        self.hasAccessibilityPermission = AXIsProcessTrusted()
-        self.hasInputMonitoringPermission = CGPreflightListenEventAccess()
         self.isEnabled = UserDefaults.standard.bool(forKey: Self.preferenceKey)
         updateMonitoring()
     }
 
     func requestPermissions() {
-        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-        _ = CGRequestListenEventAccess()
-        refreshPermissions()
+        permissionMonitor.requestPermissions()
+        updateMonitoring()
         if !hasInputMonitoringPermission || !hasAccessibilityPermission {
             status = "Berechtigungen fehlen noch. In den Systemeinstellungen CodexPad aktivieren und danach zur App zurückkehren."
         }
     }
 
     func refreshPermissions() {
-        hasAccessibilityPermission = AXIsProcessTrusted()
-        hasInputMonitoringPermission = CGPreflightListenEventAccess()
+        permissionMonitor.refresh()
         updateMonitoring()
     }
 

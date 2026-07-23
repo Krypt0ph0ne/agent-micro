@@ -24,9 +24,9 @@ struct MenuBarPopoverView: View {
             VStack(spacing: 12) {
                 DeviceCanvasView(
                     profile: appState.profiles.selectedProfile,
-                    selectedControl: $selectedControl
+                    selectedControl: $selectedControl,
+                    compact: true
                 )
-                .frame(height: 140)
 
                 MenuBarSelectedControlPanel(appState: appState, control: $selectedControl)
             }
@@ -34,7 +34,7 @@ struct MenuBarPopoverView: View {
             Divider()
             footer
         }
-        .frame(width: 360)
+        .frame(width: 340)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -42,7 +42,7 @@ struct MenuBarPopoverView: View {
         @Bindable var profiles = appState.profiles
         return HStack(spacing: 10) {
             Picker("Profil", selection: $profiles.selectedProfileID) {
-                ForEach(profiles.profiles) { profile in
+                ForEach(profiles.visibleProfiles) { profile in
                     Text(profile.name).tag(profile.id)
                 }
             }

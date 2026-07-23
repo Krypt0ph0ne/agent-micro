@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import OSLog
 import SwiftUI
 
 struct ProfileFileDocument: Codable, Hashable {
@@ -27,6 +28,33 @@ enum ProfileFileCodec {
         }
         return document.profiles
     }
+
+    /// Falls back from `decode` when the whole-document decode throws (e.g. a
+    /// model change broke one profile's shape). Re-decodes each profile in the
+    /// `profiles` array individually so a single corrupt entry doesn't erase
+    /// every other saved profile — only skips the ones that fail.
+    static func decodeLeniently(_ data: Data) -> (profiles: [MacropadProfile], droppedCount: Int)? {
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let rawProfiles = root["profiles"] as? [[String: Any]]
+        else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var recovered: [MacropadProfile] = []
+        var dropped = 0
+        for rawProfile in rawProfiles {
+            guard
+                let profileData = try? JSONSerialization.data(withJSONObject: rawProfile),
+                let profile = try? decoder.decode(MacropadProfile.self, from: profileData)
+            else {
+                dropped += 1
+                continue
+            }
+            recovered.append(profile)
+        }
+        guard !recovered.isEmpty else { return nil }
+        return (recovered, dropped)
+    }
 }
 
 @MainActor
@@ -35,6 +63,14 @@ final class ProfileStore {
     private static let selectedProfileDefaultsKey = "CodexPad.selectedProfileID"
     private static let keyboardLayoutDefaultsKey = "CodexPad.keyboardLayout"
     private static let dictationSourceDefaultsKey = "CodexPad.dictationSource"
+    private static let layerSwitchControlDefaultsKey = "CodexPad.layerSwitchControl"
+    /// Set once the user has explicitly chosen "nur über die App wechseln"
+    /// (onboarding or Settings) — distinct from simply never having set a
+    /// key, which still falls back to `defaultLayerSwitchControl` so
+    /// existing installs that skip onboarding keep working unchanged.
+    private static let layerSwitchDisabledDefaultsKey = "CodexPad.layerSwitchDisabled"
+    private static let enabledAutomationAppsDefaultsKey = "CodexPad.enabledAutomationApps"
+    static let defaultLayerSwitchControl: HardwareControl = .key3
     private let persistenceURL: URL
     private let catalog: CodexActionCatalog
     private let claudeCatalog: CodexActionCatalog
@@ -45,6 +81,7 @@ final class ProfileStore {
             guard keyboardLayout != oldValue else { return }
             UserDefaults.standard.set(keyboardLayout.rawValue, forKey: Self.keyboardLayoutDefaultsKey)
             hasUnsyncedChanges = true
+            onChange?()
         }
     }
     /// Which app's dictation chord the "Diktieren"-tagged control resolves
@@ -61,9 +98,62 @@ final class ProfileStore {
             UserDefaults.standard.set(selectedProfileID.uuidString, forKey: Self.selectedProfileDefaultsKey)
         }
     }
+    /// The one key permanently reserved for holding-to-switch between the
+    /// Codex and Claude built-in profiles, across whichever one is active.
+    /// `nil` means the user explicitly chose to switch only through the app
+    /// (menu bar / main window), never via a held key. Encoded app-only (no
+    /// macro) on upload — see `CodexPadPacketEncoder` — so a reserved key
+    /// never also fires a leftover assigned shortcut.
+    var layerSwitchControl: HardwareControl? {
+        didSet {
+            guard layerSwitchControl != oldValue else { return }
+            if let layerSwitchControl {
+                UserDefaults.standard.set(layerSwitchControl.rawValue, forKey: Self.layerSwitchControlDefaultsKey)
+                UserDefaults.standard.set(false, forKey: Self.layerSwitchDisabledDefaultsKey)
+            } else {
+                UserDefaults.standard.set(true, forKey: Self.layerSwitchDisabledDefaultsKey)
+            }
+            hasUnsyncedChanges = true
+            onChange?()
+        }
+    }
+    /// Which built-in profiles (Codex/Claude) are currently offered for
+    /// selection — set during onboarding's agent-choice step. A profile
+    /// outside this set keeps its saved bindings untouched, it's just hidden
+    /// from every picker/switcher until re-enabled. Defaults to both, so an
+    /// install that never runs the guided onboarding behaves exactly as
+    /// before this existed.
+    var enabledAutomationApps: Set<AutomationApp> {
+        didSet {
+            guard enabledAutomationApps != oldValue else { return }
+            UserDefaults.standard.set(
+                enabledAutomationApps.map(\.rawValue).sorted().joined(separator: ","),
+                forKey: Self.enabledAutomationAppsDefaultsKey
+            )
+            if !visibleProfiles.contains(where: { $0.id == selectedProfileID }), let firstVisible = visibleProfiles.first {
+                selectedProfileID = firstVisible.id
+            }
+            onChange?()
+        }
+    }
+    /// Every built-in profile whose app is currently enabled, plus any
+    /// app-agnostic profile — what pickers and the hold-to-switch gesture
+    /// should offer. Use instead of `profiles` for anything user-facing.
+    var visibleProfiles: [MacropadProfile] {
+        profiles.filter { $0.automationApp.map(enabledAutomationApps.contains) ?? true }
+    }
     /// Changes are persisted locally immediately; this means not yet synchronized to hardware.
     private(set) var hasUnsyncedChanges = false
     private(set) var lastPersistenceError: String?
+    /// Set when `Profiles.json` couldn't be decoded as-is and had to be
+    /// recovered profile-by-profile (or, in the worst case, discarded). Nil
+    /// on a clean load.
+    private(set) var lastLoadWarning: String?
+    private static let logger = Logger(subsystem: "com.codexpad.app", category: "profile-store")
+    /// Fired whenever a change is committed (including the `keyboardLayout`
+    /// `didSet` below), so `AppState` can debounce an automatic hardware
+    /// sync without `ProfileStore` needing to know `DeviceService` exists.
+    var onChange: (() -> Void)?
 
     init(catalog: CodexActionCatalog, claudeCatalog: CodexActionCatalog, persistenceURL: URL? = nil) {
         self.catalog = catalog
@@ -73,9 +163,22 @@ final class ProfileStore {
         let dictationSource = UserDefaults.standard.string(forKey: Self.dictationSourceDefaultsKey)
             .flatMap(DictationSource.init(rawValue:)) ?? .codex
         self.dictationSource = dictationSource
+        if UserDefaults.standard.bool(forKey: Self.layerSwitchDisabledDefaultsKey) {
+            self.layerSwitchControl = nil
+        } else {
+            self.layerSwitchControl = UserDefaults.standard.string(forKey: Self.layerSwitchControlDefaultsKey)
+                .flatMap(HardwareControl.init(rawValue:)) ?? Self.defaultLayerSwitchControl
+        }
+        if let storedApps = UserDefaults.standard.string(forKey: Self.enabledAutomationAppsDefaultsKey) {
+            let parsed = Set(storedApps.split(separator: ",").compactMap { AutomationApp(rawValue: String($0)) })
+            self.enabledAutomationApps = parsed.isEmpty ? Set(AutomationApp.allCases) : parsed
+        } else {
+            self.enabledAutomationApps = Set(AutomationApp.allCases)
+        }
         let baseDirectory = persistenceURL?.deletingLastPathComponent() ?? Self.applicationSupportDirectory()
         self.persistenceURL = persistenceURL ?? baseDirectory.appendingPathComponent("Profiles.json")
-        let loadedRaw = Self.load(from: self.persistenceURL)
+        var loadWarning: String?
+        let loadedRaw = Self.load(from: self.persistenceURL, warning: &loadWarning)
         let loaded = loadedRaw.map { Self.pruneToKeepOnly(Self.keptBuiltInNames, in: $0) }
         let didPrune = loadedRaw.map { $0 != loaded } ?? false
         if didPrune, let loadedRaw {
@@ -87,7 +190,8 @@ final class ProfileStore {
         let refreshedClaude = Self.migrateStaleClaudeCatalogBindings(in: taggedApps, claudeCatalog: claudeCatalog)
         let encoderMigrated = Self.migrateLegacyCodexReasoningBindings(in: refreshedClaude)
         let dictationTagged = Self.migrateLegacyDictationBindings(in: encoderMigrated, catalog: catalog)
-        let initial = Self.applyDictationSource(dictationSource, to: dictationTagged, catalog: catalog, claudeCatalog: claudeCatalog)
+        let idleColorMigrated = Self.migrateLegacyGreenIdleReaction(in: dictationTagged)
+        let initial = Self.applyDictationSource(dictationSource, to: idleColorMigrated, catalog: catalog, claudeCatalog: claudeCatalog)
         self.profiles = initial
         let codexID = initial.first(where: { $0.name == "Codex" })?.id
         let persistedID = UserDefaults.standard.string(forKey: Self.selectedProfileDefaultsKey).flatMap(UUID.init(uuidString:))
@@ -96,12 +200,22 @@ final class ProfileStore {
         } else {
             self.selectedProfileID = codexID ?? initial.first?.id ?? UUID()
         }
+        self.lastLoadWarning = loadWarning
         if loadedRaw == nil || initial != seed || didPrune { persist() }
     }
 
     var selectedProfile: MacropadProfile {
         get { profiles.first(where: { $0.id == selectedProfileID }) ?? profiles[0] }
         set { replace(newValue) }
+    }
+
+    /// Flips between the Codex and Claude built-in profiles — the only two
+    /// that exist by design (see `keptBuiltInNames`) — for the layer-switch
+    /// hold gesture. A no-op if either is missing (shouldn't happen).
+    func switchToOtherBuiltInProfile() {
+        let targetApp: AutomationApp = selectedProfile.automationApp == .claude ? .codex : .claude
+        guard let target = visibleProfiles.first(where: { $0.automationApp == targetApp }) else { return }
+        selectedProfileID = target.id
     }
 
     func actionBinding(for control: HardwareControl) -> Binding<KeyboardAction> {
@@ -274,6 +388,7 @@ final class ProfileStore {
     private func commitChange() {
         hasUnsyncedChanges = true
         persist()
+        onChange?()
     }
 
     private func persist() {
@@ -298,9 +413,26 @@ final class ProfileStore {
         return root.appendingPathComponent("CodexPad", isDirectory: true)
     }
 
-    private static func load(from url: URL) -> [MacropadProfile]? {
+    /// Loads `Profiles.json`. A clean decode is the fast path; if the whole
+    /// document fails (any single profile's shape no longer matches, e.g.
+    /// after a model change), falls back to recovering profiles one at a time
+    /// instead of discarding the user's entire saved configuration. The raw
+    /// file is always backed up first so a bad recovery is never one-way.
+    private static func load(from url: URL, warning: inout String?) -> [MacropadProfile]? {
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? ProfileFileCodec.decode(data)
+        if let profiles = try? ProfileFileCodec.decode(data) { return profiles }
+
+        backupRawFile(data, persistenceURL: url, reason: "corrupt")
+        guard let recovered = ProfileFileCodec.decodeLeniently(data) else {
+            warning = "Profiles.json war beschädigt und konnte nicht gelesen werden. Eine Sicherung liegt neben der Datei, die Belegung wurde auf Werkseinstellungen zurückgesetzt."
+            logger.error("Profiles.json fully unreadable, resetting to defaults")
+            return nil
+        }
+        if recovered.droppedCount > 0 {
+            warning = "\(recovered.droppedCount) Profil(e) in Profiles.json waren beschädigt und wurden übersprungen. Die übrigen \(recovered.profiles.count) wurden wiederhergestellt; eine Sicherung liegt neben der Datei."
+            logger.error("Recovered \(recovered.profiles.count) profile(s), dropped \(recovered.droppedCount)")
+        }
+        return recovered.profiles
     }
 
     /// Felix wants the profile list trimmed to exactly these two — everything
@@ -323,6 +455,15 @@ final class ProfileStore {
         guard let data = try? ProfileFileCodec.encode(profiles) else { return }
         let backupURL = persistenceURL.deletingLastPathComponent()
             .appendingPathComponent("Profiles.before-prune-\(Int(Date().timeIntervalSince1970)).json")
+        try? data.write(to: backupURL, options: .atomic)
+    }
+
+    /// Writes the exact bytes of a `Profiles.json` that failed to decode
+    /// cleanly to a timestamped sibling file, before any lenient recovery (or
+    /// factory-default fallback) touches it — so the raw data is never lost.
+    private static func backupRawFile(_ data: Data, persistenceURL: URL, reason: String) {
+        let backupURL = persistenceURL.deletingLastPathComponent()
+            .appendingPathComponent("Profiles.\(reason)-\(Int(Date().timeIntervalSince1970)).json")
         try? data.write(to: backupURL, options: .atomic)
     }
 
@@ -440,6 +581,21 @@ final class ProfileStore {
                 changed = true
             }
             return changed ? migrated : profile
+        }
+    }
+
+    /// The "Agent frei" reaction shipped green before Felix decided idle
+    /// should read as a calmer white pulse instead. Only rewrites a profile
+    /// still carrying that exact original green (a custom recolor is left
+    /// alone), matching the pattern of the other stale-default migrations
+    /// above.
+    private static func migrateLegacyGreenIdleReaction(in profiles: [MacropadProfile]) -> [MacropadProfile] {
+        profiles.map { profile in
+            let idle = profile.reaction(for: .agentIdle)
+            guard idle.red == 48, idle.green == 209, idle.blue == 88 else { return profile }
+            var migrated = profile
+            migrated.setReaction(LEDReactionConfiguration.defaults.first(where: { $0.event == .agentIdle })!)
+            return migrated
         }
     }
 

@@ -9,8 +9,7 @@ struct CodexPadApp: App {
     var body: some Scene {
         WindowGroup("CodexPad", id: "main") {
             WindowBridgeView(id: "main") {
-                MainWindowView(appState: appState)
-                    .frame(width: 440)
+                RootView(appState: appState)
             }
         }
         .windowResizability(.contentSize)
@@ -23,6 +22,22 @@ struct CodexPadApp: App {
 
         Settings {
             SettingsView(appState: appState)
+        }
+    }
+}
+
+/// Gates `MainWindowView` behind `OnboardingView` until the user has been
+/// through the first-run permission walkthrough at least once.
+private struct RootView: View {
+    let appState: AppState
+    @AppStorage("CodexPad.hasCompletedOnboarding") private var hasCompletedOnboarding = false
+
+    var body: some View {
+        if hasCompletedOnboarding {
+            MainWindowView(appState: appState)
+                .frame(width: 410)
+        } else {
+            OnboardingView(appState: appState) { hasCompletedOnboarding = true }
         }
     }
 }
