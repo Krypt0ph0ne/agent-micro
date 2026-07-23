@@ -10,7 +10,6 @@ struct CodexPadApp: App {
         WindowGroup("CodexPad", id: "main") {
             WindowBridgeView(id: "main") {
                 RootView(appState: appState)
-                    .frame(width: 440)
             }
         }
         .windowResizability(.contentSize)
@@ -36,6 +35,7 @@ private struct RootView: View {
     var body: some View {
         if hasCompletedOnboarding {
             MainWindowView(appState: appState)
+                .frame(width: 410)
         } else {
             OnboardingView(appState: appState) { hasCompletedOnboarding = true }
         }

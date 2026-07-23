@@ -200,7 +200,7 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
         .init(event: .approvalAccepted, effect: .flash, red: 48, green: 209, blue: 88, brightness: 255, periodMilliseconds: 450, disablesIdle: false),
         .init(event: .approvalDeclined, effect: .flash, red: 255, green: 69, blue: 58, brightness: 255, periodMilliseconds: 450, disablesIdle: false),
         .init(event: .agentRunning, effect: .pulse, red: 10, green: 132, blue: 255, brightness: 255, periodMilliseconds: 1_000, disablesIdle: true),
-        .init(event: .agentIdle, effect: .pulse, red: 48, green: 209, blue: 88, brightness: 180, periodMilliseconds: 2_200, disablesIdle: true, minBrightness: 40),
+        .init(event: .agentIdle, effect: .pulse, red: 255, green: 255, blue: 255, brightness: 180, periodMilliseconds: 2_200, disablesIdle: true, minBrightness: 40),
         .init(event: .agentCompleted, effect: .flash, red: 48, green: 209, blue: 88, brightness: 230, periodMilliseconds: 650, disablesIdle: true),
         .init(event: .agentNeedsAttention, effect: .blink, red: 255, green: 159, blue: 10, brightness: 255, periodMilliseconds: 800, disablesIdle: true),
         .init(event: .agentFailed, effect: .blink, red: 255, green: 69, blue: 58, brightness: 255, periodMilliseconds: 500, disablesIdle: true),
