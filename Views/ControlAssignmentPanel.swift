@@ -5,6 +5,7 @@ struct ControlAssignmentPanel: View {
     @Binding var control: HardwareControl
     @State private var isPresentingTextSubmission = false
     @State private var isPresentingWizard = false
+    @State private var isPresentingLayerSwitchPicker = false
     @State private var isShowingActionPicker = false
     @State private var actionSearch = ""
 
@@ -35,8 +36,6 @@ struct ControlAssignmentPanel: View {
     var body: some View {
         if HardwareControl.encoderActions.contains(control) {
             EncoderAssignmentSection(appState: appState)
-        } else if control == appState.profiles.layerSwitchControl {
-            LayerSwitchAssignmentSection(appState: appState)
         } else {
             keyAssignmentBody
         }
@@ -53,7 +52,7 @@ struct ControlAssignmentPanel: View {
                 Spacer()
                 Menu {
                     ForEach(HardwareControl.allCases) { item in
-                        Button(item.shortTitle) { control = item }
+                        Button(item.shortTitle) { withoutAnimation { control = item } }
                     }
                 } label: {
                     Image(systemName: "square.grid.3x2")
@@ -139,6 +138,12 @@ struct ControlAssignmentPanel: View {
         .sheet(isPresented: $isPresentingWizard) {
             CodexAssignmentWizardView(appState: appState, control: control)
         }
+        .sheet(isPresented: $isPresentingLayerSwitchPicker) {
+            LayerSwitchModePickerSheet { mode in
+                appState.removeActiveAgentAssignment(for: control)
+                appState.profiles.updateAction(.layerSwitch(mode: mode), for: control)
+            }
+        }
         .onChange(of: control) { _, _ in
             isShowingActionPicker = false
             actionSearch = ""
@@ -158,6 +163,17 @@ struct ControlAssignmentPanel: View {
                     isShowingActionPicker = false
                 }
                 .help("Konfigurierbare Codex-Aktion mit Trigger einrichten")
+                Button("Layer", systemImage: "square.stack.3d.up") {
+                    isPresentingLayerSwitchPicker = true
+                    isShowingActionPicker = false
+                }
+                .help("Zwischen den Layern dieses Profils wechseln")
+                Button("Profil", systemImage: "arrow.left.arrow.right") {
+                    appState.removeActiveAgentAssignment(for: control)
+                    appState.profiles.updateAction(.profileSwitch, for: control)
+                    isShowingActionPicker = false
+                }
+                .help("Zwischen Codex und Claude wechseln")
                 Button("Aus", systemImage: "minus.circle") { chooseDisabled() }
             }
             .controlSize(.small)
@@ -296,6 +312,57 @@ struct TextSubmissionSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!isValid)
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+    }
+}
+
+/// Picks how a "Layer wechseln" action assigned to this key resolves its
+/// target layer — see `LayerSwitchMode`.
+struct LayerSwitchModePickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var mode: LayerSwitchMode = .cycle
+
+    let save: (LayerSwitchMode) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Layer wechseln")
+                .font(.title2.weight(.semibold))
+            Text("Wechselt zwischen den Layern des aktuell aktiven Profils. Die Layer selbst legst du im Licht-/Belegungsbereich neben der Profilauswahl an.")
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(LayerSwitchMode.allCases) { candidate in
+                    Button {
+                        mode = candidate
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: mode == candidate ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(mode == candidate ? Color.accentColor : .secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(candidate.title).font(.body.weight(.medium))
+                                Text(candidate.detail).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 7)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Abbrechen") { dismiss() }
+                Button("Zuweisen") {
+                    save(mode)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)

@@ -3,6 +3,7 @@ set -euo pipefail
 
 MODE="${1:-run}"
 APP_NAME="CodexPad"
+DISPLAY_NAME="Agent Micro"
 BUNDLE_ID="com.codexpad.app"
 MIN_SYSTEM_VERSION="14.0"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,7 +11,7 @@ REFERENCE_DIR="$ROOT_DIR/References/ch57x-keyboard-tool"
 HELPER_SOURCE="$REFERENCE_DIR/target/release/ch57x-keyboard-tool"
 HELPER_DESTINATION="$ROOT_DIR/Support/ch57x-keyboard-tool"
 DIST_DIR="$ROOT_DIR/dist"
-APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
+APP_BUNDLE="$DIST_DIR/$DISPLAY_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
@@ -39,7 +40,7 @@ cd "$ROOT_DIR"
 swift build
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 BUILD_BINARY="$BUILD_BIN_DIR/$APP_NAME"
-RESOURCE_BUNDLE="$BUILD_BIN_DIR/CodexPad_CodexPad.bundle"
+RESOURCE_BUNDLE="$BUILD_BIN_DIR/AgentMicro_CodexPad.bundle"
 APP_ICON="$ROOT_DIR/Resources/CodexPadIcon.icns"
 
 if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
@@ -70,7 +71,7 @@ cat >"$INFO_PLIST" <<PLIST
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
   <key>CFBundleName</key>
-  <string>$APP_NAME</string>
+  <string>$DISPLAY_NAME</string>
   <key>CFBundleIconFile</key>
   <string>CodexPadIcon</string>
   <key>CFBundlePackageType</key>
@@ -80,7 +81,7 @@ cat >"$INFO_PLIST" <<PLIST
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>NSInputMonitoringUsageDescription</key>
-  <string>CodexPad uses Input Monitoring to receive the CH57x encoder's private F22/F23/F24 triggers and control Codex's model picker.</string>
+  <string>$DISPLAY_NAME uses Input Monitoring to receive the CH57x encoder's private F22/F23/F24 triggers and control Codex's model picker.</string>
 </dict>
 </plist>
 PLIST
@@ -126,7 +127,7 @@ case "$MODE" in
     open_app
     sleep 1
     pgrep -x "$APP_NAME" >/dev/null
-    echo "CodexPad is running: $APP_BUNDLE"
+    echo "$DISPLAY_NAME is running: $APP_BUNDLE"
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2

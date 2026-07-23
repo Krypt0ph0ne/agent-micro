@@ -23,6 +23,8 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case claudeDeepLink
     case localCommand
     case hostEvent
+    case layerSwitch
+    case profileSwitch
 
     var id: String { rawValue }
 
@@ -42,13 +44,15 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         case .codexDeepLink: "Codex Deep Link"
         case .claudeDeepLink: "Claude Deep Link"
         case .localCommand: "Lokaler Befehl"
-        case .hostEvent: "Nur an CodexPad melden"
+        case .hostEvent: "Nur an Agent Micro melden"
+        case .layerSwitch: "Layer wechseln"
+        case .profileSwitch: "Profil wechseln"
         }
     }
 
     var isDirectlySupportedByDevice: Bool {
         switch self {
-        case .codexAgent, .codexShortcut, .claudeAgent, .claudeShortcut, .keyboardShortcut, .singleKey, .keySequence, .textSubmission, .media, .mouse, .disabled, .hostEvent:
+        case .codexAgent, .codexShortcut, .claudeAgent, .claudeShortcut, .keyboardShortcut, .singleKey, .keySequence, .textSubmission, .media, .mouse, .disabled, .hostEvent, .layerSwitch, .profileSwitch:
             true
         case .codexDeepLink, .claudeDeepLink, .localCommand:
             false
@@ -65,6 +69,31 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     var isAgent: Bool { self == .codexAgent || self == .claudeAgent }
 }
 
+/// How an assigned `.layerSwitch` action picks its target layer.
+enum LayerSwitchMode: String, Codable, CaseIterable, Identifiable {
+    /// Every press advances to the next layer, wrapping back to the first.
+    case cycle
+    /// The number of rapid successive taps selects the layer directly
+    /// (one tap = layer 1, two taps = layer 2, ...).
+    case tapCount
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .cycle: "Zyklisch weiterschalten"
+        case .tapCount: "Klickanzahl = Layer-Nr."
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .cycle: "Jeder Druck springt zum nächsten Layer, danach wieder zu Layer 1."
+        case .tapCount: "Schnell hintereinander getippt: die Anzahl Klicks bestimmt den Ziel-Layer, z. B. 2× = Layer 2."
+        }
+    }
+}
+
 struct KeyboardAction: Codable, Hashable, Identifiable {
     var id: UUID
     var kind: ActionKind
@@ -77,6 +106,8 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
     var codexActionID: String?
     var deepLink: String?
     var command: String?
+    /// Only set for `kind == .layerSwitch`.
+    var layerSwitchMode: LayerSwitchMode?
 
     init(
         id: UUID = UUID(),
@@ -87,7 +118,8 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
         submittedText: String? = nil,
         codexActionID: String? = nil,
         deepLink: String? = nil,
-        command: String? = nil
+        command: String? = nil,
+        layerSwitchMode: LayerSwitchMode? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -98,10 +130,11 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
         self.codexActionID = codexActionID
         self.deepLink = deepLink
         self.command = command
+        self.layerSwitchMode = layerSwitchMode
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, label, icon, deviceMacro, submittedText, codexActionID, deepLink, command
+        case id, kind, label, icon, deviceMacro, submittedText, codexActionID, deepLink, command, layerSwitchMode
     }
 
     /// `id` was added after the first saved profiles shipped, so old
@@ -120,9 +153,19 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
         codexActionID = try container.decodeIfPresent(String.self, forKey: .codexActionID)
         deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
         command = try container.decodeIfPresent(String.self, forKey: .command)
+        layerSwitchMode = try container.decodeIfPresent(LayerSwitchMode.self, forKey: .layerSwitchMode)
     }
 
     static let disabled = KeyboardAction(kind: .disabled, label: "Deaktiviert", icon: "minus.circle")
+
+    static func layerSwitch(mode: LayerSwitchMode) -> KeyboardAction {
+        KeyboardAction(kind: .layerSwitch, label: mode.title, icon: "square.stack.3d.up", layerSwitchMode: mode)
+    }
+
+    /// Flips between the Codex and Claude built-in profiles — a plain
+    /// assignable action like any other, no longer tied to a single
+    /// permanently reserved key.
+    static let profileSwitch = KeyboardAction(kind: .profileSwitch, label: "Profil wechseln", icon: "arrow.left.arrow.right")
 
     /// Creates a hardware-compatible text action. The CH57x can send at most
     /// five chords, so the text is limited to four ASCII letters or digits plus Enter.
@@ -137,7 +180,7 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
         )
     }
 
-    var isEnabled: Bool { kind == .hostEvent || kind.isAgent || (kind != .disabled && !(deviceMacro?.isEmpty ?? true)) }
+    var isEnabled: Bool { kind == .hostEvent || kind == .layerSwitch || kind == .profileSwitch || kind.isAgent || (kind != .disabled && !(deviceMacro?.isEmpty ?? true)) }
 
     var displayShortcut: String {
         guard let deviceMacro, !deviceMacro.isEmpty else { return "—" }

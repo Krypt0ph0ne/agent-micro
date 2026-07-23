@@ -411,13 +411,21 @@ private struct LEDReactionEditor: View {
                 .foregroundStyle(.secondary)
 
             ScrollView {
-                LazyVStack(spacing: 7) {
-                    ForEach(LEDReactionEvent.allCases) { event in
-                        reactionRow(event)
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    ForEach(LEDReactionGroup.allCases) { group in
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(group.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 2)
+                            ForEach(group.events) { event in
+                                reactionRow(event)
+                            }
+                        }
                     }
                 }
             }
-            .frame(height: 250)
+            .frame(height: 320)
         }
     }
 

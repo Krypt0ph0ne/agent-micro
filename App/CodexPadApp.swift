@@ -7,7 +7,7 @@ struct CodexPadApp: App {
     private var appState: AppState { appDelegate.appState }
 
     var body: some Scene {
-        WindowGroup("CodexPad", id: "main") {
+        WindowGroup("Agent Micro", id: "main") {
             WindowBridgeView(id: "main") {
                 RootView(appState: appState)
             }
@@ -23,6 +23,12 @@ struct CodexPadApp: App {
         Settings {
             SettingsView(appState: appState)
         }
+
+        Window("Diagnose", id: "diagnostics") {
+            DiagnosticsView(appState: appState)
+                .frame(width: 460, height: 600)
+        }
+        .windowResizability(.contentSize)
     }
 }
 
@@ -53,7 +59,7 @@ final class CodexPadAppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.install(appState: appState)
     }
 
-    /// Closing the main window used to quit CodexPad, which meant the Codex
+    /// Closing the main window used to quit Agent Micro, which meant the Codex
     /// bridge connection, HID listening and hold-to-assign all stopped with
     /// it. The menu bar item is now the way back in, so the app stays alive
     /// in the background instead.

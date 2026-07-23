@@ -19,7 +19,7 @@ final class CodexPadStatusItemController: NSObject {
     func install(appState: AppState) {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "square.grid.3x2.fill", accessibilityDescription: "CodexPad")
+        item.button?.image = NSImage(systemSymbolName: "square.grid.3x2.fill", accessibilityDescription: "Agent Micro")
         item.button?.target = self
         item.button?.action = #selector(togglePopover)
         statusItem = item

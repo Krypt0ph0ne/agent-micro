@@ -1,5 +1,16 @@
 import SwiftUI
 
+/// Applies a state change with animations forced off, regardless of whatever
+/// implicit transaction is ambient at the call site (SwiftUI/AppKit buttons
+/// on macOS often carry one). Used for control selection: picking a
+/// different key/encoder zone should snap instantly, not replay the
+/// selection-dependent content below as an animated insert/remove.
+func withoutAnimation(_ body: () -> Void) {
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction, body)
+}
+
 /// Multi-stop opacity curves for the pad's live LED simulation, lifted from
 /// the Claude Design animation spec. A plain `.easeInOut(...).repeatForever
 /// (autoreverses: true)` only oscillates symmetrically between two values;
@@ -61,7 +72,7 @@ struct DeviceCanvasView: View {
                                     led: profile.led.setting(for: control),
                                     isSelected: selectedControl == control,
                                     compact: compact
-                                ) { selectedControl = control }
+                                ) { withoutAnimation { selectedControl = control } }
                             }
                         }
                     }
@@ -82,7 +93,7 @@ struct DeviceCanvasView: View {
             // (menu-bar) size, so the wordmark only appears at full size,
             // and is inset well clear of that screw's own position.
             if !compact {
-                Text("CODEXPAD")
+                Text("AGENT MICRO")
                     .font(.system(size: 7, weight: .bold, design: .rounded))
                     .tracking(1.2)
                     .foregroundStyle(.white.opacity(0.28))
@@ -91,7 +102,7 @@ struct DeviceCanvasView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Virtuelles CodexPad mit sechs Tasten und drei Drehrad-Aktionen")
+        .accessibilityLabel("Virtuelles Agent Micro mit sechs Tasten und drei Drehrad-Aktionen")
     }
 
     private var padBackground: some View {
@@ -278,7 +289,7 @@ struct EncoderControlView: View {
 
     var body: some View {
         VStack(spacing: compact ? 6 : 10) {
-            Button { selectedControl = .encoderPress } label: {
+            Button { withoutAnimation { selectedControl = .encoderPress } } label: {
                 ZStack {
                     Circle()
                         .fill(
@@ -358,7 +369,7 @@ struct EncoderControlView: View {
 
     private func chevronButton(_ control: HardwareControl, symbol: String) -> some View {
         let isSelected = selectedControl == control
-        return Button { selectedControl = control } label: {
+        return Button { withoutAnimation { selectedControl = control } } label: {
             Image(systemName: symbol)
                 .font(.system(size: compact ? 11 : 13, weight: .bold))
                 .foregroundStyle(isSelected ? Color.accentColor : .white.opacity(0.4))

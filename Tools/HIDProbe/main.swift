@@ -25,7 +25,7 @@ final class HIDProbe {
         }
 
         self.manager = manager
-        print("Monitoring CodexPad keyboard HID for \(Int(seconds)) seconds. Press pad keys and turn/press the encoder now.")
+        print("Monitoring Agent Micro keyboard HID for \(Int(seconds)) seconds. Press pad keys and turn/press the encoder now.")
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
         IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))

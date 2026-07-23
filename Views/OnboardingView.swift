@@ -2,9 +2,9 @@ import SwiftUI
 
 /// First-run flow, gated by `CodexPad.hasCompletedOnboarding` in `CodexPadApp`.
 /// Offers a one-tap "Schnellstart" (today's permission-only walkthrough) or a
-/// guided, step-by-step setup that also configures the agent selection, the
-/// Codex⇄Claude switch key, and the dictation source — everything that used
-/// to only be discoverable buried in Settings after the fact.
+/// guided, step-by-step setup that also configures the agent selection and
+/// the dictation source — everything that used to only be discoverable
+/// buried in Settings after the fact.
 struct OnboardingView: View {
     let appState: AppState
     let onFinished: () -> Void
@@ -13,9 +13,9 @@ struct OnboardingView: View {
 
     /// Every screen the guided path can show, in the fixed order they'd
     /// appear if all were included. `steps` filters this down to what's
-    /// actually relevant (e.g. no switch-button step for a single agent).
+    /// actually relevant.
     private enum Step: CaseIterable, Equatable {
-        case permissions, agents, switchButton, basics, microphone, summary
+        case permissions, agents, layers, basics, microphone, summary
     }
 
     static let size = CGSize(width: 560, height: 560)
@@ -25,7 +25,6 @@ struct OnboardingView: View {
 
     // Guided-path choices, applied to `appState.profiles` as they're made.
     @State private var selectedAgents: Set<AutomationApp> = [.codex, .claude]
-    @State private var switchChoice: LayerSwitchChoice?
     @State private var basicsPage = 0
     @State private var micSource: DictationSource = .codex
 
@@ -43,10 +42,7 @@ struct OnboardingView: View {
 
     private var steps: [Step] {
         guard mode == .guided else { return mode == .quick ? [.permissions] : [] }
-        var result: [Step] = [.permissions, .agents]
-        if selectedAgents.count > 1 { result.append(.switchButton) }
-        result.append(contentsOf: [.basics, .microphone, .summary])
-        return result
+        return [.permissions, .agents, .layers, .basics, .microphone, .summary]
     }
 
     var body: some View {
@@ -142,12 +138,6 @@ struct OnboardingView: View {
     private func finish() {
         if mode == .guided {
             appState.profiles.enabledAutomationApps = selectedAgents
-            if let switchChoice {
-                switch switchChoice {
-                case .key(let control): appState.profiles.layerSwitchControl = control
-                case .appOnly: appState.profiles.layerSwitchControl = nil
-                }
-            }
             appState.profiles.dictationSource = micSource
         }
         onFinished()
@@ -162,10 +152,10 @@ struct OnboardingView: View {
                 Image(systemName: "square.grid.3x2.fill")
                     .font(.system(size: 38))
                     .foregroundStyle(OnboardingPalette.accent)
-                Text("Willkommen bei CodexPad")
+                Text("Willkommen bei Agent Micro")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(OnboardingPalette.textPrimary)
-                Text("CodexPad verbindet ein physisches Macropad mit Codex und Claude: Tasten senden Shortcuts, das Drehrad steuert Reasoning-Aufwand und Modellwahl, und die LEDs zeigen den Live-Status deiner Agenten.")
+                Text("Agent Micro verbindet ein physisches Macropad mit Codex und Claude: Tasten senden Shortcuts, das Drehrad steuert Reasoning-Aufwand und Modellwahl, und die LEDs zeigen den Live-Status deiner Agenten.")
                     .font(.system(size: 13))
                     .foregroundStyle(OnboardingPalette.textSecondary)
                     .multilineTextAlignment(.center)
@@ -213,9 +203,9 @@ struct OnboardingView: View {
                 onBack: goBack,
                 onContinue: advance
             )
-        case .switchButton:
-            OnboardingSwitchButtonStep(
-                choice: $switchChoice,
+        case .layers:
+            OnboardingLayersStep(
+                profile: illustrativeProfile,
                 onBack: goBack,
                 onContinue: advance
             )
@@ -235,12 +225,6 @@ struct OnboardingView: View {
         case .summary:
             OnboardingSummaryStep(
                 selectedAgents: selectedAgents,
-                switchChoice: switchChoice.map { choice in
-                    switch choice {
-                    case .key(let control): control.shortTitle
-                    case .appOnly: "Nur über die App"
-                    }
-                },
                 micSource: micSource,
                 onBack: goBack,
                 onFinish: finish

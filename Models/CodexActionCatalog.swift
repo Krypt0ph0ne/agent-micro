@@ -15,7 +15,7 @@ enum CodexActionExecution: String, Codable, Hashable {
         case .configurableShortcut: "In Codex konfigurierbar"
         case .deepLink: "Codex Deep Link"
         case .unavailable: "Nicht stabil verfügbar"
-        case .hostEvent: "Nur an CodexPad melden"
+        case .hostEvent: "Nur an Agent Micro melden"
         }
     }
 }

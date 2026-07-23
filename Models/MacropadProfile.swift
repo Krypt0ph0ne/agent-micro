@@ -123,6 +123,14 @@ enum LEDReactionEvent: String, Codable, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    var group: LEDReactionGroup {
+        switch self {
+        case .dictation, .messageSent, .threadAssigned: .input
+        case .approvalAccepted, .approvalDeclined: .approvals
+        case .agentRunning, .agentIdle, .agentCompleted, .agentNeedsAttention, .agentFailed, .agentInterrupted: .agentStatus
+        }
+    }
+
     static func event(for status: CodexAgentStatus) -> LEDReactionEvent? {
         switch status {
         case .running: .agentRunning
@@ -133,6 +141,28 @@ enum LEDReactionEvent: String, Codable, CaseIterable, Identifiable, Hashable {
         case .interrupted: .agentInterrupted
         case .unassigned: nil
         }
+    }
+}
+
+/// Groups `LEDReactionEvent` cases into the sections shown in the LED reaction
+/// editor, so agent-related events sit together instead of one flat list.
+enum LEDReactionGroup: String, CaseIterable, Identifiable {
+    case input
+    case approvals
+    case agentStatus
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .input: "Eingabe & Nachrichten"
+        case .approvals: "Genehmigungen"
+        case .agentStatus: "Agent-Status"
+        }
+    }
+
+    var events: [LEDReactionEvent] {
+        LEDReactionEvent.allCases.filter { $0.group == self }
     }
 }
 
@@ -445,6 +475,56 @@ struct LEDConfiguration: Codable, Hashable {
     }
 }
 
+/// One alternate set of key/encoder bindings within a profile ("Belegung"),
+/// switchable at runtime without changing which app (Codex/Claude) is active.
+/// Only the bindings differ per layer — lighting (`led`/`idleLighting`/
+/// `ledReactions`) stays at the profile level, shared across all its layers.
+struct ProfileLayer: Codable, Hashable, Identifiable {
+    var id: UUID
+    var name: String
+    var controls: [ControlBinding]
+    /// Whole-pad confirmation blink shown when a layer-switch action lands on
+    /// this layer, so the user can tell which one is active without looking
+    /// at the app. `blinkCount` of 0 or 1 is a single flash.
+    var blinkRed: UInt8
+    var blinkGreen: UInt8
+    var blinkBlue: UInt8
+    var blinkCount: Int
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        controls: [ControlBinding],
+        blinkRed: UInt8 = 255,
+        blinkGreen: UInt8 = 255,
+        blinkBlue: UInt8 = 255,
+        blinkCount: Int = 1
+    ) {
+        self.id = id
+        self.name = name
+        self.controls = controls
+        self.blinkRed = blinkRed
+        self.blinkGreen = blinkGreen
+        self.blinkBlue = blinkBlue
+        self.blinkCount = blinkCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, controls, blinkRed, blinkGreen, blinkBlue, blinkCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try container.decode(String.self, forKey: .name)
+        controls = try container.decode([ControlBinding].self, forKey: .controls)
+        blinkRed = try container.decodeIfPresent(UInt8.self, forKey: .blinkRed) ?? 255
+        blinkGreen = try container.decodeIfPresent(UInt8.self, forKey: .blinkGreen) ?? 255
+        blinkBlue = try container.decodeIfPresent(UInt8.self, forKey: .blinkBlue) ?? 255
+        blinkCount = try container.decodeIfPresent(Int.self, forKey: .blinkCount) ?? 1
+    }
+}
+
 struct MacropadProfile: Codable, Hashable, Identifiable {
     static let currentFormatVersion = 1
 
@@ -453,7 +533,8 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
     var name: String
     var createdAt: Date
     var updatedAt: Date
-    var controls: [ControlBinding]
+    var layers: [ProfileLayer]
+    var activeLayerID: UUID
     var led: LEDConfiguration
     var idleLighting: IdleLEDConfiguration
     var ledReactions: [LEDReactionConfiguration]
@@ -462,6 +543,21 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
     /// target. `nil` for app-agnostic profiles (macOS, Safe, Factory-like C).
     var automationApp: AutomationApp?
 
+    /// Back-compat proxy so every existing call site (`action(for:)`,
+    /// `setAction`, migrations, `ProfileFactory`, ...) can keep reading/
+    /// writing a flat `controls` array exactly as before layers existed —
+    /// it's really just the active layer's bindings.
+    var controls: [ControlBinding] {
+        get { layers.first(where: { $0.id == activeLayerID })?.controls ?? layers.first?.controls ?? [] }
+        set {
+            guard let index = layers.firstIndex(where: { $0.id == activeLayerID }) else { return }
+            layers[index].controls = newValue
+        }
+    }
+
+    /// Convenience initializer matching the pre-layers shape: wraps `controls`
+    /// in a single "Standard" layer so every existing construction call site
+    /// (`ProfileFactory`, tests) is unaffected.
     init(
         formatVersion: Int = currentFormatVersion,
         id: UUID = UUID(),
@@ -475,12 +571,35 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
         isBuiltIn: Bool = false,
         automationApp: AutomationApp? = nil
     ) {
+        let layer = ProfileLayer(name: "Standard", controls: controls)
+        self.init(
+            formatVersion: formatVersion, id: id, name: name, createdAt: createdAt, updatedAt: updatedAt,
+            layers: [layer], activeLayerID: layer.id, led: led, idleLighting: idleLighting,
+            ledReactions: ledReactions, isBuiltIn: isBuiltIn, automationApp: automationApp
+        )
+    }
+
+    init(
+        formatVersion: Int = currentFormatVersion,
+        id: UUID = UUID(),
+        name: String,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        layers: [ProfileLayer],
+        activeLayerID: UUID,
+        led: LEDConfiguration = .confirmedSteady,
+        idleLighting: IdleLEDConfiguration = .default,
+        ledReactions: [LEDReactionConfiguration] = LEDReactionConfiguration.defaults,
+        isBuiltIn: Bool = false,
+        automationApp: AutomationApp? = nil
+    ) {
         self.formatVersion = formatVersion
         self.id = id
         self.name = name
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-        self.controls = controls
+        self.layers = layers.isEmpty ? [ProfileLayer(name: "Standard", controls: [])] : layers
+        self.activeLayerID = self.layers.contains(where: { $0.id == activeLayerID }) ? activeLayerID : self.layers[0].id
         self.led = led
         self.idleLighting = idleLighting
         self.ledReactions = ledReactions
@@ -556,7 +675,7 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, id, name, createdAt, updatedAt, controls, led, idleLighting, ledReactions, isBuiltIn, automationApp
+        case formatVersion, id, name, createdAt, updatedAt, controls, layers, activeLayerID, led, idleLighting, ledReactions, isBuiltIn, automationApp
     }
 
     init(from decoder: Decoder) throws {
@@ -566,55 +685,118 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
         name = try container.decode(String.self, forKey: .name)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
-        controls = try container.decode([ControlBinding].self, forKey: .controls)
         led = try container.decodeIfPresent(LEDConfiguration.self, forKey: .led) ?? .confirmedSteady
         idleLighting = try container.decodeIfPresent(IdleLEDConfiguration.self, forKey: .idleLighting) ?? .default
         ledReactions = try container.decodeIfPresent([LEDReactionConfiguration].self, forKey: .ledReactions)
             ?? LEDReactionConfiguration.defaults
         isBuiltIn = try container.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
         automationApp = try container.decodeIfPresent(AutomationApp.self, forKey: .automationApp)
+
+        // Profiles saved before layers existed only have a flat `controls`
+        // array — migrate it into a single "Standard" layer instead of
+        // losing it.
+        if let decodedLayers = try container.decodeIfPresent([ProfileLayer].self, forKey: .layers), !decodedLayers.isEmpty {
+            layers = decodedLayers
+            let decodedActiveID = try container.decodeIfPresent(UUID.self, forKey: .activeLayerID)
+            activeLayerID = (decodedActiveID.flatMap { id in decodedLayers.contains(where: { $0.id == id }) ? id : nil })
+                ?? decodedLayers[0].id
+        } else {
+            let legacyControls = try container.decodeIfPresent([ControlBinding].self, forKey: .controls) ?? []
+            let layer = ProfileLayer(name: "Standard", controls: legacyControls)
+            layers = [layer]
+            activeLayerID = layer.id
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(formatVersion, forKey: .formatVersion)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(layers, forKey: .layers)
+        try container.encode(activeLayerID, forKey: .activeLayerID)
+        try container.encode(led, forKey: .led)
+        try container.encode(idleLighting, forKey: .idleLighting)
+        try container.encode(ledReactions, forKey: .ledReactions)
+        try container.encode(isBuiltIn, forKey: .isBuiltIn)
+        try container.encodeIfPresent(automationApp, forKey: .automationApp)
     }
 }
 
 enum ProfileFactory {
+    /// Builds a layer's bindings from a catalog-id assignment list, always
+    /// pinning the encoder to the fixed private F22/F23/F24 reasoning
+    /// triggers regardless of which keys the layer otherwise assigns.
+    private static func layerControls(_ assignments: [(HardwareControl, String)], catalog: CodexActionCatalog) -> [ControlBinding] {
+        var bindings = assignments.map { control, actionID in
+            ControlBinding(control: control, action: catalog.keyboardAction(id: actionID) ?? .disabled)
+        }
+        bindings.append(ControlBinding(control: .encoderLeft, action: reasoningTriggerAction(for: .encoderLeft)))
+        bindings.append(ControlBinding(control: .encoderPress, action: reasoningTriggerAction(for: .encoderPress)))
+        bindings.append(ControlBinding(control: .encoderRight, action: reasoningTriggerAction(for: .encoderRight)))
+        return bindings
+    }
+
+    /// Ships with a second example layer so a fresh install already shows
+    /// the layer-switching feature in action instead of a single flat
+    /// profile — see the onboarding "Layer" step. "Standard" keeps the
+    /// original defaults; "Layer 2" rebinds the same six keys to a
+    /// different set of Codex shortcuts and confirms with two orange
+    /// blinks instead of Standard's one blue blink.
     static func codex(catalog: CodexActionCatalog) -> MacropadProfile {
-        let assignments: [(HardwareControl, String)] = [
-            (.key1, "previous-chat"), (.key2, "quick-chat"), (.key3, "next-chat"),
-            (.key4, "dictation"), (.key5, "new-chat"), (.key6, "open-review-tab"),
-            (.encoderLeft, "reasoning-decrease"), (.encoderPress, "open-model-picker"), (.encoderRight, "reasoning-increase")
-        ]
-        var profile = MacropadProfile(
+        let standard = ProfileLayer(
+            name: "Standard",
+            controls: layerControls([
+                (.key1, "previous-chat"), (.key2, "quick-chat"), (.key3, "next-chat"),
+                (.key4, "dictation"), (.key5, "new-chat"), (.key6, "open-review-tab")
+            ], catalog: catalog),
+            blinkRed: 10, blinkGreen: 132, blinkBlue: 255, blinkCount: 1
+        )
+        let layer2 = ProfileLayer(
+            name: "Layer 2",
+            controls: layerControls([
+                (.key1, "search-chats"), (.key2, "toggle-sidebar"), (.key3, "toggle-terminal"),
+                (.key4, "dictation"), (.key5, "clear-terminal"), (.key6, "toggle-review-panel")
+            ], catalog: catalog),
+            blinkRed: 255, blinkGreen: 159, blinkBlue: 10, blinkCount: 2
+        )
+        return MacropadProfile(
             name: "Codex",
-            controls: assignments.map { control, actionID in
-                ControlBinding(control: control, action: catalog.keyboardAction(id: actionID) ?? .disabled)
-            },
+            layers: [standard, layer2],
+            activeLayerID: standard.id,
             isBuiltIn: true,
             automationApp: .codex
         )
-        profile.setAction(reasoningTriggerAction(for: .encoderLeft), for: .encoderLeft)
-        profile.setAction(reasoningTriggerAction(for: .encoderPress), for: .encoderPress)
-        profile.setAction(reasoningTriggerAction(for: .encoderRight), for: .encoderRight)
-        return profile
     }
 
+    /// Same idea as `codex(catalog:)`: a second example layer with an
+    /// alternate set of Claude shortcuts and its own blink confirmation.
     static func claude(catalog: CodexActionCatalog) -> MacropadProfile {
-        let assignments: [(HardwareControl, String)] = [
-            (.key1, "previous-session"), (.key2, "toggle-diff"), (.key3, "next-session"),
-            (.key4, "dictation"), (.key5, "new-session"), (.key6, "toggle-terminal"),
-            (.encoderLeft, "open-effort-menu"), (.encoderPress, "open-model-menu"), (.encoderRight, "open-effort-menu")
-        ]
-        var profile = MacropadProfile(
+        let standard = ProfileLayer(
+            name: "Standard",
+            controls: layerControls([
+                (.key1, "previous-session"), (.key2, "toggle-diff"), (.key3, "next-session"),
+                (.key4, "dictation"), (.key5, "new-session"), (.key6, "toggle-terminal")
+            ], catalog: catalog),
+            blinkRed: 10, blinkGreen: 132, blinkBlue: 255, blinkCount: 1
+        )
+        let layer2 = ProfileLayer(
+            name: "Layer 2",
+            controls: layerControls([
+                (.key1, "shortcuts-overview"), (.key2, "close-session"), (.key3, "stop-response"),
+                (.key4, "dictation"), (.key5, "close-panel"), (.key6, "cycle-mode")
+            ], catalog: catalog),
+            blinkRed: 255, blinkGreen: 159, blinkBlue: 10, blinkCount: 2
+        )
+        return MacropadProfile(
             name: "Claude",
-            controls: assignments.map { control, actionID in
-                ControlBinding(control: control, action: catalog.keyboardAction(id: actionID) ?? .disabled)
-            },
+            layers: [standard, layer2],
+            activeLayerID: standard.id,
             isBuiltIn: true,
             automationApp: .claude
         )
-        profile.setAction(reasoningTriggerAction(for: .encoderLeft), for: .encoderLeft)
-        profile.setAction(reasoningTriggerAction(for: .encoderPress), for: .encoderPress)
-        profile.setAction(reasoningTriggerAction(for: .encoderRight), for: .encoderRight)
-        return profile
     }
 
     static func safe() -> MacropadProfile {
