@@ -75,7 +75,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         permissionMonitor.requestPermissions()
         updateMonitoring()
         if !hasInputMonitoringPermission || !hasAccessibilityPermission {
-            status = "Berechtigungen fehlen noch. In den Systemeinstellungen CodexPad aktivieren und danach zur App zurückkehren."
+            status = "Berechtigungen fehlen noch. In den Systemeinstellungen Agent Micro aktivieren und danach zur App zurückkehren."
         }
     }
 
@@ -326,7 +326,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         }
 
         guard hasInputMonitoringPermission else {
-            status = "Input Monitoring fehlt – macOS blockiert das Drehrad. Bitte CodexPad unten freigeben."
+            status = "Input Monitoring fehlt – macOS blockiert das Drehrad. Bitte Agent Micro unten freigeben."
             return
         }
 

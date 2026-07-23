@@ -41,7 +41,7 @@ final class CodexPadKeyboardStateService: @unchecked Sendable {
               let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>,
               let device = devices.first,
               IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess else {
-            logger.error("Could not open CodexPad keyboard HID")
+            logger.error("Could not open Agent Micro keyboard HID")
             return
         }
 
@@ -57,7 +57,7 @@ final class CodexPadKeyboardStateService: @unchecked Sendable {
         self.manager = manager
         self.device = device
         self.reportBuffer = buffer
-        logger.info("CodexPad keyboard report monitor connected")
+        logger.info("Agent Micro keyboard report monitor connected")
     }
 
     func stop() {

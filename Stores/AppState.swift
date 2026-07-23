@@ -30,10 +30,11 @@ final class AppState {
     /// without the user having to press "Übertragen" — see `scheduleAutoSync()`.
     private var autoSyncTask: Task<Void, Never>?
     private static let autoSyncDelaySeconds: TimeInterval = 0.4
-    /// Fires the Codex⇄Claude layer switch once `profiles.layerSwitchControl`
-    /// has been held past the threshold — see `beginLayerSwitchHold()`.
-    private var layerSwitchHoldTask: Task<Void, Never>?
-    static let layerSwitchHoldThresholdSeconds: TimeInterval = 0.4
+    /// Per-control rapid-tap counters for a `.tapCount`-mode `.layerSwitch`
+    /// action — see `handleLayerSwitchAction`.
+    private var layerTapCounts: [HardwareControl: Int] = [:]
+    private var layerTapTimers: [HardwareControl: Task<Void, Never>] = [:]
+    private static let layerMultiTapWindowSeconds: TimeInterval = 0.6
 
     init() {
         UserDefaults.standard.register(defaults: [CodexQuickAssignService.enabledDefaultsKey: true])
@@ -112,6 +113,9 @@ final class AppState {
             self.assignAgentThread(thread, to: control)
             self.ledFeedback.showThreadAssignedReaction(profile: self.profiles.selectedProfile)
         }
+        tapHold.onAppAction = { [weak self] action, control in
+            self?.dispatchAction(action, for: control)
+        }
         padEvents.onPhysicalEvent = { [weak self] event in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -122,28 +126,14 @@ final class AppState {
                 self.reasoningAutomation.handlePhysicalEvent(event)
                 self.claudeReasoningAutomation.handlePhysicalEvent(event)
                 guard let control = HardwareControl(reportedControlIndex: event.control) else { return }
-                if control == self.profiles.layerSwitchControl {
-                    switch event.phase {
-                    case .pressed: self.beginLayerSwitchHold()
-                    case .released: self.endLayerSwitchHold()
-                    case .triggered: break
-                    }
-                    return
-                }
                 guard event.phase == .pressed || event.phase == .triggered else { return }
-                let action = self.profiles.selectedProfile.action(for: control)
-                switch action.codexActionID {
-                case "approval-accept" where self.approvals.armed != nil:
-                    self.approvals.decide(.accept)
-                case "approval-decline" where self.approvals.armed != nil:
-                    self.approvals.decide(.decline)
-                default:
-                    if action.kind == .codexAgent {
-                        _ = self.codexThreads.openAssignedThread(for: control)
-                    } else if action.kind == .claudeAgent {
-                        _ = self.claudeThreads.openAssignedThread(for: control)
-                    }
-                }
+                let binding = self.profiles.selectedProfile.binding(for: control)
+                // Tap-hold controls resolve tap-vs-hold themselves (above, via
+                // `tapHold.handle`/`onAppAction`) — dispatching the plain tap
+                // action here too would fire it immediately on every press,
+                // defeating the wait-for-hold timing.
+                guard !binding.isTapHold else { return }
+                self.dispatchAction(binding.action, for: control)
             }
         }
         padEvents.onFirmwareStatus = { [weak self] firmwareStatus in
@@ -181,29 +171,61 @@ final class AppState {
     /// error surfacing as the retry signal.
     private func autoSync() {
         guard profiles.hasUnsyncedChanges, device.state.isSupportedConnection, !device.isBusy else { return }
-        let result = device.upload(profile: profiles.selectedProfile, keyboardLayout: profiles.keyboardLayout, layerSwitchControl: profiles.layerSwitchControl)
+        let result = device.upload(profile: profiles.selectedProfile, keyboardLayout: profiles.keyboardLayout)
         if result?.succeeded == true {
             profiles.markSynchronized()
             refreshAgentLEDs()
         }
     }
 
-    /// `profiles.layerSwitchControl` is reserved and app-only (no macro) in
-    /// firmware — see `CodexPadPacketEncoder` — so holding it past the
-    /// threshold is the only thing it ever does.
-    private func beginLayerSwitchHold() {
-        layerSwitchHoldTask?.cancel()
-        layerSwitchHoldTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.layerSwitchHoldThresholdSeconds))
-            guard !Task.isCancelled, let self else { return }
-            self.profiles.switchToOtherBuiltInProfile()
-            self.ledFeedback.flashLayerSwitchConfirmation(profile: self.profiles.selectedProfile)
+    /// Dispatch for a control's resolved action on a normal key press.
+    private func dispatchAction(_ action: KeyboardAction, for control: HardwareControl) {
+        switch action.codexActionID {
+        case "approval-accept" where approvals.armed != nil:
+            approvals.decide(.accept)
+        case "approval-decline" where approvals.armed != nil:
+            approvals.decide(.decline)
+        default:
+            if action.kind == .codexAgent {
+                _ = codexThreads.openAssignedThread(for: control)
+            } else if action.kind == .claudeAgent {
+                _ = claudeThreads.openAssignedThread(for: control)
+            } else if action.kind == .layerSwitch {
+                handleLayerSwitchAction(action, control: control)
+            } else if action.kind == .profileSwitch {
+                profiles.switchToOtherBuiltInProfile()
+                ledFeedback.flashLayerSwitchConfirmation(profile: profiles.selectedProfile)
+            }
         }
     }
 
-    private func endLayerSwitchHold() {
-        layerSwitchHoldTask?.cancel()
-        layerSwitchHoldTask = nil
+    /// Advances or jumps the *currently selected profile's* active layer
+    /// according to the assigned action's mode, then confirms with that
+    /// layer's own blink color/count.
+    private func handleLayerSwitchAction(_ action: KeyboardAction, control: HardwareControl) {
+        switch action.layerSwitchMode ?? .cycle {
+        case .cycle:
+            profiles.advanceToNextLayer()
+            flashActiveLayer()
+        case .tapCount:
+            let count = (layerTapCounts[control] ?? 0) + 1
+            layerTapCounts[control] = count
+            layerTapTimers[control]?.cancel()
+            layerTapTimers[control] = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.layerMultiTapWindowSeconds))
+                guard !Task.isCancelled, let self else { return }
+                let finalCount = self.layerTapCounts[control] ?? 1
+                self.layerTapCounts[control] = 0
+                self.profiles.selectLayer(atPosition: finalCount)
+                self.flashActiveLayer()
+            }
+        }
+    }
+
+    private func flashActiveLayer() {
+        let profile = profiles.selectedProfile
+        guard let layer = profile.layers.first(where: { $0.id == profile.activeLayerID }) else { return }
+        ledFeedback.flashLayerConfirmation(profile: profile, red: layer.blinkRed, green: layer.blinkGreen, blue: layer.blinkBlue, count: layer.blinkCount)
     }
 
     /// The action catalog matching whichever app the selected profile targets;

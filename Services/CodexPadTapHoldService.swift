@@ -24,6 +24,12 @@ final class CodexPadTapHoldService {
     /// Last resolved action, surfaced in Diagnostics/Settings for confidence.
     private(set) var lastResolvedAction = "Noch keine Tipp-/Halte-Aktion ausgelöst"
 
+    /// Fired instead of keystroke synthesis when the resolved tap or hold
+    /// action has no `deviceMacro` to synthesize (agent, layer-switch,
+    /// profile-switch, ...) — lets `AppState` run its normal app-side
+    /// dispatch for whichever slot just resolved.
+    var onAppAction: ((KeyboardAction, HardwareControl) -> Void)?
+
     /// Synthesizing keystrokes into other apps needs the Accessibility grant.
     var hasAccessibilityPermission: Bool { permissionMonitor.hasAccessibilityPermission }
 
@@ -69,9 +75,12 @@ final class CodexPadTapHoldService {
         state.holdFired = true
         state.timer = nil
         pressStates[control] = state
-        let hold = profileProvider().binding(for: control).holdAction
-        if KeystrokeSynthesizer.post(macro: hold?.deviceMacro) {
-            lastResolvedAction = "Halten: \(hold?.label ?? "—")"
+        guard let hold = profileProvider().binding(for: control).holdAction else { return }
+        if KeystrokeSynthesizer.post(macro: hold.deviceMacro) {
+            lastResolvedAction = "Halten: \(hold.label)"
+        } else if hold.isEnabled {
+            onAppAction?(hold, control)
+            lastResolvedAction = "Halten: \(hold.label)"
         }
     }
 
@@ -82,7 +91,10 @@ final class CodexPadTapHoldService {
         // The hold already fired for this press; the release must not also tap.
         guard !state.holdFired else { return }
         let tap = binding.action
-        if tap.isEnabled, KeystrokeSynthesizer.post(macro: tap.deviceMacro) {
+        if KeystrokeSynthesizer.post(macro: tap.deviceMacro) {
+            lastResolvedAction = "Tippen: \(tap.label)"
+        } else if tap.isEnabled {
+            onAppAction?(tap, control)
             lastResolvedAction = "Tippen: \(tap.label)"
         }
     }

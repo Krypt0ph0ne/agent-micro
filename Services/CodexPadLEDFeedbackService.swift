@@ -111,6 +111,41 @@ final class CodexPadLEDFeedbackService {
         }
     }
 
+    /// Confirms which layer just became active after a `.layerSwitch` action
+    /// fires: the whole pad blinks `count` times in the layer's own color,
+    /// then restores whatever was showing before. Distinct from
+    /// `flashLayerSwitchConfirmation` (the fixed white blip for the Codex⇄
+    /// Claude hold gesture) since each layer picks its own color/count.
+    ///
+    /// The gap between blinks briefly shows the profile's own Grundlicht
+    /// instead of a hard cut to black — dipping to true off for every gap
+    /// read as flicker/interference rather than a deliberate blink pattern.
+    func flashLayerConfirmation(profile: MacropadProfile, red: UInt8, green: UInt8, blue: UInt8, count: Int) {
+        activeProfile = profile
+        animationTask?.cancel()
+        let blinkCount = max(1, count)
+        logger.info("Layer confirmation flash ×\(blinkCount, privacy: .public)")
+        let onMilliseconds = 180
+        let gapMilliseconds = 160
+        animationTask = Task { [weak self] in
+            guard let self else { return }
+            for index in 0..<blinkCount {
+                self.sendWholePad { control in
+                    KeyLEDConfiguration(control: control, effect: .steady, red: red, green: green, blue: blue, brightness: 255, periodMilliseconds: onMilliseconds)
+                }
+                do { try await Task.sleep(for: .milliseconds(onMilliseconds)) } catch { return }
+                guard index < blinkCount - 1 else { continue }
+                self.sendWholePad { control in profile.baseLighting(for: control) }
+                do { try await Task.sleep(for: .milliseconds(gapMilliseconds)) } catch { return }
+            }
+            if self.isDictationHeld {
+                self.showDictationReaction()
+            } else {
+                self.showIdleLighting()
+            }
+        }
+    }
+
     func showAgentStatuses(_ statuses: [HardwareControl: CodexAgentStatus], profile: MacropadProfile) {
         let previous = agentStatuses
         agentStatuses = statuses

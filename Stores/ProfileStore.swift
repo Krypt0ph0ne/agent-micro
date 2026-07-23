@@ -63,14 +63,7 @@ final class ProfileStore {
     private static let selectedProfileDefaultsKey = "CodexPad.selectedProfileID"
     private static let keyboardLayoutDefaultsKey = "CodexPad.keyboardLayout"
     private static let dictationSourceDefaultsKey = "CodexPad.dictationSource"
-    private static let layerSwitchControlDefaultsKey = "CodexPad.layerSwitchControl"
-    /// Set once the user has explicitly chosen "nur über die App wechseln"
-    /// (onboarding or Settings) — distinct from simply never having set a
-    /// key, which still falls back to `defaultLayerSwitchControl` so
-    /// existing installs that skip onboarding keep working unchanged.
-    private static let layerSwitchDisabledDefaultsKey = "CodexPad.layerSwitchDisabled"
     private static let enabledAutomationAppsDefaultsKey = "CodexPad.enabledAutomationApps"
-    static let defaultLayerSwitchControl: HardwareControl = .key3
     private let persistenceURL: URL
     private let catalog: CodexActionCatalog
     private let claudeCatalog: CodexActionCatalog
@@ -96,25 +89,6 @@ final class ProfileStore {
     var selectedProfileID: UUID {
         didSet {
             UserDefaults.standard.set(selectedProfileID.uuidString, forKey: Self.selectedProfileDefaultsKey)
-        }
-    }
-    /// The one key permanently reserved for holding-to-switch between the
-    /// Codex and Claude built-in profiles, across whichever one is active.
-    /// `nil` means the user explicitly chose to switch only through the app
-    /// (menu bar / main window), never via a held key. Encoded app-only (no
-    /// macro) on upload — see `CodexPadPacketEncoder` — so a reserved key
-    /// never also fires a leftover assigned shortcut.
-    var layerSwitchControl: HardwareControl? {
-        didSet {
-            guard layerSwitchControl != oldValue else { return }
-            if let layerSwitchControl {
-                UserDefaults.standard.set(layerSwitchControl.rawValue, forKey: Self.layerSwitchControlDefaultsKey)
-                UserDefaults.standard.set(false, forKey: Self.layerSwitchDisabledDefaultsKey)
-            } else {
-                UserDefaults.standard.set(true, forKey: Self.layerSwitchDisabledDefaultsKey)
-            }
-            hasUnsyncedChanges = true
-            onChange?()
         }
     }
     /// Which built-in profiles (Codex/Claude) are currently offered for
@@ -163,12 +137,6 @@ final class ProfileStore {
         let dictationSource = UserDefaults.standard.string(forKey: Self.dictationSourceDefaultsKey)
             .flatMap(DictationSource.init(rawValue:)) ?? .codex
         self.dictationSource = dictationSource
-        if UserDefaults.standard.bool(forKey: Self.layerSwitchDisabledDefaultsKey) {
-            self.layerSwitchControl = nil
-        } else {
-            self.layerSwitchControl = UserDefaults.standard.string(forKey: Self.layerSwitchControlDefaultsKey)
-                .flatMap(HardwareControl.init(rawValue:)) ?? Self.defaultLayerSwitchControl
-        }
         if let storedApps = UserDefaults.standard.string(forKey: Self.enabledAutomationAppsDefaultsKey) {
             let parsed = Set(storedApps.split(separator: ",").compactMap { AutomationApp(rawValue: String($0)) })
             self.enabledAutomationApps = parsed.isEmpty ? Set(AutomationApp.allCases) : parsed
@@ -210,8 +178,8 @@ final class ProfileStore {
     }
 
     /// Flips between the Codex and Claude built-in profiles — the only two
-    /// that exist by design (see `keptBuiltInNames`) — for the layer-switch
-    /// hold gesture. A no-op if either is missing (shouldn't happen).
+    /// that exist by design (see `keptBuiltInNames`) — for a `.profileSwitch`
+    /// action. A no-op if either is missing (shouldn't happen).
     func switchToOtherBuiltInProfile() {
         let targetApp: AutomationApp = selectedProfile.automationApp == .claude ? .codex : .claude
         guard let target = visibleProfiles.first(where: { $0.automationApp == targetApp }) else { return }
@@ -297,6 +265,101 @@ final class ProfileStore {
         var profile = selectedProfile
         profile.setHoldAction(action, thresholdMilliseconds: thresholdMilliseconds, for: control)
         replace(profile)
+    }
+
+    /// Adds a new layer to the selected profile, starting as a copy of the
+    /// currently active layer's bindings so the user edits from a working
+    /// baseline instead of a blank one, and selects it.
+    func addLayer() {
+        var profile = selectedProfile
+        let newLayer = ProfileLayer(
+            name: uniqueLayerName("Layer \(profile.layers.count + 1)", in: profile),
+            controls: profile.controls
+        )
+        profile.layers.append(newLayer)
+        profile.activeLayerID = newLayer.id
+        profile.updatedAt = .now
+        replace(profile)
+    }
+
+    func duplicateLayer(_ layerID: UUID) {
+        var profile = selectedProfile
+        guard let source = profile.layers.first(where: { $0.id == layerID }) else { return }
+        var copy = source
+        copy.id = UUID()
+        copy.name = uniqueLayerName("\(source.name) Kopie", in: profile)
+        profile.layers.append(copy)
+        profile.activeLayerID = copy.id
+        profile.updatedAt = .now
+        replace(profile)
+    }
+
+    func renameLayer(_ layerID: UUID, to name: String) {
+        var profile = selectedProfile
+        guard let index = profile.layers.firstIndex(where: { $0.id == layerID }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        profile.layers[index].name = trimmed
+        profile.updatedAt = .now
+        replace(profile)
+    }
+
+    /// Removes a layer, keeping at least one. If the removed layer was
+    /// active, falls back to the first remaining one.
+    func deleteLayer(_ layerID: UUID) {
+        var profile = selectedProfile
+        guard profile.layers.count > 1, let index = profile.layers.firstIndex(where: { $0.id == layerID }) else { return }
+        profile.layers.remove(at: index)
+        if profile.activeLayerID == layerID {
+            profile.activeLayerID = profile.layers[0].id
+        }
+        profile.updatedAt = .now
+        replace(profile)
+    }
+
+    func selectLayer(_ layerID: UUID) {
+        var profile = selectedProfile
+        guard profile.layers.contains(where: { $0.id == layerID }) else { return }
+        profile.activeLayerID = layerID
+        replace(profile)
+    }
+
+    /// Advances the selected profile's active layer to the next one,
+    /// wrapping back to the first. A no-op with a single layer.
+    func advanceToNextLayer() {
+        var profile = selectedProfile
+        guard profile.layers.count > 1, let index = profile.layers.firstIndex(where: { $0.id == profile.activeLayerID }) else { return }
+        let nextIndex = (index + 1) % profile.layers.count
+        profile.activeLayerID = profile.layers[nextIndex].id
+        replace(profile)
+    }
+
+    /// Selects the layer at 1-indexed `position` (one tap = layer 1, two taps
+    /// = layer 2, ...), clamped to the profile's actual layer count.
+    func selectLayer(atPosition position: Int) {
+        var profile = selectedProfile
+        guard !profile.layers.isEmpty else { return }
+        let index = min(max(position - 1, 0), profile.layers.count - 1)
+        profile.activeLayerID = profile.layers[index].id
+        replace(profile)
+    }
+
+    func updateLayerBlink(_ layerID: UUID, red: UInt8, green: UInt8, blue: UInt8, count: Int) {
+        var profile = selectedProfile
+        guard let index = profile.layers.firstIndex(where: { $0.id == layerID }) else { return }
+        profile.layers[index].blinkRed = red
+        profile.layers[index].blinkGreen = green
+        profile.layers[index].blinkBlue = blue
+        profile.layers[index].blinkCount = max(1, count)
+        profile.updatedAt = .now
+        replace(profile)
+    }
+
+    private func uniqueLayerName(_ requested: String, in profile: MacropadProfile) -> String {
+        guard profile.layers.contains(where: { $0.name == requested }) else { return requested }
+        var number = 2
+        while profile.layers.contains(where: { $0.name == "\(requested) \(number)" }) { number += 1 }
+        return "\(requested) \(number)"
     }
 
     func newProfile() {
