@@ -150,7 +150,6 @@ struct LEDControlPanel: View {
 
             brightnessControls(
                 effect: idle.effect,
-                maxLabel: "Helligkeit",
                 max: idleByteBinding(\.brightness),
                 maxPercent: Int(idle.brightness) * 100 / 255,
                 min: idleByteBinding(\.minBrightness),
@@ -200,7 +199,6 @@ struct LEDControlPanel: View {
 
             brightnessControls(
                 effect: setting.effect,
-                maxLabel: "Helligkeit",
                 max: byteBinding(\.brightness),
                 maxPercent: Int(setting.brightness) * 100 / 255,
                 min: byteBinding(\.minBrightness),
@@ -270,19 +268,17 @@ struct LEDControlPanel: View {
         }
     }
 
-    /// Brightness row(s) shared by the base editors: a single slider normally,
-    /// or a "Von / Bis" pair once "Pulsieren" is selected, so the effect can
-    /// breathe within a configured range instead of always dipping to zero.
+    /// Brightness row(s) shared by the base editors. A non-zero pulse floor is
+    /// rendered live by the Mac because the firmware has no floor parameter.
     @ViewBuilder
     private func brightnessControls(
         effect: LEDEffect,
-        maxLabel: String,
         max: Binding<Double>,
         maxPercent: Int,
         min: Binding<Double>,
         minPercent: Int
     ) -> some View {
-        LabeledContent(effect == .pulse ? "Bis" : maxLabel) {
+        LabeledContent(effect == .pulse ? "Bis" : "Helligkeit") {
             HStack(spacing: 8) {
                 Slider(value: max, in: 0...255)
                 Text("\(maxPercent) %")
@@ -299,7 +295,7 @@ struct LEDControlPanel: View {
                         .frame(width: 38, alignment: .trailing)
                 }
             }
-            Text("Pulsiert zwischen \(minPercent) % und \(maxPercent) %. Bei 0 % pulsiert es klassisch bis ganz aus.")
+            Text("Pulsiert zwischen \(minPercent) % und \(maxPercent) %. Bei 0 % übernimmt die Firmware den Puls.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -687,7 +683,7 @@ private struct LEDReactionEditor: View {
                             .frame(width: 38, alignment: .trailing)
                     }
                 }
-                Text("Pulsiert zwischen \(Int(reaction.minBrightness) * 100 / 255) % und \(Int(reaction.brightness) * 100 / 255) %.")
+                Text("Pulsiert zwischen \(Int(reaction.minBrightness) * 100 / 255) % und \(Int(reaction.brightness) * 100 / 255) %. Bei 0 % übernimmt die Firmware den Puls.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

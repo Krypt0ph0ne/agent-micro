@@ -202,10 +202,8 @@ struct LEDReactionConfiguration: Codable, Hashable, Identifiable {
     /// When this agent status is active, suppress the otherwise ambient idle
     /// lighting so the status indication has the pad's full attention.
     var disablesIdle: Bool
-    /// Floor for a "Pulsieren" effect, so it breathes between `minBrightness`
-    /// and `brightness` instead of the firmware's native 0→`brightness`
-    /// sweep. Zero (the default) reproduces the classic firmware-native pulse
-    /// exactly. See `KeyLEDConfiguration.isRangePulse`.
+    /// Floor for a pulse rendered by the host when the device protocol cannot
+    /// express the requested non-zero minimum.
     var minBrightness: UInt8
 
     var id: LEDReactionEvent { event }
@@ -291,7 +289,7 @@ struct IdleLEDConfiguration: Codable, Hashable {
     var blue: UInt8
     var brightness: UInt8
     var periodMilliseconds: Int
-    /// Floor for a "Pulsieren" effect. See `KeyLEDConfiguration.isRangePulse`.
+    /// Optional pulse floor; non-zero ranges are rendered by the host.
     var minBrightness: UInt8
 
     static let `default` = IdleLEDConfiguration(
@@ -367,19 +365,12 @@ struct KeyLEDConfiguration: Codable, Hashable, Identifiable {
     var blue: UInt8
     var brightness: UInt8
     var periodMilliseconds: Int
-    /// Floor for a "Pulsieren" effect, breathing between `minBrightness` and
-    /// `brightness` rather than the CH552 firmware's native 0→`brightness`
-    /// sweep. Zero (the default) is the classic firmware-native pulse.
+    /// Optional pulse floor. Zero uses the firmware-native pulse; a value
+    /// strictly below `brightness` requests host-rendered range breathing.
     var minBrightness: UInt8
 
     var id: HardwareControl { control }
 
-    /// True when this key should breathe within a host-managed brightness
-    /// range. The firmware has no concept of a pulse floor, so whenever this
-    /// is true `CodexPadLEDFeedbackService` must animate it itself instead of
-    /// handing the effect off to the device. A degenerate range (min ≥ max)
-    /// is treated as a plain pulse, so the default `minBrightness == 0`
-    /// reproduces the original firmware-native behaviour exactly.
     var isRangePulse: Bool {
         effect == .pulse && minBrightness > 0 && minBrightness < brightness
     }
