@@ -1,27 +1,23 @@
 import Foundation
 import OSLog
 
-/// Native pulses are handed to the firmware, which renders them smoothly
-/// without continuous USB traffic. Only pulses with a non-zero brightness
-/// floor need host frames because the firmware cannot represent that range.
-/// Those exceptional animations are generation-protected so a stale idle
-/// frame can never overwrite a newer agent state.
+/// Native pulses are handed to the firmware. Pulses with a configured
+/// brightness floor are the one deliberate exception because the device
+/// protocol cannot encode that floor; those are animated by the host.
 @MainActor
 final class CodexPadLEDFeedbackService {
     private enum DictationSource { case rawEvent, statusMask, keyboardReport }
 
-    /// Raised-cosine breathing is smooth at roughly 30 Hz while leaving
-    /// substantially more bandwidth for status polling and physical events.
-    private static let rangePulseTickMilliseconds = 33
+    /// 50 Hz keeps host-rendered brightness-range pulses visually smooth.
+    private static let rangePulseTickMilliseconds = 20
 
     private let logger = Logger(subsystem: "com.codexpad.app", category: "led-feedback")
     private let encoder = CodexPadPacketEncoder()
     private let send: ([[UInt8]]) -> Void
     private var animationTask: Task<Void, Never>?
     private var pulseAnimationTask: Task<Void, Never>?
-    /// Invalidates an already-cancelled task before it can emit a late frame.
-    /// Task cancellation alone is cooperative, so the generation check is the
-    /// hard guarantee that only the newest render may write pulse packets.
+    /// Cancellation is cooperative. The generation check prevents an older
+    /// range pulse from emitting a late frame after a newer status has won.
     private var pulseGeneration: UInt64 = 0
     private var rawEventHeld = false
     private var statusMaskHeld = false
@@ -29,6 +25,9 @@ final class CodexPadLEDFeedbackService {
     private var pickerSelectionActive = false
     private var agentStatuses: [HardwareControl: CodexAgentStatus] = [:]
     private var activeProfile: MacropadProfile?
+    /// Reconciliation may publish the same status repeatedly. Re-sending an
+    /// identical pulse restarts it at its trough, which looks like a stutter.
+    private var lastAgentLightingSettings: [KeyLEDConfiguration]?
 
     init(send: @escaping ([[UInt8]]) -> Void) {
         self.send = send
@@ -244,11 +243,8 @@ final class CodexPadLEDFeedbackService {
     /// user-configured effect alive.
     func showStatusTransition(_ status: CodexAgentStatus, for control: HardwareControl, profile: MacropadProfile) {
         // Dictation owns the complete pad while the key is held. In particular,
-        // a range-limited dictation pulse is host-driven, so starting even a
-        // one-key terminal reaction here would cancel its timer and leave the
-        // agent key's firmware effect visible until the next dictation frame.
-        // The status is still retained in `agentStatuses`; releasing dictation
-        // reconciles the latest agent lighting in `showIdleLighting()`.
+        // its optional brightness-range pulse must not be replaced by an agent
+        // transition. Releasing dictation reconciles the retained status.
         guard !isDictationHeld, !pickerSelectionActive else { return }
         guard let event = LEDReactionEvent.event(for: status) else { return }
         let reaction = profile.reaction(for: event)
@@ -339,32 +335,37 @@ final class CodexPadLEDFeedbackService {
             guard reaction.effect != .off else { return idleSetting }
             return reaction.keyConfiguration(for: control)
         }
+        guard settings != lastAgentLightingSettings else { return }
+        lastAgentLightingSettings = settings
         sendMixed(settings)
     }
 
     /// Sends the same configuration to all six keys, routing only unsupported
     /// brightness-range pulses through the host animator.
     private func sendWholePad(_ keyConfiguration: (HardwareControl) -> KeyLEDConfiguration) {
+        // A temporary whole-pad owner (dictation, picker, confirmation) means
+        // the cached agent lighting is no longer what the hardware displays.
+        lastAgentLightingSettings = nil
         sendMixed(HardwareControl.buttons.map(keyConfiguration))
     }
 
-    /// Splits firmware-supported settings from range pulses. Every new render
-    /// invalidates the previous host generation before writing either group,
-    /// while normal pulses remain fire-and-forget firmware commands.
+    /// Normal pulses are fire-and-forget firmware commands. Only pulses whose
+    /// minimum is strictly between zero and their maximum need host frames.
     private func sendMixed(_ settings: [KeyLEDConfiguration]) {
         invalidatePulseAnimation()
         let generation = pulseGeneration
-        let staticSettings = settings.filter { !$0.isRangePulse }
-        let animatedSettings = settings.filter(\.isRangePulse)
-        if !staticSettings.isEmpty {
-            send(staticSettings.map(encoder.ledPacket))
+        let nativeSettings = settings.filter { !$0.isRangePulse }
+        let rangeSettings = settings.filter(\.isRangePulse)
+        if !nativeSettings.isEmpty {
+            send(nativeSettings.map(encoder.ledPacket))
         }
-        startPulseAnimation(animatedSettings, generation: generation)
+        startPulseAnimation(rangeSettings, generation: generation)
     }
 
     private func beginExclusiveTimeline() {
         animationTask?.cancel()
         animationTask = nil
+        lastAgentLightingSettings = nil
         invalidatePulseAnimation()
     }
 
@@ -383,22 +384,15 @@ final class CodexPadLEDFeedbackService {
         pulseAnimationTask = nil
     }
 
-    /// Starts one animation generation for every currently pulsing key. The
-    /// first frame is synchronous; later frames verify both cancellation and
-    /// the generation immediately before sending.
     private func startPulseAnimation(
         _ settings: [KeyLEDConfiguration],
         generation: UInt64
     ) {
         guard !settings.isEmpty else { return }
-        logger.info("Starting range-pulse generation \(generation, privacy: .public) for \(settings.count, privacy: .public) key(s)")
+        logger.info("Starting brightness-range pulse \(generation, privacy: .public) for \(settings.count, privacy: .public) key(s)")
         let startNanoseconds = DispatchTime.now().uptimeNanoseconds
-        let initialFrames = settings.map { breathingFrame(of: $0, elapsedMilliseconds: 0) }
-        send(initialFrames.map(encoder.ledPacket))
+        send(settings.map { encoder.ledPacket(setting: breathingFrame(of: $0, elapsedMilliseconds: 0)) })
         pulseAnimationTask = Task { [weak self] in
-            // Track true elapsed time rather than accumulating fixed tick
-            // steps: a scheduling hiccup would otherwise desync the phase
-            // from wall-clock time and read as a stutter on every later tick.
             while true {
                 do {
                     try await Task.sleep(for: .milliseconds(Self.rangePulseTickMilliseconds))
@@ -406,22 +400,24 @@ final class CodexPadLEDFeedbackService {
                     return
                 }
                 guard !Task.isCancelled, let self, self.pulseGeneration == generation else { return }
-                let elapsedMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startNanoseconds) / 1_000_000
-                let frames = settings.map { self.breathingFrame(of: $0, elapsedMilliseconds: elapsedMilliseconds) }
+                let elapsedMilliseconds = Double(
+                    DispatchTime.now().uptimeNanoseconds - startNanoseconds
+                ) / 1_000_000
+                let frames = settings.map {
+                    self.breathingFrame(of: $0, elapsedMilliseconds: elapsedMilliseconds)
+                }
                 guard !Task.isCancelled, self.pulseGeneration == generation else { return }
                 self.send(frames.map(self.encoder.ledPacket))
             }
         }
     }
 
-    /// Computes one animation frame for a pulse key: a raised-cosine
-    /// ("smoothstep") wave between `minBrightness` and `brightness` that
-    /// completes one full up-and-down cycle every `periodMilliseconds`, sent
-    /// to the firmware as a plain steady colour so no unsupported effect byte
-    /// ever reaches it. The cosine easing eases in and out of each peak/
-    /// trough instead of moving at a constant linear rate, which is what
-    /// reads as a smooth "breathing" motion instead of a visible ramp.
-    private func breathingFrame(of setting: KeyLEDConfiguration, elapsedMilliseconds: Double) -> KeyLEDConfiguration {
+    /// Raised-cosine breathing avoids a visible direction change at the
+    /// configured minimum and maximum brightness.
+    private func breathingFrame(
+        of setting: KeyLEDConfiguration,
+        elapsedMilliseconds: Double
+    ) -> KeyLEDConfiguration {
         let period = Double(max(200, setting.periodMilliseconds))
         let position = elapsedMilliseconds.truncatingRemainder(dividingBy: period) / period
         let eased = (1 - cos(position * 2 * .pi)) / 2

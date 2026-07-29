@@ -757,12 +757,12 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(LEDReactionEvent.event(for: .interrupted), .agentInterrupted)
     }
 
-    func testAgentIdleReactionDefaultsToARangePulseAndCanFallBackToBaseLighting() {
+    func testAgentIdleReactionDefaultsToRangePulseAndCanFallBackToBaseLighting() {
         let profile = ProfileFactory.codex(catalog: CodexActionCatalog())
         let idleReaction = profile.reaction(for: .agentIdle)
         XCTAssertEqual(idleReaction.effect, .pulse)
         XCTAssertTrue(idleReaction.disablesIdle)
-        XCTAssertGreaterThan(idleReaction.minBrightness, 0, "Should breathe within a range rather than the firmware's native 0-sweep")
+        XCTAssertGreaterThan(idleReaction.minBrightness, 0)
 
         var mutable = profile
         mutable.setReaction(LEDReactionConfiguration(
@@ -1273,7 +1273,7 @@ final class CodexPadTests: XCTestCase {
     }
 
     @MainActor
-    func testRunningStatusInvalidatesEveryPendingIdlePulseFrame() async {
+    func testRunningStatusInvalidatesEveryPendingIdleRangePulseFrame() async {
         var batches: [[[UInt8]]] = []
         let feedback = CodexPadLEDFeedbackService { batches.append($0) }
         var profile = ProfileFactory.safe()
@@ -1300,7 +1300,24 @@ final class CodexPadTests: XCTestCase {
         ))
 
         feedback.showAgentStatuses([.key1: .idle], profile: profile)
-        try? await Task.sleep(for: .milliseconds(45))
+        try? await Task.sleep(for: .milliseconds(65))
+        let idleFrames = batches.flatMap { $0 }.filter {
+            $0[4] == HardwareControl.key1.firmwareControlIndex
+                && $0[6...8] == [255, 255, 255]
+        }
+        XCTAssertGreaterThanOrEqual(idleFrames.count, 3)
+        XCTAssertTrue(idleFrames.allSatisfy {
+            $0[5] == LEDEffect.steady.rawValue && (40...180).contains($0[10])
+        })
+
+        let beforeDuplicateIdle = batches.count
+        feedback.showAgentStatuses([.key1: .idle], profile: profile)
+        XCTAssertEqual(
+            batches.count,
+            beforeDuplicateIdle,
+            "An identical reconciliation must not restart the pulse at its trough"
+        )
+
         let runningStart = batches.count
         feedback.showAgentStatuses([.key1: .running], profile: profile)
         try? await Task.sleep(for: .milliseconds(90))
