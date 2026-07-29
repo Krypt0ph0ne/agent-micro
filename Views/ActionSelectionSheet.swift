@@ -86,9 +86,9 @@ struct ActionSelectionSheet: View {
     private var specialActions: some View {
         HStack(spacing: 8) {
             special(AppLanguage.text("Agent", "Agent"), icon: "terminal.fill", unavailableForHold: true) { appState.assignAgentPlaceholder(to: control); dismiss() }
-            special(AppLanguage.text("Text", "Text"), icon: "text.cursor", unavailableForHold: true) { showingText = true }
-            special(AppLanguage.text("Layer", "Layer"), icon: "square.stack.3d.up", unavailableForHold: true) { showingLayer = true }
-            special(AppLanguage.text("Profil", "Profile"), icon: "arrow.left.arrow.right", unavailableForHold: true) { apply(.profileSwitch) }
+            special(AppLanguage.text("Text", "Text"), icon: "text.cursor") { showingText = true }
+            special(AppLanguage.text("Layer", "Layer"), icon: "square.stack.3d.up") { showingLayer = true }
+            special(AppLanguage.text("Profil", "Profile"), icon: "arrow.left.arrow.right") { apply(.profileSwitch) }
             special(AppLanguage.text("Deaktivieren", "Disable"), icon: "minus.circle") { apply(.disabled) }
         }
         .controlSize(.small)
@@ -120,7 +120,7 @@ struct ActionSelectionSheet: View {
             ContextInfoButton(title: action.title, message: action.description)
 
             if action.execution == .configurableShortcut {
-                if let configured = configuredAction(for: action.id) {
+                if let configured = configuredAction(for: action) {
                     Text(configured.displayShortcut)
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
@@ -157,12 +157,19 @@ struct ActionSelectionSheet: View {
         .padding(.vertical, 3)
     }
 
-    private func configuredAction(for actionID: String) -> KeyboardAction? {
-        appState.profiles.selectedProfile.layers
-            .lazy
-            .flatMap(\.controls)
-            .flatMap { binding in [binding.action, binding.holdAction].compactMap { $0 } }
-            .first { $0.codexActionID == actionID && $0.deviceMacro?.isEmpty == false }
+    private func configuredAction(for definition: CodexActionDefinition) -> KeyboardAction? {
+        let bindings = appState.profiles.selectedProfile.layers.flatMap(\.controls)
+        let profileActions = bindings.flatMap { binding in
+            [binding.action, binding.holdAction].compactMap { $0 }
+        }
+        if let inProfile = profileActions.first(where: {
+            $0.codexActionID == definition.id && $0.deviceMacro?.isEmpty == false
+        }) {
+            return inProfile
+        }
+
+        let app = appState.profiles.selectedProfile.automationApp ?? .codex
+        return CodexTriggerRegistry.confirmedAction(for: definition, app: app)
     }
 
     private func choose(_ definition: CodexActionDefinition) {
@@ -175,11 +182,15 @@ struct ActionSelectionSheet: View {
         switch context {
         case .tap: appState.profiles.updateAction(action, for: control)
         case .hold:
-            appState.profiles.setHoldAction(
-                action,
-                thresholdMilliseconds: appState.profiles.selectedProfile.binding(for: control).resolvedHoldThresholdMilliseconds,
-                for: control
-            )
+            if action.kind == .disabled {
+                appState.profiles.setHoldAction(nil, for: control)
+            } else {
+                appState.profiles.setHoldAction(
+                    action,
+                    thresholdMilliseconds: appState.profiles.selectedProfile.binding(for: control).resolvedHoldThresholdMilliseconds,
+                    for: control
+                )
+            }
         }
         dismiss()
     }

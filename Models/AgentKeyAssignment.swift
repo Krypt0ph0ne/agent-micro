@@ -36,8 +36,9 @@ struct CodexThreadDescriptor: Identifiable, Codable, Hashable, Sendable {
     /// `local_…` route ID while older assignments and hooks use the CLI UUID.
     var alternateID: String? = nil
     /// Identifier accepted by the target application's navigation surface.
-    /// Claude Desktop's local metadata ID is not routable; the supported
-    /// Resume flow uses the underlying CLI UUID.
+    /// Claude Desktop's `local_…` metadata ID is not routable. Its underlying
+    /// CLI/bridge UUID is accepted by `claude://code/<UUID>` and resolves to
+    /// the existing Desktop session without importing or cloning it.
     var navigationID: String? = nil
 
     var isSubagent: Bool { parentThreadID != nil }

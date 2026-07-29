@@ -15,6 +15,16 @@ struct ControlAssignmentPanel: View {
         return appState.activeCatalog.action(id: id)
     }
 
+    private var isConfigurableShortcutConfirmed: Bool {
+        guard
+            let definition,
+            let macro = action.deviceMacro,
+            let app = appState.profiles.selectedProfile.automationApp,
+            let confirmed = CodexTriggerRegistry.confirmedTrigger(for: definition.id, app: app)
+        else { return false }
+        return confirmed == macro.lowercased()
+    }
+
     var body: some View {
         if HardwareControl.encoderActions.contains(control) {
             EncoderAssignmentSection(appState: appState)
@@ -119,7 +129,8 @@ struct ControlAssignmentPanel: View {
     @ViewBuilder
     private var configurableReminder: some View {
         if let definition, definition.execution == .configurableShortcut,
-           let macro = action.deviceMacro, !macro.isEmpty {
+           let macro = action.deviceMacro, !macro.isEmpty,
+           !isConfigurableShortcutConfirmed {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "wand.and.stars")
                     .foregroundStyle(.tint)

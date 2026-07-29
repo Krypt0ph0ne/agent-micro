@@ -49,17 +49,11 @@ struct LEDControlPanel: View {
         appState.profiles.selectedProfile.idleLighting
     }
 
-    /// Colour swatch shown in the header, reflecting the current base layer.
-    private var headerPreviewColor: Color {
-        guard idle.enabled else { return Color.white.opacity(0.16) }
-        return idle.perKey ? setting.previewColor : idle.keyConfiguration(for: targetControls[0]).previewColor
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 7) {
                 Image(systemName: "lightbulb.led.fill")
-                    .foregroundStyle(headerPreviewColor)
+                    .foregroundStyle(.secondary)
                 Text("Licht")
                     .font(.headline)
                 ContextInfoButton(
@@ -417,36 +411,33 @@ private struct LEDReactionEditor: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Layer-Wechsel")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 2)
+                    Text("Bestätigung direkt nach dem Wechsel. Jede Belegung hat ihr eigenes Signal.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 2)
+                    ForEach(appState.profiles.selectedProfile.layers) { layer in
+                        layerConfirmationRow(layer)
+                    }
+                }
+
+                ForEach(LEDReactionGroup.allCases) { group in
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("Layer-Wechsel")
+                        Text(group.title)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 2)
-                        Text("Bestätigung direkt nach dem Wechsel. Jede Belegung hat ihr eigenes Signal.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 2)
-                        ForEach(appState.profiles.selectedProfile.layers) { layer in
-                            layerConfirmationRow(layer)
-                        }
-                    }
-
-                    ForEach(LEDReactionGroup.allCases) { group in
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text(group.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 2)
-                            ForEach(group.events) { event in
-                                reactionRow(event)
-                            }
+                        ForEach(group.events) { event in
+                            reactionRow(event)
                         }
                     }
                 }
             }
-            .frame(height: 320)
         }
     }
 

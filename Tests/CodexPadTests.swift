@@ -115,7 +115,7 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(thread.navigationID, "8566a8f9-bd20-4f55-bb33-7675859812ed")
     }
 
-    func testClaudeNavigationUsesDesktopAndCLIResumeRoutes() {
+    func testClaudeNavigationUsesExistingDesktopSessionRoute() {
         XCTAssertEqual(
             CodexThreadStore.navigationURL(for: "session_01XMavBeqfaCXC5dbAMrn6ba", app: .claude)?.absoluteString,
             "claude://code/session_01XMavBeqfaCXC5dbAMrn6ba"
@@ -123,7 +123,7 @@ final class CodexPadTests: XCTestCase {
         XCTAssertNil(CodexThreadStore.navigationURL(for: "local_1cdac978-4c4d-452c-87ca-d3769b994e0a", app: .claude))
         XCTAssertEqual(
             CodexThreadStore.navigationURL(for: "8566a8f9-bd20-4f55-bb33-7675859812ed", app: .claude)?.absoluteString,
-            "claude://resume?session=8566a8f9-bd20-4f55-bb33-7675859812ed"
+            "claude://code/8566a8f9-bd20-4f55-bb33-7675859812ed"
         )
     }
 
@@ -1745,6 +1745,94 @@ final class CodexPadTests: XCTestCase {
                 defaults: defaults
             ),
             "cmd-ctrl-opt-shift-c"
+        )
+    }
+
+    func testTriggerRegistryRemembersAnActionAcrossPadControls() {
+        let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        CodexTriggerRegistry.remember(
+            "cmd-ctrl-opt-shift-f7",
+            for: "toggle-pet",
+            app: .codex,
+            defaults: defaults
+        )
+
+        XCTAssertEqual(
+            CodexTriggerRegistry.trigger(for: "toggle-pet", app: .codex, defaults: defaults),
+            "cmd-ctrl-opt-shift-f7"
+        )
+        XCTAssertNil(CodexTriggerRegistry.trigger(for: "toggle-pet", app: .claude, defaults: defaults))
+        XCTAssertTrue(CodexTriggerRegistry.reservedTriggers(defaults: defaults).contains("cmd-ctrl-opt-shift-f7"))
+    }
+
+    func testTriggerRegistryConfirmsOnlyAfterSuccessfulSetup() {
+        let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        CodexTriggerRegistry.remember(
+            "cmd-ctrl-opt-shift-f8",
+            for: "toggle-pet",
+            app: .codex,
+            defaults: defaults
+        )
+        XCTAssertNil(CodexTriggerRegistry.confirmedTrigger(for: "toggle-pet", app: .codex, defaults: defaults))
+
+        CodexTriggerRegistry.markConfirmed(
+            "cmd-ctrl-opt-shift-f8",
+            for: "toggle-pet",
+            app: .codex,
+            defaults: defaults
+        )
+        XCTAssertEqual(
+            CodexTriggerRegistry.confirmedTrigger(for: "toggle-pet", app: .codex, defaults: defaults),
+            "cmd-ctrl-opt-shift-f8"
+        )
+    }
+
+    func testTriggerRegistryRestoresConfirmedActionAfterRestart() throws {
+        let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let definition = try XCTUnwrap(CodexActionCatalog().action(id: "toggle-pet"))
+        CodexTriggerRegistry.markConfirmed(
+            "cmd-ctrl-opt-shift-f9",
+            for: definition.id,
+            app: .codex,
+            defaults: defaults
+        )
+
+        let restored = CodexTriggerRegistry.confirmedAction(for: definition, app: .codex, defaults: defaults)
+        XCTAssertEqual(restored?.deviceMacro, "cmd-ctrl-opt-shift-f9")
+        XCTAssertEqual(restored?.codexActionID, "toggle-pet")
+        XCTAssertEqual(restored?.kind, .codexShortcut)
+    }
+
+    func testTriggerRegistryImportsExistingBindingsFromInactiveLayers() {
+        let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        var inactiveLayer = profile.layers[0]
+        inactiveLayer.name = "Eigene Aktionen"
+        inactiveLayer.controls[0].action = KeyboardAction(
+            kind: .codexShortcut,
+            label: "Pad an/aus",
+            deviceMacro: "cmd-ctrl-opt-shift-9",
+            codexActionID: "toggle-pet"
+        )
+        profile.layers.append(inactiveLayer)
+
+        CodexTriggerRegistry.importExistingAssignments(from: [profile], defaults: defaults)
+
+        XCTAssertEqual(
+            CodexTriggerRegistry.trigger(for: "toggle-pet", app: .codex, defaults: defaults),
+            "cmd-ctrl-opt-shift-9"
         )
     }
 

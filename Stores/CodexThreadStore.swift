@@ -49,7 +49,7 @@ final class CodexThreadStore {
     var liveStatusAvailability: AgentLiveStatusAvailability { bridge.liveStatusAvailability }
     var sessionNavigationSummary: String {
         automationApp == .claude
-            ? "Claude-Desktop-Sitzungen öffnen direkt in der Code-Seitenleiste; reine CLI-Sitzungen werden per Sitzungs-ID in Desktop fortgesetzt."
+            ? "Claude-Sitzungen werden über ihre Code-Sitzungs-ID in der bestehenden Desktop-Unterhaltung geöffnet. Sitzungen ohne Claude-Titel sind nicht mit Merge-Status verknüpft."
             : "Codex öffnet den zugewiesenen Thread per Deep Link."
     }
 
@@ -149,16 +149,14 @@ final class CodexThreadStore {
         switch app {
         case .codex:
             return URL(string: "codex://threads/\(threadID)")
-        case .claude where threadID.hasPrefix("session_") || threadID.hasPrefix("cse_"):
-            return URL(string: "claude://code/\(threadID)")
         case .claude where threadID.hasPrefix("local_"):
             return nil
         case .claude:
-            var components = URLComponents()
-            components.scheme = "claude"
-            components.host = "resume"
-            components.queryItems = [URLQueryItem(name: "session", value: threadID)]
-            return components.url
+            // `claude://resume?session=…` imports a CLI transcript into a new
+            // Desktop session. That is why a tap produced "General coding
+            // session" copies. `code/<bridge UUID>` instead resolves the
+            // existing Desktop session through Claude's session manager.
+            return URL(string: "claude://code/\(threadID)")
         }
     }
 

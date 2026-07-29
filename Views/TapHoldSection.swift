@@ -1,25 +1,23 @@
 import SwiftUI
 
-/// Editor for a key's optional second function on hold. Only the six buttons
-/// support it; the encoder keeps its dedicated reasoning semantics.
+/// Editor for a key's optional action on hold. The regular action is already
+/// shown by the parent editor, so this surface only configures the hold side.
+/// Only the six buttons support it; the encoder keeps its dedicated reasoning
+/// semantics.
 struct TapHoldSection: View {
     let appState: AppState
     let control: HardwareControl
-    @State private var isChoosingHold = false
-    @State private var holdSearch = ""
-    @State private var isPresentingHoldTextSubmission = false
-    @State private var isPresentingHoldWizard = false
-    @State private var isPresentingHoldLayerSwitchPicker = false
+    @State private var isPresentingHoldActionSheet = false
 
     private var binding: ControlBinding {
         appState.profiles.selectedProfile.binding(for: control)
     }
 
-    /// The tap side must either be an app-synthesizable keyboard action, or
-    /// one of the host-dispatched app actions (`.layerSwitch`/`.profileSwitch`)
+    /// The regular action must either be an app-synthesizable keyboard action,
+    /// or one of the host-dispatched app actions (`.layerSwitch`/`.profileSwitch`)
     /// — both slots then resolve through `CodexPadTapHoldService.onAppAction`
     /// instead of keystroke synthesis. Media, mouse and agent bindings cannot
-    /// be re-emitted by the app, so tap-vs-hold stays hidden for those.
+    /// be re-emitted by the app, so a hold action stays unavailable for those.
     private var tapSupportsHold: Bool {
         KeystrokeSynthesizer.canSynthesize(binding.action.deviceMacro)
             || binding.action.kind == .layerSwitch
@@ -28,14 +26,6 @@ struct TapHoldSection: View {
 
     private var assignableActions: [CodexActionDefinition] {
         appState.activeCatalog.actions.filter { $0.isDirectlyAssignable && KeystrokeSynthesizer.canSynthesize($0.deviceMacro) }
-    }
-
-    private var filteredHoldActions: [CodexActionDefinition] {
-        let query = holdSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return assignableActions }
-        return assignableActions.filter {
-            $0.title.localizedCaseInsensitiveContains(query) || $0.category.localizedCaseInsensitiveContains(query)
-        }
     }
 
     var body: some View {
@@ -47,26 +37,10 @@ struct TapHoldSection: View {
             }
         }
         .onChange(of: control) { _, _ in
-            isChoosingHold = false
-            holdSearch = ""
+            isPresentingHoldActionSheet = false
         }
-        .sheet(isPresented: $isPresentingHoldTextSubmission) {
-            TextSubmissionSheet { text in
-                guard let textAction = KeyboardAction.textSubmission(text) else { return }
-                appState.profiles.setHoldAction(textAction, thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds, for: control)
-            }
-        }
-        .sheet(isPresented: $isPresentingHoldWizard) {
-            CodexAssignmentWizardView(appState: appState, control: control, slot: .hold)
-        }
-        .sheet(isPresented: $isPresentingHoldLayerSwitchPicker) {
-            LayerSwitchModePickerSheet { mode in
-                appState.profiles.setHoldAction(
-                    .layerSwitch(mode: mode),
-                    thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds,
-                    for: control
-                )
-            }
+        .sheet(isPresented: $isPresentingHoldActionSheet) {
+            ActionSelectionSheet(appState: appState, control: control, context: .hold)
         }
     }
 
@@ -74,11 +48,11 @@ struct TapHoldSection: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack(spacing: 6) {
-                Image(systemName: "hand.tap")
+                Image(systemName: "hand.raised")
                     .foregroundStyle(.tint)
-                Text("Tippen / Halten")
+                Text("Halten")
                     .font(.subheadline.weight(.semibold))
-                ContextInfoButton(title: "Zweitbelegung beim Halten", message: infoMessage)
+                ContextInfoButton(title: "Aktion beim Halten", message: infoMessage)
                 Spacer()
                 Toggle("", isOn: tapHoldEnabled)
                     .labelsHidden()
@@ -88,13 +62,13 @@ struct TapHoldSection: View {
             }
 
             if !tapSupportsHold && !binding.isTapHold {
-                Text("Nur für Tastatur-/Codex-Shortcuts verfügbar. Diese Tippen-Aktion kann die App nicht als Halten-Zweitaktion nachbilden.")
+                Text("Nur für Tastatur-/Codex-Shortcuts verfügbar. Die aktuelle Belegung kann die App nicht zusammen mit einer Halte-Aktion ausführen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if binding.isTapHold {
                 activeEditor
             } else {
-                Text("Kurz tippen löst „\(binding.action.displayLabel)“ aus. Aktiviere den Schalter, um beim Halten eine zweite Aktion zu senden.")
+                Text("Aktiviere den Schalter, um beim Halten eine zusätzliche Aktion zu senden.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -137,12 +111,9 @@ struct TapHoldSection: View {
 
     @ViewBuilder
     private var activeEditor: some View {
-        // Tap summary
-        row(icon: binding.action.icon, title: "Tippen", value: binding.action.displayLabel, macro: binding.action.displayShortcut)
-
         // Hold action, editable
         Button {
-            withAnimation(.easeInOut(duration: 0.15)) { isChoosingHold.toggle() }
+            isPresentingHoldActionSheet = true
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: binding.holdAction?.icon ?? "hand.raised")
@@ -158,7 +129,7 @@ struct TapHoldSection: View {
                 if let macro = binding.holdAction?.displayShortcut {
                     Text(macro).font(.caption2.monospaced()).foregroundStyle(.secondary)
                 }
-                Image(systemName: isChoosingHold ? "chevron.up" : "chevron.down")
+                Image(systemName: "chevron.up.chevron.down")
                     .font(.caption).foregroundStyle(.tertiary)
             }
             .padding(10)
@@ -168,84 +139,11 @@ struct TapHoldSection: View {
         }
         .buttonStyle(.plain)
 
-        if isChoosingHold {
-            holdPicker
-        }
-
         thresholdSlider
 
         if !appState.tapHold.hasAccessibilityPermission {
             permissionHint
         }
-    }
-
-    private var holdPicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Button("Text", systemImage: "paperplane.fill") {
-                    isPresentingHoldTextSubmission = true
-                    isChoosingHold = false
-                }
-                Button("Assistent", systemImage: "wand.and.stars") {
-                    isPresentingHoldWizard = true
-                    isChoosingHold = false
-                }
-                .help("Konfigurierbare Codex-Aktion mit eigenem Trigger als Halten-Aktion einrichten")
-                Button("Layer", systemImage: "square.stack.3d.up") {
-                    isPresentingHoldLayerSwitchPicker = true
-                    isChoosingHold = false
-                }
-                .help("Zwischen den Layern dieses Profils wechseln")
-                Button("Profil", systemImage: "arrow.left.arrow.right") {
-                    appState.profiles.setHoldAction(
-                        .profileSwitch,
-                        thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds,
-                        for: control
-                    )
-                    isChoosingHold = false
-                }
-                .help("Zwischen Codex und Claude wechseln")
-            }
-            .controlSize(.small)
-
-            TextField("Halten-Aktion durchsuchen", text: $holdSearch)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-            ScrollView {
-                LazyVStack(spacing: 3) {
-                    ForEach(filteredHoldActions) { action in
-                        Button {
-                            appState.profiles.setHoldAction(
-                                appState.activeCatalog.keyboardAction(id: action.id),
-                                thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds,
-                                for: control
-                            )
-                            isChoosingHold = false
-                            holdSearch = ""
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: action.icon).frame(width: 20).foregroundStyle(.tint)
-                                Text(action.title)
-                                    .font(.caption.weight(.medium))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Spacer(minLength: 4)
-                                if action.id == binding.holdAction?.codexActionID {
-                                    Image(systemName: "checkmark").foregroundStyle(.tint)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                            .frame(maxWidth: .infinity, minHeight: 30)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .background(.quaternary.opacity(action.id == binding.holdAction?.codexActionID ? 0.6 : 0.2), in: RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-            }
-            .frame(height: 150)
-        }
-        .padding(8)
-        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 9))
     }
 
     private var thresholdSlider: some View {
@@ -274,7 +172,7 @@ struct TapHoldSection: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Bedienungshilfen nötig")
                     .font(.caption.weight(.semibold))
-                Text("Tippen/Halten sendet die Aktionen selbst. Erlaube Agent Micro die Bedienungshilfen, sonst bleibt die Zweitbelegung wirkungslos.")
+                Text("Die Halte-Aktion wird von Agent Micro ausgelöst. Erlaube die Bedienungshilfen, sonst bleibt sie wirkungslos.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -314,10 +212,10 @@ struct TapHoldSection: View {
                         thresholdMilliseconds: binding.resolvedHoldThresholdMilliseconds,
                         for: control
                     )
-                    isChoosingHold = fallback == nil
+                    isPresentingHoldActionSheet = fallback == nil
                 } else {
                     appState.profiles.setHoldAction(nil, for: control)
-                    isChoosingHold = false
+                    isPresentingHoldActionSheet = false
                 }
             }
         )
@@ -339,6 +237,6 @@ struct TapHoldSection: View {
     }
 
     private var infoMessage: String {
-        "Kurzes Tippen sendet die Haupt-Aktion, längeres Halten die Zweit-Aktion. Agent Micro misst die Druckdauer und sendet die passende Tastenkombination selbst. Das benötigt die eigene CH552-Firmware (sie meldet die Druckflanken) und die Bedienungshilfen-Berechtigung. Nach dem Ändern einmal „Übertragen“ klicken."
+        "Halten löst zusätzlich zur normalen Tastenaktion eine eigene Aktion aus. Agent Micro misst die Druckdauer und sendet die passende Tastenkombination selbst. Das benötigt die eigene CH552-Firmware (sie meldet die Druckflanken) und die Bedienungshilfen-Berechtigung. Nach dem Ändern einmal „Übertragen“ klicken."
     }
 }

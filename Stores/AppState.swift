@@ -523,6 +523,12 @@ final class AppState {
         let transfer = transferCurrentConfiguration()
         guard transfer?.succeeded == true else { return transfer }
 
+        CodexTriggerRegistry.markConfirmed(
+            trigger,
+            for: definition.id,
+            app: app
+        )
+
         return transfer
     }
 
