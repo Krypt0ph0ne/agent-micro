@@ -11,7 +11,7 @@ enum KeyboardLayout: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .automatic: "Automatisch"
+        case .automatic: AppLanguage.text("Automatisch", "Automatic")
         case .germanISO: "Deutsch ISO"
         case .usANSI: "English US"
         case .britishISO: "English UK"
@@ -23,7 +23,9 @@ enum KeyboardLayout: String, CaseIterable, Codable, Identifiable {
     }
 
     var detail: String {
-        self == .automatic ? "Automatisch · \(resolved.title)" : title
+        self == .automatic
+            ? AppLanguage.text("Automatisch erkannt · \(resolved.title)", "Automatically detected · \(resolved.title)")
+            : title
     }
 
     static var detected: KeyboardLayout {

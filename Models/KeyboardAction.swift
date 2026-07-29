@@ -35,18 +35,18 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         case .claudeAgent: "Claude Agent"
         case .claudeShortcut: "Claude Shortcut"
         case .keyboardShortcut: "macOS Shortcut"
-        case .singleKey: "Einzelne Taste"
-        case .keySequence: "Tastensequenz / Makro"
-        case .textSubmission: "Text absenden"
-        case .media: "Mediensteuerung"
-        case .mouse: "Mausaktion"
-        case .disabled: "Deaktiviert"
+        case .singleKey: AppLanguage.text("Einzelne Taste", "Single key")
+        case .keySequence: AppLanguage.text("Tastensequenz / Makro", "Key sequence / macro")
+        case .textSubmission: AppLanguage.text("Text absenden", "Submit text")
+        case .media: AppLanguage.text("Mediensteuerung", "Media control")
+        case .mouse: AppLanguage.text("Mausaktion", "Mouse action")
+        case .disabled: AppLanguage.text("Deaktiviert", "Disabled")
         case .codexDeepLink: "Codex Deep Link"
         case .claudeDeepLink: "Claude Deep Link"
-        case .localCommand: "Lokaler Befehl"
-        case .hostEvent: "Nur an Agent Micro melden"
-        case .layerSwitch: "Layer wechseln"
-        case .profileSwitch: "Profil wechseln"
+        case .localCommand: AppLanguage.text("Lokaler Befehl", "Local command")
+        case .hostEvent: AppLanguage.text("Nur an Agent Micro melden", "Send to Agent Micro only")
+        case .layerSwitch: AppLanguage.text("Layer wechseln", "Switch layer")
+        case .profileSwitch: AppLanguage.text("Profil wechseln", "Switch profile")
         }
     }
 
@@ -81,15 +81,15 @@ enum LayerSwitchMode: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .cycle: "Zyklisch weiterschalten"
-        case .tapCount: "Klickanzahl = Layer-Nr."
+        case .cycle: AppLanguage.text("Zyklisch weiterschalten", "Cycle through layers")
+        case .tapCount: AppLanguage.text("Klickanzahl = Layer-Nr.", "Tap count = layer number")
         }
     }
 
     var detail: String {
         switch self {
-        case .cycle: "Jeder Druck springt zum nächsten Layer, danach wieder zu Layer 1."
-        case .tapCount: "Schnell hintereinander getippt: die Anzahl Klicks bestimmt den Ziel-Layer, z. B. 2× = Layer 2."
+        case .cycle: AppLanguage.text("Jeder Druck springt zum nächsten Layer, danach wieder zu Layer 1.", "Each press advances to the next layer, then wraps back to layer 1.")
+        case .tapCount: AppLanguage.text("Schnell hintereinander getippt: die Anzahl Klicks bestimmt den Ziel-Layer, z. B. 2× = Layer 2.", "Tap repeatedly: the number of taps selects the target layer, e.g. 2× = layer 2.")
         }
     }
 }
@@ -157,6 +157,25 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
     }
 
     static let disabled = KeyboardAction(kind: .disabled, label: "Deaktiviert", icon: "minus.circle")
+
+    /// Labels for built-in actions are stored in profiles for backwards
+    /// compatibility, but must follow the current app language at display
+    /// time. Custom action labels deliberately remain exactly as the user
+    /// entered them.
+    var displayLabel: String {
+        return switch kind {
+        case .disabled:
+            AppLanguage.text("Deaktiviert", "Disabled")
+        case .layerSwitch:
+            layerSwitchMode?.title ?? AppLanguage.text("Layer wechseln", "Switch layer")
+        case .profileSwitch:
+            AppLanguage.text("Profil wechseln", "Switch profile")
+        case .textSubmission:
+            submittedText.map { AppLanguage.text("„\($0)“ absenden", "Submit “\($0)”") } ?? label
+        default:
+            label
+        }
+    }
 
     static func layerSwitch(mode: LayerSwitchMode) -> KeyboardAction {
         KeyboardAction(kind: .layerSwitch, label: mode.title, icon: "square.stack.3d.up", layerSwitchMode: mode)

@@ -15,14 +15,20 @@ struct DeviceEditorView: View {
         VStack(spacing: 12) {
             DeviceCanvasView(
                 profile: appState.profiles.selectedProfile,
-                selectedControl: $selectedControl
+                selectedControl: $selectedControl,
+                agentTitleForControl: {
+                    appState.activeAgentThreads.assignment(for: $0)?.threadTitle
+                }
             )
 
-            Picker("Editor", selection: $mode) {
-                ForEach(EditorMode.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            EditorModeSwitch(
+                selection: $mode,
+                options: [
+                    .init(.actions, title: "Belegung", systemImage: "rectangle.grid.2x2"),
+                    .init(.lighting, title: "Licht", systemImage: "lightbulb.led.fill")
+                ],
+                accessibilityLabel: "Editor"
+            )
 
             Group {
                 if mode == .actions {

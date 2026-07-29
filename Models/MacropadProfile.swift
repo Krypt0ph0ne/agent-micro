@@ -59,10 +59,10 @@ enum LEDEffect: UInt8, Codable, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .off: "Aus"
-        case .steady: "Dauerlicht"
-        case .blink: "Blinken"
-        case .pulse: "Pulsieren"
+        case .off: AppLanguage.text("Aus", "Off")
+        case .steady: AppLanguage.text("Dauerlicht", "Steady")
+        case .blink: AppLanguage.text("Blinken", "Blink")
+        case .pulse: AppLanguage.text("Pulsieren", "Pulse")
         }
     }
 }
@@ -84,33 +84,33 @@ enum LEDReactionEvent: String, Codable, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .dictation: "Diktat halten"
-        case .messageSent: "Nachricht gesendet"
-        case .threadAssigned: "Thread zugewiesen"
-        case .approvalAccepted: "Genehmigt"
-        case .approvalDeclined: "Abgelehnt"
-        case .agentRunning: "Agent läuft"
-        case .agentIdle: "Agent frei"
-        case .agentCompleted: "Agent fertig"
-        case .agentNeedsAttention: "Eingabe erforderlich"
-        case .agentFailed: "Agent fehlgeschlagen"
-        case .agentInterrupted: "Agent unterbrochen"
+        case .dictation: AppLanguage.text("Diktat halten", "Hold dictation")
+        case .messageSent: AppLanguage.text("Nachricht gesendet", "Message sent")
+        case .threadAssigned: AppLanguage.text("Thread zugewiesen", "Thread assigned")
+        case .approvalAccepted: AppLanguage.text("Genehmigt", "Approved")
+        case .approvalDeclined: AppLanguage.text("Abgelehnt", "Declined")
+        case .agentRunning: AppLanguage.text("Agent läuft", "Agent running")
+        case .agentIdle: AppLanguage.text("Agent frei", "Agent idle")
+        case .agentCompleted: AppLanguage.text("Agent fertig", "Agent completed")
+        case .agentNeedsAttention: AppLanguage.text("Eingabe erforderlich", "Input required")
+        case .agentFailed: AppLanguage.text("Agent fehlgeschlagen", "Agent failed")
+        case .agentInterrupted: AppLanguage.text("Agent unterbrochen", "Agent interrupted")
         }
     }
 
     var detail: String {
         switch self {
-        case .dictation: "Solange die Taste gedrückt ist"
-        case .messageSent: "Kurzes Feedback beim Senden"
-        case .threadAssigned: "Kurzes Feedback nach Halten-zum-Zuweisen"
-        case .approvalAccepted: "Nach Bestätigen einer Anfrage"
-        case .approvalDeclined: "Nach Ablehnen einer Anfrage"
-        case .agentRunning: "Während ein Thread arbeitet"
-        case .agentIdle: "Zugewiesener Thread ohne offene Aufgabe"
-        case .agentCompleted: "Wenn ein Thread abschließt"
-        case .agentNeedsAttention: "Agent wartet auf dich"
-        case .agentFailed: "Thread mit Fehler beendet"
-        case .agentInterrupted: "Thread wurde gestoppt"
+        case .dictation: AppLanguage.text("Solange die Taste gedrückt ist", "While the key is held")
+        case .messageSent: AppLanguage.text("Kurzes Feedback beim Senden", "Brief feedback after sending")
+        case .threadAssigned: AppLanguage.text("Kurzes Feedback nach Halten-zum-Zuweisen", "Brief feedback after hold-to-assign")
+        case .approvalAccepted: AppLanguage.text("Nach Bestätigen einer Anfrage", "After approving a request")
+        case .approvalDeclined: AppLanguage.text("Nach Ablehnen einer Anfrage", "After declining a request")
+        case .agentRunning: AppLanguage.text("Während ein Thread arbeitet", "While a thread is working")
+        case .agentIdle: AppLanguage.text("Zugewiesener Thread ohne offene Aufgabe", "Assigned thread with no active task")
+        case .agentCompleted: AppLanguage.text("Wenn ein Thread abschließt", "When a thread completes")
+        case .agentNeedsAttention: AppLanguage.text("Agent wartet auf dich", "Agent is waiting for you")
+        case .agentFailed: AppLanguage.text("Thread mit Fehler beendet", "Thread ended with an error")
+        case .agentInterrupted: AppLanguage.text("Thread wurde gestoppt", "Thread was stopped")
         }
     }
 
@@ -155,8 +155,8 @@ enum LEDReactionGroup: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .input: "Eingabe & Nachrichten"
-        case .approvals: "Genehmigungen"
+        case .input: AppLanguage.text("Eingabe & Nachrichten", "Input & messages")
+        case .approvals: AppLanguage.text("Genehmigungen", "Approvals")
         case .agentStatus: "Agent-Status"
         }
     }
@@ -173,11 +173,11 @@ enum LEDReactionEffect: String, Codable, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .off: "Aus"
-        case .steady: "An"
-        case .blink: "Blinken"
-        case .pulse: "Pulsieren"
-        case .flash: "Einmal"
+        case .off: AppLanguage.text("Aus", "Off")
+        case .steady: AppLanguage.text("An", "On")
+        case .blink: AppLanguage.text("Blinken", "Blink")
+        case .pulse: AppLanguage.text("Pulsieren", "Pulse")
+        case .flash: AppLanguage.text("Einmal", "Once")
         }
     }
 
@@ -490,6 +490,26 @@ struct ProfileLayer: Codable, Hashable, Identifiable {
     var blinkGreen: UInt8
     var blinkBlue: UInt8
     var blinkCount: Int
+    /// Full confirmation effect.  The original colour/count fields remain on
+    /// disk for backwards compatibility and seed this value when migrating an
+    /// older profile.
+    var confirmationEffect: LEDReactionEffect
+    var confirmationBrightness: UInt8
+    var confirmationDurationMilliseconds: Int
+    var confirmationRepeatCount: Int
+
+    var confirmation: LEDReactionConfiguration {
+        LEDReactionConfiguration(
+            event: .threadAssigned,
+            effect: confirmationEffect,
+            red: blinkRed,
+            green: blinkGreen,
+            blue: blinkBlue,
+            brightness: confirmationBrightness,
+            periodMilliseconds: confirmationDurationMilliseconds,
+            disablesIdle: false
+        )
+    }
 
     init(
         id: UUID = UUID(),
@@ -498,7 +518,11 @@ struct ProfileLayer: Codable, Hashable, Identifiable {
         blinkRed: UInt8 = 255,
         blinkGreen: UInt8 = 255,
         blinkBlue: UInt8 = 255,
-        blinkCount: Int = 1
+        blinkCount: Int = 1,
+        confirmationEffect: LEDReactionEffect = .flash,
+        confirmationBrightness: UInt8 = 255,
+        confirmationDurationMilliseconds: Int = 180,
+        confirmationRepeatCount: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -507,10 +531,14 @@ struct ProfileLayer: Codable, Hashable, Identifiable {
         self.blinkGreen = blinkGreen
         self.blinkBlue = blinkBlue
         self.blinkCount = blinkCount
+        self.confirmationEffect = confirmationEffect
+        self.confirmationBrightness = confirmationBrightness
+        self.confirmationDurationMilliseconds = confirmationDurationMilliseconds
+        self.confirmationRepeatCount = confirmationRepeatCount ?? max(1, blinkCount)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, controls, blinkRed, blinkGreen, blinkBlue, blinkCount
+        case id, name, controls, blinkRed, blinkGreen, blinkBlue, blinkCount, confirmationEffect, confirmationBrightness, confirmationDurationMilliseconds, confirmationRepeatCount
     }
 
     init(from decoder: Decoder) throws {
@@ -522,6 +550,10 @@ struct ProfileLayer: Codable, Hashable, Identifiable {
         blinkGreen = try container.decodeIfPresent(UInt8.self, forKey: .blinkGreen) ?? 255
         blinkBlue = try container.decodeIfPresent(UInt8.self, forKey: .blinkBlue) ?? 255
         blinkCount = try container.decodeIfPresent(Int.self, forKey: .blinkCount) ?? 1
+        confirmationEffect = try container.decodeIfPresent(LEDReactionEffect.self, forKey: .confirmationEffect) ?? .flash
+        confirmationBrightness = try container.decodeIfPresent(UInt8.self, forKey: .confirmationBrightness) ?? 255
+        confirmationDurationMilliseconds = try container.decodeIfPresent(Int.self, forKey: .confirmationDurationMilliseconds) ?? 180
+        confirmationRepeatCount = try container.decodeIfPresent(Int.self, forKey: .confirmationRepeatCount) ?? max(1, blinkCount)
     }
 }
 
@@ -622,6 +654,10 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
     mutating func setAction(_ action: KeyboardAction, for control: HardwareControl) {
         if let index = controls.firstIndex(where: { $0.control == control }) {
             controls[index].action = action
+            if action.kind.isAgent {
+                controls[index].holdAction = nil
+                controls[index].holdThresholdMilliseconds = nil
+            }
         } else {
             controls.append(ControlBinding(control: control, action: action))
         }
@@ -631,6 +667,7 @@ struct MacropadProfile: Codable, Hashable, Identifiable {
     /// Sets or clears the hold slot. Passing `nil` turns the control back into a
     /// plain single-function binding and drops any stored threshold.
     mutating func setHoldAction(_ action: KeyboardAction?, thresholdMilliseconds: Int? = nil, for control: HardwareControl) {
+        guard !self.action(for: control).kind.isAgent || action == nil else { return }
         if let index = controls.firstIndex(where: { $0.control == control }) {
             controls[index].holdAction = action
             controls[index].holdThresholdMilliseconds = action == nil ? nil : thresholdMilliseconds

@@ -2,19 +2,41 @@ import SwiftUI
 
 struct SettingsView: View {
     let appState: AppState
+    @AppStorage(AppLanguage.defaultsKey) private var languageRawValue = AppLanguage.systemDefault.rawValue
     @State private var resultText: String?
-    @AppStorage(CodexQuickAssignService.enabledDefaultsKey) private var quickAssignEnabled = true
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var profiles = appState.profiles
+        let language = AppLanguage(rawValue: languageRawValue) ?? .systemDefault
 
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 block {
-                    SettingsGroup(title: "Profil") {
-                        SettingsRow(label: "Profil") {
-                            Picker("Profil", selection: $profiles.selectedProfileID) {
+                    SettingsGroup(title: language.text("Sprache & Region", "Language & region")) {
+                        SettingsRow(label: language.text("Sprache", "Language")) {
+                            Picker(
+                                language.text("Sprache", "Language"),
+                                selection: $languageRawValue
+                            ) {
+                                ForEach(AppLanguage.allCases) { candidate in
+                                    Text(candidate.nativeTitle).tag(candidate.rawValue)
+                                }
+                            }
+                            .labelsHidden()
+                            .fixedSize()
+                        }
+                    }
+                    caption(language.text(
+                        "Die App-Sprache wird sofort geändert. Deine Sprache fehlt? Ergänze die zentralen Sprachtexte mit Codex oder einem anderen Coding-Agenten – Beiträge sind willkommen.",
+                        "The app language changes immediately. Missing your language? Add it through the centralized language strings with Codex or another coding agent — contributions are welcome."
+                    ))
+                }
+
+                block {
+                    SettingsGroup(title: language.text("Profil", "Profile")) {
+                        SettingsRow(label: language.text("Profil", "Profile")) {
+                            Picker(language.text("Profil", "Profile"), selection: $profiles.selectedProfileID) {
                                 ForEach(profiles.profiles) { profile in
                                     Text(profile.name).tag(profile.id)
                                 }
@@ -23,7 +45,7 @@ struct SettingsView: View {
                             .fixedSize()
                         }
                         Divider().padding(.leading, 12)
-                        SettingsRow(label: "Name") {
+                        SettingsRow(label: language.text("Name", "Name")) {
                             TextField(
                                 "",
                                 text: Binding(
@@ -38,9 +60,9 @@ struct SettingsView: View {
                         SettingsRow {
                             HStack(spacing: 8) {
                                 Spacer()
-                                Button("Neu") { profiles.newProfile() }
-                                Button("Duplizieren") { profiles.duplicateSelected() }
-                                Button("Löschen", role: .destructive) { profiles.deleteSelected() }
+                                Button(language.text("Neu", "New")) { profiles.newProfile() }
+                                Button(language.text("Duplizieren", "Duplicate")) { profiles.duplicateSelected() }
+                                Button(language.text("Löschen", "Delete"), role: .destructive) { profiles.deleteSelected() }
                                     .disabled(profiles.profiles.count <= 1)
                             }
                         }
@@ -48,9 +70,9 @@ struct SettingsView: View {
                 }
 
                 block {
-                    SettingsGroup(title: "Tastaturlayout") {
+                    SettingsGroup(title: language.text("Tastaturlayout", "Keyboard layout")) {
                         SettingsRow {
-                            Picker("Tastaturlayout", selection: $profiles.keyboardLayout) {
+                            Picker(language.text("Tastaturlayout", "Keyboard layout"), selection: $profiles.keyboardLayout) {
                                 ForEach(KeyboardLayout.allCases) { layout in
                                     Text(layout.title).tag(layout)
                                 }
@@ -63,47 +85,49 @@ struct SettingsView: View {
                 }
 
                 block {
-                    SettingsGroup(title: "Gerät") {
+                    SettingsGroup(title: language.text("Gerät", "Device")) {
                         SettingsRow {
-                            Text("Erkanntes USB-HID-Gerät")
+                            Text(language.text("Erkanntes USB-HID-Gerät", "Detected USB HID device"))
                             Spacer()
-                            Button("Erneut suchen") { appState.refreshDevice() }
+                            Button(language.text("Erneut suchen", "Scan again")) { appState.refreshDevice() }
                         }
                         Divider().padding(.leading, 12)
                         SettingsRow {
-                            Text("Diagnose")
+                            Text(language.text("Diagnose", "Diagnostics"))
                             Spacer()
-                            Button("Öffnen") { openWindow(id: "diagnostics") }
+                            Button(language.text("Öffnen", "Open")) { openWindow(id: "diagnostics") }
                         }
                     }
-                    caption("Der Helper öffnet nur ein bestätigtes USB-HID-Gerät. Für die Entwicklung läuft die App absichtlich unsandboxed.")
+                    caption(language.text(
+                        "Der Helper öffnet nur ein bestätigtes USB-HID-Gerät. Für die Entwicklung läuft die App absichtlich unsandboxed.",
+                        "The helper opens only a verified USB HID device. The development build intentionally runs without an app sandbox."
+                    ))
                 }
 
                 block {
-                    SettingsGroup(title: "Hintergrund") {
+                    SettingsGroup(title: language.text("Hintergrund", "Background")) {
                         SettingsRow {
                             Toggle(
-                                "Bei Anmeldung starten",
+                                language.text("Bei Anmeldung starten", "Launch at login"),
                                 isOn: Binding(
                                     get: { appState.loginItem.isEnabled },
                                     set: { appState.loginItem.setEnabled($0) }
                                 )
                             )
                         }
-                        Divider().padding(.leading, 12)
-                        SettingsRow {
-                            Toggle("Halten ordnet bereits belegte Agent-Tasten neu zu", isOn: $quickAssignEnabled)
-                        }
                     }
-                    caption("Gilt nur für Tasten, die schon einmal einem Codex-Thread zugeordnet wurden. Nutzt eine in Codex kopierte Sitzungs-ID aus der Zwischenablage, sonst den zuletzt aktiven Thread. Agent Micro bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit das auch ohne offenes Fenster funktioniert.")
+                    caption(language.text(
+                        "Agent-Tasten verwenden fest Tippen zum Öffnen und Halten zum Neuzuordnen. Agent Micro bleibt nach dem Schließen des Fensters im Menüleisten-Symbol aktiv, damit das auch ohne offenes Fenster funktioniert.",
+                        "Agent keys always use tap to open and hold to reassign. Agent Micro remains active in the menu bar after its window closes, so this also works without an open window."
+                    ))
                 }
 
                 block {
-                    SettingsGroup(title: "Import & Export") {
+                    SettingsGroup(title: language.text("Import & Export", "Import & export")) {
                         SettingsRow {
                             Spacer()
-                            Button("Exportieren") { exportProfile() }
-                            Button("Importieren") { importProfile() }
+                            Button(language.text("Exportieren", "Export")) { exportProfile() }
+                            Button(language.text("Importieren", "Import")) { importProfile() }
                         }
                     }
                     if let resultText {
@@ -111,7 +135,10 @@ struct SettingsView: View {
                     }
                 }
 
-                caption("Profile und Agent-Zuordnungen bleiben lokal unter Application Support. Codex-Approvals (Befehl ausführen, Datei ändern) können beantwortet werden, indem du „Genehmigen“/„Ablehnen“ wie jede andere Aktion einer Taste zuweist (Belegungs-Panel); alle anderen Ereignisse werden nur beobachtet.")
+                caption(language.text(
+                    "Profile und Agent-Zuordnungen bleiben lokal unter Application Support. Codex-Approvals (Befehl ausführen, Datei ändern) können beantwortet werden, indem du „Genehmigen“/„Ablehnen“ wie jede andere Aktion einer Taste zuweist (Belegungs-Panel); alle anderen Ereignisse werden nur beobachtet.",
+                    "Profiles and agent assignments stay local in Application Support. Codex approvals (run a command, change a file) can be answered by assigning Approve/Decline to a key like any other action; all other events are observed only."
+                ))
             }
             .padding(20)
         }
@@ -133,20 +160,20 @@ struct SettingsView: View {
 
     private func exportProfile() {
         do {
-            resultText = "Exportiert: \(try appState.profiles.exportSelectedProfile().path)"
+            resultText = AppLanguage.text("Exportiert", "Exported") + ": \(try appState.profiles.exportSelectedProfile().path)"
         } catch is CancellationError {
         } catch {
-            resultText = "Export fehlgeschlagen: \(error.localizedDescription)"
+            resultText = AppLanguage.text("Export fehlgeschlagen", "Export failed") + ": \(error.localizedDescription)"
         }
     }
 
     private func importProfile() {
         do {
             try appState.profiles.importProfile()
-            resultText = "Profil importiert."
+            resultText = AppLanguage.text("Profil importiert.", "Profile imported.")
         } catch is CancellationError {
         } catch {
-            resultText = "Import fehlgeschlagen: \(error.localizedDescription)"
+            resultText = AppLanguage.text("Import fehlgeschlagen", "Import failed") + ": \(error.localizedDescription)"
         }
     }
 }

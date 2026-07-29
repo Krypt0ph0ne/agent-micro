@@ -87,6 +87,9 @@ final class CodexPadEventService: @unchecked Sendable {
         if let manager { IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone)) }
         reportBuffer?.deallocate()
         reportBuffer = nil; device = nil; manager = nil
+        firmwareStatus = nil
+        lastLoggedPressedMask = nil
+        status = "Noch nicht verbunden"
     }
 
     func requestStatus() {

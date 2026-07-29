@@ -1,33 +1,34 @@
 import Foundation
 import OSLog
 
-/// Whole-pad feedback mostly delegates animation timing to the firmware: the
-/// device renders its native pulse effect smoothly, and the host only
-/// changes the six LED configurations once and later restores the idle
-/// state. The one exception is a range-limited pulse (`isRangePulse`), which
-/// the CH552 firmware cannot do on its own — that one is driven by a
-/// lightweight host timer in `updateRangePulseAnimation`.
+/// Native pulses are handed to the firmware, which renders them smoothly
+/// without continuous USB traffic. Only pulses with a non-zero brightness
+/// floor need host frames because the firmware cannot represent that range.
+/// Those exceptional animations are generation-protected so a stale idle
+/// frame can never overwrite a newer agent state.
 @MainActor
 final class CodexPadLEDFeedbackService {
     private enum DictationSource { case rawEvent, statusMask, keyboardReport }
 
-    /// 50 Hz keeps the steps below the eye's flicker threshold for a
-    /// breathing effect while staying cheap: at most a few dozen short HID
-    /// writes per second (one per animated key), nothing like the busy-loop
-    /// CPU issue fixed for app-server output parsing.
-    private static let rangePulseTickMilliseconds = 20
+    /// Raised-cosine breathing is smooth at roughly 30 Hz while leaving
+    /// substantially more bandwidth for status polling and physical events.
+    private static let rangePulseTickMilliseconds = 33
 
     private let logger = Logger(subsystem: "com.codexpad.app", category: "led-feedback")
     private let encoder = CodexPadPacketEncoder()
     private let send: ([[UInt8]]) -> Void
     private var animationTask: Task<Void, Never>?
-    private var rangePulseTask: Task<Void, Never>?
+    private var pulseAnimationTask: Task<Void, Never>?
+    /// Invalidates an already-cancelled task before it can emit a late frame.
+    /// Task cancellation alone is cooperative, so the generation check is the
+    /// hard guarantee that only the newest render may write pulse packets.
+    private var pulseGeneration: UInt64 = 0
     private var rawEventHeld = false
     private var statusMaskHeld = false
     private var keyboardReportHeld = false
+    private var pickerSelectionActive = false
     private var agentStatuses: [HardwareControl: CodexAgentStatus] = [:]
     private var activeProfile: MacropadProfile?
-    private var statusFlashTasks: [HardwareControl: Task<Void, Never>] = [:]
 
     init(send: @escaping ([[UInt8]]) -> Void) {
         self.send = send
@@ -75,22 +76,78 @@ final class CodexPadLEDFeedbackService {
         showMomentaryReaction(.threadAssigned, profile: profile)
     }
 
+    /// The picker owns the whole pad until the held agent key is released.
+    /// It reuses the configurable assignment colour while forcing the
+    /// interaction-specific pulse requested by the hardware gesture.
+    func beginThreadPickerSelection(profile: MacropadProfile) {
+        activeProfile = profile
+        pickerSelectionActive = true
+        beginExclusiveTimeline()
+        let reaction = profile.reaction(for: .threadAssigned)
+        sendWholePad { control in
+            KeyLEDConfiguration(
+                control: control,
+                effect: .pulse,
+                red: reaction.red,
+                green: reaction.green,
+                blue: reaction.blue,
+                brightness: reaction.brightness,
+                periodMilliseconds: max(200, reaction.periodMilliseconds),
+                minBrightness: reaction.minBrightness
+            )
+        }
+    }
+
+    func finishThreadPickerSelection(profile: MacropadProfile, confirmed: Bool) {
+        activeProfile = profile
+        pickerSelectionActive = false
+        beginExclusiveTimeline()
+        guard confirmed else {
+            showIdleLighting()
+            return
+        }
+        let reaction = profile.reaction(for: .threadAssigned)
+        let duration = max(120, reaction.periodMilliseconds)
+        sendWholePad { control in
+            KeyLEDConfiguration(
+                control: control,
+                effect: .steady,
+                red: reaction.red,
+                green: reaction.green,
+                blue: reaction.blue,
+                brightness: reaction.brightness,
+                periodMilliseconds: duration
+            )
+        }
+        animationTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(duration)) } catch { return }
+            self?.finishExclusiveTimeline()
+        }
+    }
+
     /// One-shot green/red reaction fired the moment an approval is answered.
     func showApprovalResolvedReaction(decision: ApprovalDecision, profile: MacropadProfile) {
         showMomentaryReaction(decision == .accept ? .approvalAccepted : .approvalDeclined, profile: profile)
     }
 
+    /// Plays an event's current configuration across the pad, then restores
+    /// the regular lighting. This is intentionally independent of the live
+    /// event sources so testing a reaction never changes an agent's status.
+    func previewReaction(_ event: LEDReactionEvent, profile: MacropadProfile) {
+        showMomentaryReaction(event, profile: profile)
+    }
+
     func showIdleLighting() {
         animationTask?.cancel()
         animationTask = nil
-        renderAgentLighting(previousStatuses: agentStatuses)
+        renderAgentLighting()
     }
 
     /// A brief all-keys white flash confirming the layer-switch hold gesture
     /// fired — not a per-profile configurable reaction, just a system blip.
     func flashLayerSwitchConfirmation(profile: MacropadProfile) {
         activeProfile = profile
-        animationTask?.cancel()
+        beginExclusiveTimeline()
         logger.info("Layer switch confirmation flash")
         let flashDurationMilliseconds = 350
         sendWholePad { control in
@@ -117,41 +174,89 @@ final class CodexPadLEDFeedbackService {
     /// `flashLayerSwitchConfirmation` (the fixed white blip for the Codex⇄
     /// Claude hold gesture) since each layer picks its own color/count.
     ///
-    /// The gap between blinks briefly shows the profile's own Grundlicht
-    /// instead of a hard cut to black — dipping to true off for every gap
-    /// read as flicker/interference rather than a deliberate blink pattern.
-    func flashLayerConfirmation(profile: MacropadProfile, red: UInt8, green: UInt8, blue: UInt8, count: Int) {
+    /// Runs as one exclusive host-owned timeline.  Nothing else writes LEDs
+    /// between flashes; the pad is dark in each gap and is restored exactly
+    /// once after the final frame.
+    func flashLayerConfirmation(profile: MacropadProfile, layer: ProfileLayer) {
         activeProfile = profile
-        animationTask?.cancel()
-        let blinkCount = max(1, count)
+        beginExclusiveTimeline()
+        let configuration = layer.confirmation
+        guard configuration.effect != .off else {
+            showIdleLighting()
+            return
+        }
+        let blinkCount = max(1, layer.confirmationRepeatCount)
         logger.info("Layer confirmation flash ×\(blinkCount, privacy: .public)")
-        let onMilliseconds = 180
-        let gapMilliseconds = 160
+        let onMilliseconds = max(80, configuration.periodMilliseconds)
+        let gapMilliseconds = max(100, min(220, onMilliseconds / 2))
         animationTask = Task { [weak self] in
             guard let self else { return }
-            for index in 0..<blinkCount {
+
+            if configuration.effect == .pulse {
                 self.sendWholePad { control in
-                    KeyLEDConfiguration(control: control, effect: .steady, red: red, green: green, blue: blue, brightness: 255, periodMilliseconds: onMilliseconds)
+                    KeyLEDConfiguration(
+                        control: control,
+                        effect: .pulse,
+                        red: configuration.red,
+                        green: configuration.green,
+                        blue: configuration.blue,
+                        brightness: configuration.brightness,
+                        periodMilliseconds: onMilliseconds
+                    )
+                }
+                do { try await Task.sleep(for: .milliseconds(onMilliseconds * blinkCount)) } catch { return }
+                self.finishExclusiveTimeline()
+                return
+            }
+
+            let repetitions = configuration.effect == .steady ? 1 : blinkCount
+            for index in 0..<repetitions {
+                self.sendWholePad { control in
+                    KeyLEDConfiguration(
+                        control: control,
+                        effect: .steady,
+                        red: configuration.red,
+                        green: configuration.green,
+                        blue: configuration.blue,
+                        brightness: configuration.brightness,
+                        periodMilliseconds: onMilliseconds
+                    )
                 }
                 do { try await Task.sleep(for: .milliseconds(onMilliseconds)) } catch { return }
-                guard index < blinkCount - 1 else { continue }
-                self.sendWholePad { control in profile.baseLighting(for: control) }
+                guard index < repetitions - 1 else { continue }
+                self.send([self.encoder.allOffPacket()])
                 do { try await Task.sleep(for: .milliseconds(gapMilliseconds)) } catch { return }
             }
-            if self.isDictationHeld {
-                self.showDictationReaction()
-            } else {
-                self.showIdleLighting()
-            }
+            self.finishExclusiveTimeline()
         }
     }
 
     func showAgentStatuses(_ statuses: [HardwareControl: CodexAgentStatus], profile: MacropadProfile) {
-        let previous = agentStatuses
         agentStatuses = statuses
         activeProfile = profile
-        guard !isDictationHeld else { return }
-        renderAgentLighting(previousStatuses: previous)
+        guard !isDictationHeld, !pickerSelectionActive else { return }
+        renderAgentLighting()
+    }
+
+    /// Terminal states remain the active status layer until the thread starts
+    /// again or completion is acknowledged. This immediate write makes the
+    /// transition responsive; `showAgentStatuses` then keeps the same
+    /// user-configured effect alive.
+    func showStatusTransition(_ status: CodexAgentStatus, for control: HardwareControl, profile: MacropadProfile) {
+        // Dictation owns the complete pad while the key is held. In particular,
+        // a range-limited dictation pulse is host-driven, so starting even a
+        // one-key terminal reaction here would cancel its timer and leave the
+        // agent key's firmware effect visible until the next dictation frame.
+        // The status is still retained in `agentStatuses`; releasing dictation
+        // reconciles the latest agent lighting in `showIdleLighting()`.
+        guard !isDictationHeld, !pickerSelectionActive else { return }
+        guard let event = LEDReactionEvent.event(for: status) else { return }
+        let reaction = profile.reaction(for: event)
+        guard reaction.effect != .off else { return }
+        activeProfile = profile
+        agentStatuses[control] = status
+        beginExclusiveTimeline()
+        renderAgentLighting()
     }
 
     private var isDictationHeld: Bool {
@@ -174,7 +279,7 @@ final class CodexPadLEDFeedbackService {
         guard let profile = activeProfile else { return }
         let reaction = profile.reaction(for: .dictation)
         guard reaction.effect != .off else {
-            renderAgentLighting(previousStatuses: agentStatuses)
+            renderAgentLighting()
             return
         }
         animationTask?.cancel()
@@ -204,7 +309,7 @@ final class CodexPadLEDFeedbackService {
         }
     }
 
-    private func renderAgentLighting(previousStatuses: [HardwareControl: CodexAgentStatus] = [:]) {
+    private func renderAgentLighting() {
         // Several independent callers reach this (status updates, flash
         // restores) and none of them own the LEDs while a momentary
         // animation is mid-flight — sending here too would race the
@@ -212,7 +317,7 @@ final class CodexPadLEDFeedbackService {
         // every animation ends by calling back into
         // showIdleLighting()/showDictationReaction(), which re-renders from
         // whatever the latest state turned out to be.
-        guard animationTask == nil else { return }
+        guard animationTask == nil, !pickerSelectionActive else { return }
         guard let profile = activeProfile else { return }
         let settings = HardwareControl.buttons.map { control -> KeyLEDConfiguration in
             let status = agentStatuses[control] ?? .unassigned
@@ -228,75 +333,88 @@ final class CodexPadLEDFeedbackService {
             }()
             let idleSetting = baseSetting(for: control, profile: profile, suppressed: suppressThisKey)
             guard let event = LEDReactionEvent.event(for: status) else {
-                statusFlashTasks[control]?.cancel()
-                statusFlashTasks[control] = nil
                 return idleSetting
             }
             let reaction = profile.reaction(for: event)
             guard reaction.effect != .off else { return idleSetting }
-            guard reaction.effect == .flash else {
-                statusFlashTasks[control]?.cancel()
-                statusFlashTasks[control] = nil
-                return reaction.keyConfiguration(for: control)
-            }
-            guard previousStatuses[control] != status else {
-                return idleSetting
-            }
-            scheduleStatusFlashRestore(control: control, status: status, delay: reaction.periodMilliseconds)
             return reaction.keyConfiguration(for: control)
         }
         sendMixed(settings)
     }
 
-    /// Sends the same configuration to all six keys, routing it through the
-    /// range-pulse animator when it needs a host-managed brightness floor.
+    /// Sends the same configuration to all six keys, routing only unsupported
+    /// brightness-range pulses through the host animator.
     private func sendWholePad(_ keyConfiguration: (HardwareControl) -> KeyLEDConfiguration) {
         sendMixed(HardwareControl.buttons.map(keyConfiguration))
     }
 
-    /// Sends a batch of per-key settings, splitting off any that need a
-    /// host-animated range pulse so the rest still take the cheap,
-    /// fire-and-forget firmware-native path.
+    /// Splits firmware-supported settings from range pulses. Every new render
+    /// invalidates the previous host generation before writing either group,
+    /// while normal pulses remain fire-and-forget firmware commands.
     private func sendMixed(_ settings: [KeyLEDConfiguration]) {
+        invalidatePulseAnimation()
+        let generation = pulseGeneration
         let staticSettings = settings.filter { !$0.isRangePulse }
         let animatedSettings = settings.filter(\.isRangePulse)
         if !staticSettings.isEmpty {
             send(staticSettings.map(encoder.ledPacket))
         }
-        updateRangePulseAnimation(animatedSettings)
+        startPulseAnimation(animatedSettings, generation: generation)
     }
 
-    /// Starts (or stops) the host-driven breathing loop for keys whose pulse
-    /// has a floor above zero. Always cancels any previous animation first,
-    /// so this is the single choke point that keeps `rangePulseTask` in sync
-    /// with whatever base/reaction layer is currently active.
-    private func updateRangePulseAnimation(_ settings: [KeyLEDConfiguration]) {
-        rangePulseTask?.cancel()
-        guard !settings.isEmpty else {
-            rangePulseTask = nil
-            return
+    private func beginExclusiveTimeline() {
+        animationTask?.cancel()
+        animationTask = nil
+        invalidatePulseAnimation()
+    }
+
+    private func finishExclusiveTimeline() {
+        animationTask = nil
+        if isDictationHeld {
+            showDictationReaction()
+        } else {
+            showIdleLighting()
         }
-        logger.info("Starting range-pulse animation for \(settings.count, privacy: .public) key(s)")
-        rangePulseTask = Task { [weak self] in
+    }
+
+    private func invalidatePulseAnimation() {
+        pulseGeneration &+= 1
+        pulseAnimationTask?.cancel()
+        pulseAnimationTask = nil
+    }
+
+    /// Starts one animation generation for every currently pulsing key. The
+    /// first frame is synchronous; later frames verify both cancellation and
+    /// the generation immediately before sending.
+    private func startPulseAnimation(
+        _ settings: [KeyLEDConfiguration],
+        generation: UInt64
+    ) {
+        guard !settings.isEmpty else { return }
+        logger.info("Starting range-pulse generation \(generation, privacy: .public) for \(settings.count, privacy: .public) key(s)")
+        let startNanoseconds = DispatchTime.now().uptimeNanoseconds
+        let initialFrames = settings.map { breathingFrame(of: $0, elapsedMilliseconds: 0) }
+        send(initialFrames.map(encoder.ledPacket))
+        pulseAnimationTask = Task { [weak self] in
             // Track true elapsed time rather than accumulating fixed tick
             // steps: a scheduling hiccup would otherwise desync the phase
             // from wall-clock time and read as a stutter on every later tick.
-            let startNanoseconds = DispatchTime.now().uptimeNanoseconds
-            while !Task.isCancelled {
-                guard let self else { return }
-                let elapsedMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startNanoseconds) / 1_000_000
-                let frames = settings.map { self.breathingFrame(of: $0, elapsedMilliseconds: elapsedMilliseconds) }
-                self.send(frames.map(self.encoder.ledPacket))
+            while true {
                 do {
                     try await Task.sleep(for: .milliseconds(Self.rangePulseTickMilliseconds))
                 } catch {
                     return
                 }
+                guard !Task.isCancelled, let self, self.pulseGeneration == generation else { return }
+                let elapsedMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startNanoseconds) / 1_000_000
+                let frames = settings.map { self.breathingFrame(of: $0, elapsedMilliseconds: elapsedMilliseconds) }
+                guard !Task.isCancelled, self.pulseGeneration == generation else { return }
+                self.send(frames.map(self.encoder.ledPacket))
             }
         }
     }
 
-    /// Computes one animation frame for a range-pulse key: a raised-cosine
+    /// Computes one animation frame for a pulse key: a raised-cosine
     /// ("smoothstep") wave between `minBrightness` and `brightness` that
     /// completes one full up-and-down cycle every `periodMilliseconds`, sent
     /// to the firmware as a plain steady colour so no unsupported effect byte
@@ -327,24 +445,6 @@ final class CodexPadLEDFeedbackService {
             return KeyLEDConfiguration(control: control, effect: .off, red: 0, green: 0, blue: 0, brightness: 0, periodMilliseconds: 1_000)
         }
         return profile.baseLighting(for: control)
-    }
-
-    private func scheduleStatusFlashRestore(
-        control: HardwareControl,
-        status: CodexAgentStatus,
-        delay: Int
-    ) {
-        statusFlashTasks[control]?.cancel()
-        statusFlashTasks[control] = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .milliseconds(max(200, delay)))
-            } catch {
-                return
-            }
-            guard let self, !self.isDictationHeld, self.agentStatuses[control] == status else { return }
-            self.statusFlashTasks[control] = nil
-            self.renderAgentLighting(previousStatuses: self.agentStatuses)
-        }
     }
 
 }

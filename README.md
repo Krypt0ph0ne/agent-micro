@@ -53,6 +53,12 @@ Press Key 1–6, then rotate the encoder left, press it, and rotate it right. Ex
 
 The app is deliberately unsandboxed for local development so the helper can claim the USB HID interface. No elevated privilege is normally needed on macOS; a failed claim is recorded verbatim in Diagnostics.
 
+## Localization
+
+Agent Micro ships with German and English UI text. The first-run setup asks for the app language and keyboard layout; both can be changed later in Settings. Language and keyboard layout are separate preferences: the language controls UI copy, while the keyboard layout controls how semantic shortcuts are translated into physical HID usages.
+
+To add another language, copy `Resources/en.lproj/Localizable.strings` to a matching `<language>.lproj` directory and translate the values. Strings that are shared with models or assembled dynamically use the centralized `AppLanguage` helper in `Models/AppLanguage.swift`; add the language case and its translations there as well. This split keeps SwiftUI literals compatible with standard Apple localization while making dynamic labels switch immediately at runtime.
+
 ## Safe use
 
 1. Start with the `Sichere F13–F21-Belegung` profile.

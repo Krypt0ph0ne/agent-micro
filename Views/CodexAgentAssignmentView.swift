@@ -25,7 +25,7 @@ struct CodexAgentAssignmentView: View {
     private static let activeCap = 40
 
     private var assignment: AgentKeyAssignment? { appState.activeAgentThreads.assignment(for: control) }
-    private var status: CodexAgentStatus { appState.activeAgentThreads.status(for: control) }
+    private var status: CodexAgentStatus { appState.activeAgentThreads.presentedStatus(for: control) }
 
     /// Distinct working directories present across all loaded threads,
     /// offered as the "project" filter menu.
@@ -70,7 +70,7 @@ struct CodexAgentAssignmentView: View {
                     Text(assignment?.threadTitle ?? "Noch kein Thread zugeordnet")
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                    Text(status.title)
+                    Text(appState.activeAgentThreads.statusTitle(for: control))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -223,7 +223,8 @@ struct CodexAgentAssignmentView: View {
     }
 
     private var statusColor: Color {
-        color(for: status)
+        if appState.activeAgentThreads.liveStatusAvailability == .notActivated { return .secondary }
+        return color(for: status)
     }
 
     private func color(for status: CodexAgentStatus) -> Color {

@@ -39,32 +39,11 @@ struct TapHoldSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Divider()
-            HStack(spacing: 6) {
-                Image(systemName: "hand.tap")
-                    .foregroundStyle(.tint)
-                Text("Tippen / Halten")
-                    .font(.subheadline.weight(.semibold))
-                ContextInfoButton(title: "Zweitbelegung beim Halten", message: infoMessage)
-                Spacer()
-                Toggle("", isOn: tapHoldEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .disabled(!tapSupportsHold && !binding.isTapHold)
-            }
-
-            if !tapSupportsHold && !binding.isTapHold {
-                Text("Nur für Tastatur-/Codex-Shortcuts verfügbar. Diese Tippen-Aktion kann die App nicht als Halten-Zweitaktion nachbilden.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if binding.isTapHold {
-                activeEditor
+        Group {
+            if binding.action.kind.isAgent {
+                agentGestureSummary
             } else {
-                Text("Kurz tippen löst „\(binding.action.label)“ aus. Aktiviere den Schalter, um beim Halten eine zweite Aktion zu senden.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                configurableTapHoldEditor
             }
         }
         .onChange(of: control) { _, _ in
@@ -91,10 +70,75 @@ struct TapHoldSection: View {
         }
     }
 
+    private var configurableTapHoldEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            HStack(spacing: 6) {
+                Image(systemName: "hand.tap")
+                    .foregroundStyle(.tint)
+                Text("Tippen / Halten")
+                    .font(.subheadline.weight(.semibold))
+                ContextInfoButton(title: "Zweitbelegung beim Halten", message: infoMessage)
+                Spacer()
+                Toggle("", isOn: tapHoldEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(!tapSupportsHold && !binding.isTapHold)
+            }
+
+            if !tapSupportsHold && !binding.isTapHold {
+                Text("Nur für Tastatur-/Codex-Shortcuts verfügbar. Diese Tippen-Aktion kann die App nicht als Halten-Zweitaktion nachbilden.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if binding.isTapHold {
+                activeEditor
+            } else {
+                Text("Kurz tippen löst „\(binding.action.displayLabel)“ aus. Aktiviere den Schalter, um beim Halten eine zweite Aktion zu senden.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var agentGestureSummary: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Divider()
+            HStack(spacing: 6) {
+                Image(systemName: "hand.tap.fill")
+                    .foregroundStyle(.tint)
+                Text("Tippen / Halten")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("Fest für Agenten")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            row(
+                icon: "arrow.up.forward.app",
+                title: "Tippen",
+                value: "Zugewiesenen Chat öffnen",
+                macro: ""
+            )
+            row(
+                icon: "arrow.triangle.2.circlepath",
+                title: "Halten",
+                value: "Chat neu zuweisen",
+                macro: "\(CodexQuickAssignService.holdThresholdMilliseconds) ms"
+            )
+
+            Text("Beim Halten nimmt Agent Micro zuerst eine kopierte Sitzungs-ID. Ist keine passende ID in der Zwischenablage, wird der zuletzt aktive, noch freie Chat verwendet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     @ViewBuilder
     private var activeEditor: some View {
         // Tap summary
-        row(icon: binding.action.icon, title: "Tippen", value: binding.action.label, macro: binding.action.displayShortcut)
+        row(icon: binding.action.icon, title: "Tippen", value: binding.action.displayLabel, macro: binding.action.displayShortcut)
 
         // Hold action, editable
         Button {
@@ -106,7 +150,7 @@ struct TapHoldSection: View {
                     .foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Halten").font(.caption2).foregroundStyle(.secondary)
-                    Text(binding.holdAction?.label ?? "Aktion wählen").font(.body.weight(.medium)).lineLimit(1)
+                    Text(binding.holdAction?.displayLabel ?? "Aktion wählen").font(.body.weight(.medium)).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 if let macro = binding.holdAction?.displayShortcut {

@@ -3,11 +3,8 @@ import SwiftUI
 struct ControlAssignmentPanel: View {
     let appState: AppState
     @Binding var control: HardwareControl
-    @State private var isPresentingTextSubmission = false
-    @State private var isPresentingWizard = false
-    @State private var isPresentingLayerSwitchPicker = false
-    @State private var isShowingActionPicker = false
-    @State private var actionSearch = ""
+    @State private var isPresentingActionSheet = false
+    @State private var setupAction: CodexActionDefinition?
 
     private var action: KeyboardAction {
         appState.profiles.selectedProfile.action(for: control)
@@ -16,21 +13,6 @@ struct ControlAssignmentPanel: View {
     private var definition: CodexActionDefinition? {
         guard let id = action.codexActionID else { return nil }
         return appState.activeCatalog.action(id: id)
-    }
-
-    private var assignableActions: [CodexActionDefinition] {
-        appState.activeCatalog.actions.filter(\.isDirectlyAssignable)
-    }
-
-    private var filteredActions: [CodexActionDefinition] {
-        let query = actionSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return assignableActions }
-        return assignableActions.filter {
-            $0.title.localizedCaseInsensitiveContains(query)
-                || $0.category.localizedCaseInsensitiveContains(query)
-                || $0.description.localizedCaseInsensitiveContains(query)
-                || ($0.shortcut?.localizedCaseInsensitiveContains(query) ?? false)
-        }
     }
 
     var body: some View {
@@ -67,7 +49,7 @@ struct ControlAssignmentPanel: View {
                     .foregroundStyle(.tint)
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(action.label)
+                    Text(action.displayLabel)
                         .font(.body.weight(.semibold))
                         .lineLimit(1)
                     Text(action.displayShortcut)
@@ -81,25 +63,17 @@ struct ControlAssignmentPanel: View {
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             Button {
-                withAnimation(.easeInOut(duration: 0.16)) {
-                    isShowingActionPicker.toggle()
-                    actionSearch = ""
-                }
+                isPresentingActionSheet = true
             } label: {
                 HStack {
-                    Text(isShowingActionPicker ? "Auswahl schließen" : "Belegung ändern")
+                    Text("Belegung ändern")
                     Spacer()
-                    Image(systemName: isShowingActionPicker ? "chevron.up" : "chevron.down")
+                    Image(systemName: "chevron.up.chevron.down")
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.bordered)
             .frame(maxWidth: .infinity)
-
-            if isShowingActionPicker {
-                actionPicker
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
 
             if let definition {
                 Text(definition.description)
@@ -114,13 +88,11 @@ struct ControlAssignmentPanel: View {
 
             configurableReminder
 
-            if action.kind.isAgent && !isShowingActionPicker {
+            if action.kind.isAgent {
                 CodexAgentAssignmentView(appState: appState, control: control)
             }
 
-            if !isShowingActionPicker {
-                TapHoldSection(appState: appState, control: control)
-            }
+            TapHoldSection(appState: appState, control: control)
 
             Label("Klick links, Auswahl rechts.", systemImage: "cursorarrow.click")
                 .font(.caption2)
@@ -128,125 +100,16 @@ struct ControlAssignmentPanel: View {
         }
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .sheet(isPresented: $isPresentingTextSubmission) {
-            TextSubmissionSheet { text in
-                guard let textAction = KeyboardAction.textSubmission(text) else { return }
-                appState.removeActiveAgentAssignment(for: control)
-                appState.profiles.updateAction(textAction, for: control)
-            }
+        .sheet(isPresented: $isPresentingActionSheet) {
+            ActionSelectionSheet(appState: appState, control: control, context: .tap)
         }
-        .sheet(isPresented: $isPresentingWizard) {
-            CodexAssignmentWizardView(appState: appState, control: control)
+        .sheet(item: $setupAction) { definition in
+            CodexAssignmentWizardView(
+                appState: appState,
+                control: control,
+                initialAction: definition
+            )
         }
-        .sheet(isPresented: $isPresentingLayerSwitchPicker) {
-            LayerSwitchModePickerSheet { mode in
-                appState.removeActiveAgentAssignment(for: control)
-                appState.profiles.updateAction(.layerSwitch(mode: mode), for: control)
-            }
-        }
-        .onChange(of: control) { _, _ in
-            isShowingActionPicker = false
-            actionSearch = ""
-        }
-    }
-
-    private var actionPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Button("Agent", systemImage: "terminal.fill") { chooseAgent() }
-                Button("Text", systemImage: "paperplane.fill") {
-                    isPresentingTextSubmission = true
-                    isShowingActionPicker = false
-                }
-                Button("Assistent", systemImage: "wand.and.stars") {
-                    isPresentingWizard = true
-                    isShowingActionPicker = false
-                }
-                .help("Konfigurierbare Codex-Aktion mit Trigger einrichten")
-                Button("Layer", systemImage: "square.stack.3d.up") {
-                    isPresentingLayerSwitchPicker = true
-                    isShowingActionPicker = false
-                }
-                .help("Zwischen den Layern dieses Profils wechseln")
-                Button("Profil", systemImage: "arrow.left.arrow.right") {
-                    appState.removeActiveAgentAssignment(for: control)
-                    appState.profiles.updateAction(.profileSwitch, for: control)
-                    isShowingActionPicker = false
-                }
-                .help("Zwischen Codex und Claude wechseln")
-                Button("Aus", systemImage: "minus.circle") { chooseDisabled() }
-            }
-            .controlSize(.small)
-
-            TextField("Aktion durchsuchen", text: $actionSearch)
-                .textFieldStyle(.roundedBorder)
-
-            ScrollView {
-                LazyVStack(spacing: 3) {
-                    if filteredActions.isEmpty {
-                        ContentUnavailableView("Keine Aktion gefunden", systemImage: "magnifyingglass")
-                            .frame(height: 90)
-                    } else {
-                        ForEach(filteredActions) { item in
-                            actionRow(item)
-                        }
-                    }
-                }
-            }
-            .frame(height: 174)
-        }
-        .padding(9)
-        .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 9))
-    }
-
-    private func actionRow(_ item: CodexActionDefinition) -> some View {
-        Button {
-            appState.removeActiveAgentAssignment(for: control)
-            appState.profiles.assignAction(id: item.id, from: appState.activeCatalog, to: control)
-            isShowingActionPicker = false
-            actionSearch = ""
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: item.icon)
-                    .frame(width: 22)
-                    .foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.title)
-                        .font(.caption.weight(.medium))
-                        .lineLimit(1)
-                    Text(item.category)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 4)
-                if let shortcut = item.shortcut {
-                    Text(shortcut)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                if item.id == action.codexActionID {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, minHeight: 34)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(.quaternary.opacity(item.id == action.codexActionID ? 0.65 : 0.22), in: RoundedRectangle(cornerRadius: 7))
-    }
-
-    private func chooseAgent() {
-        appState.removeActiveAgentAssignment(for: control)
-        appState.assignAgentPlaceholder(to: control)
-        isShowingActionPicker = false
-    }
-
-    private func chooseDisabled() {
-        appState.removeActiveAgentAssignment(for: control)
-        appState.profiles.updateAction(.disabled, for: control)
-        isShowingActionPicker = false
     }
 
     /// When a wizard-configured Codex action is bound, remind the user that the
@@ -267,7 +130,7 @@ struct ControlAssignmentPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
-                Button("Anleitung") { isPresentingWizard = true }
+                Button("Anleitung") { setupAction = definition }
                     .controlSize(.small)
             }
             .padding(10)

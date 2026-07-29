@@ -18,8 +18,10 @@ struct OnboardingView: View {
         case permissions, agents, layers, basics, microphone, summary
     }
 
-    static let size = CGSize(width: 560, height: 560)
+    static let size = CGSize(width: 560, height: 590)
 
+    @AppStorage(AppLanguage.defaultsKey) private var languageRawValue = AppLanguage.systemDefault.rawValue
+    @State private var hasChosenRegionalSetup = false
     @State private var mode: Mode?
     @State private var stepIndex = 0
 
@@ -29,6 +31,9 @@ struct OnboardingView: View {
     @State private var micSource: DictationSource = .codex
 
     private var monitor: PermissionMonitor { appState.permissionMonitor }
+    private var language: AppLanguage {
+        AppLanguage(rawValue: languageRawValue) ?? .systemDefault
+    }
     private var bothPermissionsGranted: Bool {
         monitor.hasAccessibilityPermission && monitor.hasInputMonitoringPermission
     }
@@ -49,14 +54,16 @@ struct OnboardingView: View {
         ZStack {
             backgroundGradient
             VStack(spacing: 0) {
-                if mode != nil, !steps.isEmpty {
+                if hasChosenRegionalSetup, mode != nil, !steps.isEmpty {
                     progressBar
                         .padding(.horizontal, 26)
                         .padding(.top, 26)
                         .padding(.bottom, 10)
                 }
                 ZStack {
-                    if mode == nil {
+                    if !hasChosenRegionalSetup {
+                        regionalSetupScreen
+                    } else if mode == nil {
                         startScreen
                             .transition(.asymmetric(
                                 insertion: .opacity.combined(with: .scale(scale: 1.02)),
@@ -73,6 +80,94 @@ struct OnboardingView: View {
         .preferredColorScheme(.dark)
         .task { monitor.requestNotificationAuthorizationIfNeeded() }
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: mode)
+    }
+
+    // MARK: - Language and keyboard
+
+    private var regionalSetupScreen: some View {
+        VStack(spacing: 18) {
+            Spacer(minLength: 0)
+            VStack(spacing: 7) {
+                Image(systemName: "globe.europe.africa.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(OnboardingPalette.accent)
+                Text(language.text("Sprache & Tastatur", "Language & keyboard"))
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(OnboardingPalette.textPrimary)
+                Text(language.text(
+                    "Wähle zuerst die Sprache der App und das Layout deiner Mac-Tastatur.",
+                    "First choose the app language and your Mac keyboard layout."
+                ))
+                .font(.system(size: 12))
+                .foregroundStyle(OnboardingPalette.textSecondary)
+                .multilineTextAlignment(.center)
+            }
+
+            HStack(spacing: 12) {
+                languageCard(.german, icon: "textformat.abc")
+                languageCard(.english, icon: "character.book.closed")
+            }
+            .frame(maxWidth: 420)
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text(language.text("Tastaturlayout", "Keyboard layout"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(OnboardingPalette.textSecondary)
+                Picker(
+                    language.text("Tastaturlayout", "Keyboard layout"),
+                    selection: Binding(
+                        get: { appState.profiles.keyboardLayout },
+                        set: { appState.profiles.keyboardLayout = $0 }
+                    )
+                ) {
+                    ForEach(KeyboardLayout.allCases) { layout in
+                        Text(layout.title).tag(layout)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                Text(appState.profiles.keyboardLayout.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(OnboardingPalette.textSecondary)
+            }
+            .frame(maxWidth: 420)
+
+            Label(
+                language.text(
+                    "Deine Sprache fehlt? Lass einen Coding-Agenten die zentralen Sprachtexte ergänzen – Beiträge sind willkommen.",
+                    "Missing your language? Ask a coding agent to add it through the centralized language strings — contributions are welcome."
+                ),
+                systemImage: "chevron.left.forwardslash.chevron.right"
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(OnboardingPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 420, alignment: .leading)
+
+            HStack {
+                Spacer()
+                Button(language.text("Weiter", "Continue")) {
+                    AppLanguage.current = language
+                    hasChosenRegionalSetup = true
+                }
+                .buttonStyle(OnboardingPrimaryButtonStyle())
+            }
+            .frame(maxWidth: 420)
+            Spacer(minLength: 0)
+        }
+        .padding(30)
+    }
+
+    private func languageCard(_ candidate: AppLanguage, icon: String) -> some View {
+        OnboardingChoiceCard(
+            icon: icon,
+            title: candidate.nativeTitle,
+            subtitle: candidate == .german ? "Deutsch" : "English",
+            isSelected: language == candidate
+        ) {
+            languageRawValue = candidate.rawValue
+            AppLanguage.current = candidate
+        }
     }
 
     /// Every step is laid out side by side in a single row; sliding to the
@@ -152,10 +247,13 @@ struct OnboardingView: View {
                 Image(systemName: "square.grid.3x2.fill")
                     .font(.system(size: 38))
                     .foregroundStyle(OnboardingPalette.accent)
-                Text("Willkommen bei Agent Micro")
+                Text(language.text("Willkommen bei Agent Micro", "Welcome to Agent Micro"))
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(OnboardingPalette.textPrimary)
-                Text("Agent Micro verbindet ein physisches Macropad mit Codex und Claude: Tasten senden Shortcuts, das Drehrad steuert Reasoning-Aufwand und Modellwahl, und die LEDs zeigen den Live-Status deiner Agenten.")
+                Text(language.text(
+                    "Agent Micro verbindet ein physisches Macropad mit Codex und Claude: Tasten senden Shortcuts, das Drehrad steuert Reasoning-Aufwand und Modellwahl, und die LEDs zeigen den Live-Status deiner Agenten.",
+                    "Agent Micro connects a physical macropad to Codex and Claude: keys send shortcuts, the dial controls reasoning effort and model selection, and the LEDs show your agents' live status."
+                ))
                     .font(.system(size: 13))
                     .foregroundStyle(OnboardingPalette.textSecondary)
                     .multilineTextAlignment(.center)
@@ -166,15 +264,15 @@ struct OnboardingView: View {
             VStack(spacing: 12) {
                 OnboardingChoiceCard(
                     icon: "bolt.fill",
-                    title: "Schnellstart",
-                    subtitle: "Nur Berechtigungen einrichten, Rest später in den Einstellungen.",
+                    title: language.text("Schnellstart", "Quick setup"),
+                    subtitle: language.text("Nur Berechtigungen einrichten, Rest später in den Einstellungen.", "Set up permissions only; configure everything else later in Settings."),
                     isSelected: false
                 ) { goTo(mode: .quick) }
 
                 OnboardingChoiceCard(
                     icon: "list.bullet.rectangle.portrait",
-                    title: "Geführte Einrichtung",
-                    subtitle: "Agents wählen, Umschalt-Taste, Mikrofon und die Bedienung Schritt für Schritt erklärt.",
+                    title: language.text("Geführte Einrichtung", "Guided setup"),
+                    subtitle: language.text("Agents wählen, Layer, Mikrofon und die Bedienung Schritt für Schritt erklärt.", "Choose agents, layers, microphone behavior, and learn the controls step by step."),
                     isSelected: false
                 ) { goTo(mode: .guided) }
             }
@@ -261,7 +359,7 @@ struct OnboardingStepChrome<Content: View>: View {
         icon: String,
         title: String,
         subtitle: String,
-        continueTitle: String = "Weiter",
+        continueTitle: String = AppLanguage.text("Weiter", "Continue"),
         continueDisabled: Bool = false,
         onBack: @escaping () -> Void,
         onContinue: @escaping () -> Void,
@@ -300,7 +398,7 @@ struct OnboardingStepChrome<Content: View>: View {
             Spacer(minLength: 0)
 
             HStack {
-                Button("Zurück", action: onBack)
+                Button(AppLanguage.text("Zurück", "Back"), action: onBack)
                     .buttonStyle(OnboardingSecondaryButtonStyle())
                 Spacer()
                 Button(continueTitle, action: onContinue)

@@ -59,6 +59,9 @@ cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$APP_ICON" "$APP_RESOURCES/CodexPadIcon.icns"
 cp "$HELPER_DESTINATION" "$APP_RESOURCES/ch57x-keyboard-tool"
 cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCES/"
+if [[ -d "$RESOURCE_BUNDLE/en.lproj" ]]; then
+  cp -R "$RESOURCE_BUNDLE/en.lproj" "$APP_RESOURCES/"
+fi
 chmod +x "$APP_BINARY" "$APP_RESOURCES/ch57x-keyboard-tool"
 
 cat >"$INFO_PLIST" <<PLIST
@@ -70,6 +73,13 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>de</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>de</string>
+    <string>en</string>
+  </array>
   <key>CFBundleName</key>
   <string>$DISPLAY_NAME</string>
   <key>CFBundleIconFile</key>

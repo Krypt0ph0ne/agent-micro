@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "AgentMicro",
+    defaultLocalization: "de",
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "CodexPad", targets: ["CodexPad"]),

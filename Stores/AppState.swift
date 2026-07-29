@@ -26,18 +26,35 @@ final class AppState {
     let loginItem: LoginItemService
     let approvals: ApprovalCoordinator
     let permissionMonitor: PermissionMonitor
+    private let threadPickerPanel: ThreadPickerPanelController
     /// Debounces `autoSync()` so a config change is pushed to the hardware
     /// without the user having to press "Übertragen" — see `scheduleAutoSync()`.
     private var autoSyncTask: Task<Void, Never>?
+    private var deviceMonitorTask: Task<Void, Never>?
+    private var observedDeviceID: String?
     private static let autoSyncDelaySeconds: TimeInterval = 0.4
     /// Per-control rapid-tap counters for a `.tapCount`-mode `.layerSwitch`
     /// action — see `handleLayerSwitchAction`.
     private var layerTapCounts: [HardwareControl: Int] = [:]
     private var layerTapTimers: [HardwareControl: Task<Void, Never>] = [:]
+    private var completedAcknowledgementTasks: [String: Task<Void, Never>] = [:]
     private static let layerMultiTapWindowSeconds: TimeInterval = 0.6
+    /// A completed agent remains visibly acknowledged after its key opens the
+    /// chat. This is deliberately longer than the completion reaction's own
+    /// period: the configured pulse/blink is the status layer until this
+    /// acknowledgement expires, not just a three-second flash.
+    private static let completedAcknowledgementDelaySeconds: TimeInterval = 30
+    private(set) var lastTransferResult: TransferResult?
+
+    struct TransferResult: Identifiable {
+        let id = UUID()
+        let profileName: String
+        let layerName: String
+        let succeeded: Bool
+        let detail: String
+    }
 
     init() {
-        UserDefaults.standard.register(defaults: [CodexQuickAssignService.enabledDefaultsKey: true])
         let catalog = CodexActionCatalog()
         let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
         let diagnostics = DiagnosticsStore()
@@ -62,6 +79,7 @@ final class AppState {
         self.claudeAgentBridge = claudeAgentBridge
         self.claudeThreads = CodexThreadStore(bridge: claudeAgentBridge, automationApp: .claude)
         self.loginItem = LoginItemService()
+        self.threadPickerPanel = ThreadPickerPanelController()
         self.ledFeedback = CodexPadLEDFeedbackService { [padEvents] packets in
             padEvents.sendLEDs(packets)
         }
@@ -74,44 +92,52 @@ final class AppState {
         let codexThreads = self.codexThreads
         let claudeThreads = self.claudeThreads
         self.quickAssign = CodexQuickAssignService(
-            isEnabled: { UserDefaults.standard.bool(forKey: CodexQuickAssignService.enabledDefaultsKey) },
+            isEnabled: { true },
             isDesignatedAgentControl: { profiles.selectedProfile.action(for: $0).kind == .codexAgent },
             isTapHoldConfigured: { profiles.selectedProfile.binding(for: $0).isTapHold },
-            clipboardThread: {
-                guard let clipboardText = NSPasteboard.general.string(forType: .string),
-                      let id = CodexQuickAssignService.extractThreadID(from: clipboardText)
-                else { return nil }
-                return codexThreads.threads.first { $0.id == id }
+            candidateThreads: { control in
+                CodexQuickAssignService.recentCandidates(
+                    from: codexThreads.threads,
+                    assignedThreadID: codexThreads.assignment(for: control)?.threadID
+                )
             },
-            fallbackThread: {
-                let assignedThreadIDs = Set(codexThreads.assignments.map(\.threadID))
-                return codexThreads.threads.first { !assignedThreadIDs.contains($0.id) }
-            }
+            assignedThreadID: { codexThreads.assignment(for: $0)?.threadID },
+            appName: { AutomationApp.codex.displayName }
         )
         self.claudeQuickAssign = CodexQuickAssignService(
-            isEnabled: { UserDefaults.standard.bool(forKey: CodexQuickAssignService.enabledDefaultsKey) },
+            isEnabled: { true },
             isDesignatedAgentControl: { profiles.selectedProfile.action(for: $0).kind == .claudeAgent },
             isTapHoldConfigured: { profiles.selectedProfile.binding(for: $0).isTapHold },
-            clipboardThread: {
-                guard let clipboardText = NSPasteboard.general.string(forType: .string),
-                      let id = CodexQuickAssignService.extractThreadID(from: clipboardText)
-                else { return nil }
-                return claudeThreads.threads.first { $0.id == id }
+            candidateThreads: { control in
+                CodexQuickAssignService.recentCandidates(
+                    from: claudeThreads.threads,
+                    assignedThreadID: claudeThreads.assignment(for: control)?.threadID
+                )
             },
-            fallbackThread: {
-                let assignedThreadIDs = Set(claudeThreads.assignments.map(\.threadID))
-                return claudeThreads.threads.first { !assignedThreadIDs.contains($0.id) }
-            }
+            assignedThreadID: { claudeThreads.assignment(for: $0)?.threadID },
+            appName: { AutomationApp.claude.displayName }
         )
         quickAssign.onAssign = { [weak self] thread, control in
             guard let self else { return }
             self.assignAgentThread(thread, to: control)
-            self.ledFeedback.showThreadAssignedReaction(profile: self.profiles.selectedProfile)
         }
         claudeQuickAssign.onAssign = { [weak self] thread, control in
             guard let self else { return }
             self.assignAgentThread(thread, to: control)
-            self.ledFeedback.showThreadAssignedReaction(profile: self.profiles.selectedProfile)
+        }
+        quickAssign.onTap = { [weak self] control in
+            self?.openAgentThread(app: .codex, store: codexThreads, control: control)
+        }
+        claudeQuickAssign.onTap = { [weak self] control in
+            self?.openAgentThread(app: .claude, store: claudeThreads, control: control)
+        }
+        configureThreadPicker(self.quickAssign, store: codexThreads)
+        configureThreadPicker(self.claudeQuickAssign, store: claudeThreads)
+        reasoningAutomation.isExternallySuspended = { [weak self] in
+            self?.quickAssign.isSelecting == true || self?.claudeQuickAssign.isSelecting == true
+        }
+        claudeReasoningAutomation.isExternallySuspended = { [weak self] in
+            self?.quickAssign.isSelecting == true || self?.claudeQuickAssign.isSelecting == true
         }
         tapHold.onAppAction = { [weak self] action, control in
             self?.dispatchAction(action, for: control)
@@ -128,6 +154,9 @@ final class AppState {
                 guard let control = HardwareControl(reportedControlIndex: event.control) else { return }
                 guard event.phase == .pressed || event.phase == .triggered else { return }
                 let binding = self.profiles.selectedProfile.binding(for: control)
+                // Agent controls own both gestures: release-before-threshold
+                // opens the assignment, while a completed hold reassigns it.
+                guard !binding.action.kind.isAgent else { return }
                 // Tap-hold controls resolve tap-vs-hold themselves (above, via
                 // `tapHold.handle`/`onAppAction`) — dispatching the plain tap
                 // action here too would fire it immediately on every press,
@@ -148,7 +177,70 @@ final class AppState {
         }
         codexThreads.onStatusChange = { [weak self] in self?.refreshAgentLEDs() }
         claudeThreads.onStatusChange = { [weak self] in self?.refreshAgentLEDs() }
-        profiles.onChange = { [weak self] in self?.scheduleAutoSync() }
+        codexThreads.onThreadsChange = { [weak self] in self?.quickAssign.refreshCandidates() }
+        claudeThreads.onThreadsChange = { [weak self] in self?.claudeQuickAssign.refreshCandidates() }
+        codexThreads.onStatusUpdate = { [weak self] control, status, source in
+            self?.handleAgentStatusUpdate(app: .codex, control: control, status: status, source: source)
+        }
+        claudeThreads.onStatusUpdate = { [weak self] control, status, source in
+            self?.handleAgentStatusUpdate(app: .claude, control: control, status: status, source: source)
+        }
+        profiles.onChange = { [weak self] in
+            guard let self else { return }
+            self.scheduleAutoSync()
+        }
+        profiles.onSelectedProfileChange = { [weak self] in
+            self?.quickAssign.cancelSelection()
+            self?.claudeQuickAssign.cancelSelection()
+        }
+    }
+
+    private func configureThreadPicker(
+        _ service: CodexQuickAssignService,
+        store: CodexThreadStore
+    ) {
+        service.onPickerWillOpen = { [weak store] in
+            store?.refreshRecentThreads()
+        }
+        service.onPickerChanged = { [weak self] presentation in
+            self?.threadPickerPanel.update(presentation)
+        }
+        service.onSelectionStarted = { [weak self] in
+            guard let self else { return }
+            self.ledFeedback.beginThreadPickerSelection(profile: self.profiles.selectedProfile)
+        }
+        service.onSelectionFinished = { [weak self] confirmed in
+            guard let self else { return }
+            self.ledFeedback.finishThreadPickerSelection(
+                profile: self.profiles.selectedProfile,
+                confirmed: confirmed
+            )
+        }
+    }
+
+    private func openAgentThread(
+        app: AutomationApp,
+        store: CodexThreadStore,
+        control: HardwareControl
+    ) {
+        guard store.openAssignedThread(for: control) else { return }
+        guard
+            store.status(for: control) == .completed,
+            let expectedThreadID = store.assignment(for: control)?.threadID
+        else { return }
+        let key = acknowledgementKey(app: app, control: control)
+        completedAcknowledgementTasks[key]?.cancel()
+        completedAcknowledgementTasks[key] = Task { [weak self, weak store] in
+            try? await Task.sleep(for: .seconds(Self.completedAcknowledgementDelaySeconds))
+            guard !Task.isCancelled, let self, let store else { return }
+            defer { self.completedAcknowledgementTasks[key] = nil }
+            guard store.assignment(for: control)?.threadID == expectedThreadID else { return }
+            _ = store.acknowledgeCompleted(for: control)
+        }
+    }
+
+    private func acknowledgementKey(app: AutomationApp, control: HardwareControl) -> String {
+        "\(app.rawValue)-\(control.rawValue)"
     }
 
     /// Debounces a hardware sync so rapid successive edits (e.g. dragging a
@@ -170,12 +262,36 @@ final class AppState {
     /// attempt failed, with the existing `hasUnsyncedChanges`/diagnostics
     /// error surfacing as the retry signal.
     private func autoSync() {
-        guard profiles.hasUnsyncedChanges, device.state.isSupportedConnection, !device.isBusy else { return }
-        let result = device.upload(profile: profiles.selectedProfile, keyboardLayout: profiles.keyboardLayout)
-        if result?.succeeded == true {
-            profiles.markSynchronized()
+        guard profiles.hasUnsyncedChanges else { return }
+        _ = transferCurrentConfiguration()
+    }
+
+    /// Single transfer path shared by the main window, the menu extra and the
+    /// debounce.  The selected profile/layer is captured before uploading;
+    /// only that exact confirmed snapshot is allowed to clear the dirty flag.
+    @discardableResult
+    func transferCurrentConfiguration() -> TransferResult? {
+        autoSyncTask?.cancel()
+        guard device.state.isSupportedConnection, !device.isBusy else { return nil }
+        let snapshot = profiles.selectedProfile
+        let layer = snapshot.layers.first(where: { $0.id == snapshot.activeLayerID })
+        let result = device.upload(profile: snapshot, keyboardLayout: profiles.keyboardLayout)
+        let succeeded = result?.succeeded == true
+        if succeeded {
+            profiles.markSynchronized(profileID: snapshot.id, layerID: snapshot.activeLayerID)
             refreshAgentLEDs()
         }
+        let detail = [result?.launchError, result?.stderr, result?.stdout]
+            .compactMap { $0?.isEmpty == false ? $0 : nil }
+            .joined(separator: "\n")
+        let transfer = TransferResult(
+            profileName: snapshot.name,
+            layerName: layer?.name ?? "Standard",
+            succeeded: succeeded,
+            detail: detail
+        )
+        lastTransferResult = transfer
+        return transfer
     }
 
     /// Dispatch for a control's resolved action on a normal key press.
@@ -194,6 +310,7 @@ final class AppState {
                 handleLayerSwitchAction(action, control: control)
             } else if action.kind == .profileSwitch {
                 profiles.switchToOtherBuiltInProfile()
+                activeAgentThreads.activateApp()
                 ledFeedback.flashLayerSwitchConfirmation(profile: profiles.selectedProfile)
             }
         }
@@ -225,7 +342,19 @@ final class AppState {
     private func flashActiveLayer() {
         let profile = profiles.selectedProfile
         guard let layer = profile.layers.first(where: { $0.id == profile.activeLayerID }) else { return }
-        ledFeedback.flashLayerConfirmation(profile: profile, red: layer.blinkRed, green: layer.blinkGreen, blue: layer.blinkBlue, count: layer.blinkCount)
+        ledFeedback.flashLayerConfirmation(profile: profile, layer: layer)
+    }
+
+    func previewLayerConfirmation(_ layerID: UUID) {
+        let profile = profiles.selectedProfile
+        guard let layer = profile.layers.first(where: { $0.id == layerID }) else { return }
+        ledFeedback.flashLayerConfirmation(profile: profile, layer: layer)
+    }
+
+    /// Plays the selected profile's configured event reaction without
+    /// requiring the corresponding real-world event to occur.
+    func previewReaction(_ event: LEDReactionEvent) {
+        ledFeedback.previewReaction(event, profile: profiles.selectedProfile)
     }
 
     /// The action catalog matching whichever app the selected profile targets;
@@ -267,13 +396,94 @@ final class AppState {
         activeAgentThreads.removeAssignment(for: control)
     }
 
-    func refreshDevice() {
-        device.refresh()
-        padEvents.refresh(enabled: device.currentDevice?.isCodexPadFirmware == true)
-        keyboardState.refresh(enabled: device.currentDevice?.isCodexPadFirmware == true)
-        if device.currentDevice?.isCodexPadFirmware == true {
-            refreshAgentLEDs()
+    /// Starts the persistent USB lifecycle independently of the main window.
+    /// A reconnect is treated like a small boot: both input-report listeners
+    /// are reopened, the complete profile/layer snapshot is uploaded, and the
+    /// current agent LEDs are restored without requiring the toolbar refresh.
+    func startHardwareServices() {
+        guard deviceMonitorTask == nil else { return }
+        reconcileDeviceConnection(forceReinitialization: true, reportDiagnostics: true)
+        deviceMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.reconcileDeviceConnection(
+                    forceReinitialization: false,
+                    reportDiagnostics: false
+                )
+            }
         }
+    }
+
+    func refreshDevice() {
+        reconcileDeviceConnection(forceReinitialization: true, reportDiagnostics: true)
+    }
+
+    private func reconcileDeviceConnection(
+        forceReinitialization: Bool,
+        reportDiagnostics: Bool
+    ) {
+        let previousID = observedDeviceID
+        // The once-per-second presence check is intentionally silent in the
+        // UI. It must not make the already-connected pad look disconnected
+        // for one frame on every poll.
+        device.refresh(
+            reportDiagnostics: reportDiagnostics,
+            showsScanningState: forceReinitialization
+        )
+        let connected = device.currentDevice?.support == .supported
+            ? device.currentDevice : nil
+        let newID = connected?.id
+
+        guard let connected else {
+            quickAssign.cancelSelection()
+            claudeQuickAssign.cancelSelection()
+            if previousID != nil {
+                padEvents.refresh(enabled: false)
+                keyboardState.refresh(enabled: false)
+                diagnostics.append(.warning, "Agent Micro getrennt", detail: "Eingabe- und LED-Dienste wurden angehalten.")
+            }
+            observedDeviceID = nil
+            return
+        }
+
+        guard Self.requiresPadReinitialization(
+            previousID: previousID,
+            newID: newID,
+            forced: forceReinitialization
+        ) else { return }
+
+        // Record this physical connection *before* attempting its one-time
+        // setup upload. An unavailable Raw-HID interface may make that upload
+        // fail, but it must never turn the 1-second presence poll into an
+        // endless reinitialise-and-upload loop that resets LED effects.
+        observedDeviceID = newID
+        let customFirmware = connected.isCodexPadFirmware
+        padEvents.refresh(enabled: customFirmware)
+        keyboardState.refresh(enabled: customFirmware)
+        let transfer = transferCurrentConfiguration()
+        if transfer?.succeeded == true {
+            diagnostics.append(
+                .success,
+                previousID == nil ? "Agent Micro initialisiert" : "Agent Micro neu initialisiert",
+                detail: "\(transfer?.profileName ?? "Profil") · \(transfer?.layerName ?? "Layer") · Eingaben und Live-LEDs aktiv"
+            )
+        } else if reportDiagnostics {
+            diagnostics.append(
+                .error,
+                "Agent Micro Initialisierung unvollständig",
+                detail: "Das Gerät wurde erkannt, aber das aktive Profil konnte nicht bestätigt werden. Mit „Gerät erneut suchen“ oder „Übertragen“ kann der Versuch bewusst wiederholt werden."
+            )
+        }
+    }
+
+    nonisolated static func requiresPadReinitialization(
+        previousID: String?,
+        newID: String?,
+        forced: Bool
+    ) -> Bool {
+        guard newID != nil else { return false }
+        return forced || previousID != newID
     }
 
     func startAgentBridges() {
@@ -283,6 +493,10 @@ final class AppState {
     }
 
     func assignAgentThread(_ thread: CodexThreadDescriptor, to control: HardwareControl) {
+        let app = profiles.selectedProfile.automationApp == .claude ? AutomationApp.claude : .codex
+        let acknowledgement = acknowledgementKey(app: app, control: control)
+        completedAcknowledgementTasks[acknowledgement]?.cancel()
+        completedAcknowledgementTasks[acknowledgement] = nil
         activeAgentThreads.assign(thread, to: control)
         profiles.updateAction(
             KeyboardAction(kind: activeAgentKind, label: thread.displayTitle, icon: thread.isSubagent ? "person.2.fill" : "terminal.fill"),
@@ -291,8 +505,33 @@ final class AppState {
         refreshAgentLEDs()
     }
 
+    /// Transfers an action without a built-in shortcut to the pad. Shortcut
+    /// setup stays deliberately manual: the app never attempts to navigate
+    /// Codex, because that route is not stable across Codex versions.
+    @discardableResult
+    func transferConfiguredShortcut(
+        _ definition: CodexActionDefinition,
+        trigger: String,
+        control: HardwareControl,
+        slot: ActionSlot
+    ) -> TransferResult? {
+        if slot == .tap { removeActiveAgentAssignment(for: control) }
+        let app = profiles.selectedProfile.automationApp ?? .codex
+        let kind: ActionKind = app == .claude ? .claudeShortcut : .codexShortcut
+        profiles.assignConfigurableCodexAction(definition, trigger: trigger, to: control, slot: slot, kind: kind)
+
+        let transfer = transferCurrentConfiguration()
+        guard transfer?.succeeded == true else { return transfer }
+
+        return transfer
+    }
+
     func removeAgentAssignment(for control: HardwareControl) {
         let kind = activeAgentKind
+        let app = profiles.selectedProfile.automationApp == .claude ? AutomationApp.claude : .codex
+        let acknowledgement = acknowledgementKey(app: app, control: control)
+        completedAcknowledgementTasks[acknowledgement]?.cancel()
+        completedAcknowledgementTasks[acknowledgement] = nil
         activeAgentThreads.removeAssignment(for: control)
         if profiles.selectedProfile.action(for: control).kind == kind {
             profiles.updateAction(.disabled, for: control)
@@ -302,8 +541,30 @@ final class AppState {
 
     func refreshAgentLEDs() {
         let statuses = Dictionary(uniqueKeysWithValues: HardwareControl.buttons.map { control in
-            (control, activeAgentThreads.status(for: control))
+            (control, activeAgentThreads.presentedStatus(for: control))
         })
         ledFeedback.showAgentStatuses(statuses, profile: profiles.selectedProfile)
+    }
+
+    private func handleAgentStatusUpdate(
+        app: AutomationApp,
+        control: HardwareControl,
+        status: CodexAgentStatus,
+        source: AgentStatusSource
+    ) {
+        let acknowledgement = acknowledgementKey(app: app, control: control)
+        completedAcknowledgementTasks[acknowledgement]?.cancel()
+        completedAcknowledgementTasks[acknowledgement] = nil
+        let reaction = profiles.selectedProfile.reaction(for: LEDReactionEvent.event(for: status) ?? .agentIdle)
+        diagnostics.recordStatus(
+            threadID: (app == .codex ? codexThreads : claudeThreads).assignment(for: control)?.threadID ?? "unknown",
+            source: source,
+            status: status,
+            ledReaction: reaction.effect.title
+        )
+        guard profiles.selectedProfile.automationApp == app else { return }
+        if status == .completed || status == .failed || status == .interrupted {
+            ledFeedback.showStatusTransition(status, for: control, profile: profiles.selectedProfile)
+        }
     }
 }

@@ -69,11 +69,15 @@ struct LEDControlPanel: View {
                 Spacer()
             }
 
-            Picker("Lichteditor", selection: $section) {
-                ForEach(LEDEditorSection.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            EditorModeSwitch(
+                selection: $section,
+                options: [
+                    .init(.base, title: "Grundlicht"),
+                    .init(.reactions, title: "Reaktionen")
+                ],
+                density: .compact,
+                accessibilityLabel: "Lichteditor"
+            )
 
             if section == .base {
                 baseEditor
@@ -94,15 +98,25 @@ struct LEDControlPanel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Toggle("Grundlicht an", isOn: idleBinding(\.enabled))
+            HStack(spacing: 8) {
+                EditorToggleRail(
+                    isOn: idleBinding(\.enabled),
+                    title: "Grundlicht",
+                    systemImage: "lightbulb.led.fill"
+                )
+                .frame(width: 138)
 
-            Picker("Modus", selection: idleBinding(\.perKey)) {
-                Text("Alle gleich").tag(false)
-                Text("Pro Taste").tag(true)
+                EditorModeSwitch(
+                    selection: idleBinding(\.perKey),
+                    options: [
+                        .init(false, title: "Alle Tasten"),
+                        .init(true, title: "Pro Taste")
+                    ],
+                    density: .compact,
+                    accessibilityLabel: "Grundlichtmodus"
+                )
+                .disabled(!idle.enabled)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .disabled(!idle.enabled)
 
             if idle.perKey {
                 perKeyControls
@@ -403,6 +417,7 @@ struct LEDControlPanel: View {
 private struct LEDReactionEditor: View {
     let appState: AppState
     @State private var expandedEvents: Set<LEDReactionEvent> = []
+    @State private var expandedLayerIDs: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -412,6 +427,20 @@ private struct LEDReactionEditor: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Layer-Wechsel")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 2)
+                        Text("Bestätigung direkt nach dem Wechsel. Jede Belegung hat ihr eigenes Signal.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 2)
+                        ForEach(appState.profiles.selectedProfile.layers) { layer in
+                            layerConfirmationRow(layer)
+                        }
+                    }
+
                     ForEach(LEDReactionGroup.allCases) { group in
                         VStack(alignment: .leading, spacing: 7) {
                             Text(group.title)
@@ -427,6 +456,155 @@ private struct LEDReactionEditor: View {
             }
             .frame(height: 320)
         }
+    }
+
+    private func layerConfirmationRow(_ layer: ProfileLayer) -> some View {
+        let isExpanded = expandedLayerIDs.contains(layer.id)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(layer.confirmation.color)
+                    .frame(width: 9, height: 9)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(layer.name)
+                        .font(.caption.weight(.medium))
+                    Text(layer.id == appState.profiles.selectedProfile.activeLayerID ? "Aktiver Layer" : "Layer-Bestätigung")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Button {
+                    appState.previewLayerConfirmation(layer.id)
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Bestätigung testen")
+
+                ColorPicker("Farbe", selection: layerColorBinding(layer.id), supportsOpacity: false)
+                    .labelsHidden()
+                Picker("Effekt", selection: layerEffectBinding(layer.id)) {
+                    ForEach(LEDReactionEffect.allCases) { effect in
+                        Text(effect.title).tag(effect)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 92)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        if isExpanded {
+                            expandedLayerIDs.remove(layer.id)
+                        } else {
+                            expandedLayerIDs.insert(layer.id)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.borderless)
+                .help(isExpanded ? "Optionen schließen" : "Helligkeit, Dauer und Wiederholungen")
+            }
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 7) {
+                    LabeledContent("Helligkeit") {
+                        HStack(spacing: 8) {
+                            Slider(value: layerBrightnessBinding(layer.id), in: 1...255)
+                            Text("\(Int(layer.confirmationBrightness) * 100 / 255) %")
+                                .monospacedDigit()
+                                .frame(width: 38, alignment: .trailing)
+                        }
+                    }
+                    LabeledContent("Dauer") {
+                        HStack(spacing: 8) {
+                            Slider(value: layerDurationBinding(layer.id), in: 80...2_000, step: 20)
+                            Text(periodLabel(layer.confirmationDurationMilliseconds))
+                                .monospacedDigit()
+                                .frame(width: 46, alignment: .trailing)
+                        }
+                    }
+                    if layer.confirmationEffect != .steady && layer.confirmationEffect != .off {
+                        Stepper(
+                            "Wiederholungen: \(layer.confirmationRepeatCount)",
+                            value: layerRepeatBinding(layer.id),
+                            in: 1...8
+                        )
+                    }
+                }
+                .font(.caption)
+                .padding(.leading, 18)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(.quaternary.opacity(0.38), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func currentLayer(_ id: UUID) -> ProfileLayer? {
+        appState.profiles.selectedProfile.layers.first(where: { $0.id == id })
+    }
+
+    private func saveLayer(_ layer: ProfileLayer) {
+        appState.profiles.updateLayerConfirmation(
+            layer.id,
+            effect: layer.confirmationEffect,
+            red: layer.blinkRed,
+            green: layer.blinkGreen,
+            blue: layer.blinkBlue,
+            brightness: layer.confirmationBrightness,
+            durationMilliseconds: layer.confirmationDurationMilliseconds,
+            repeats: layer.confirmationRepeatCount
+        )
+    }
+
+    private func mutateLayer(_ id: UUID, _ mutation: (inout ProfileLayer) -> Void) {
+        guard var layer = currentLayer(id) else { return }
+        mutation(&layer)
+        saveLayer(layer)
+    }
+
+    private func layerColorBinding(_ id: UUID) -> Binding<Color> {
+        Binding(
+            get: { currentLayer(id)?.confirmation.color ?? .white },
+            set: { color in
+                guard let rgb = NSColor(color).usingColorSpace(.deviceRGB) else { return }
+                mutateLayer(id) {
+                    $0.blinkRed = UInt8(clamping: Int((rgb.redComponent * 255).rounded()))
+                    $0.blinkGreen = UInt8(clamping: Int((rgb.greenComponent * 255).rounded()))
+                    $0.blinkBlue = UInt8(clamping: Int((rgb.blueComponent * 255).rounded()))
+                    if $0.confirmationEffect == .off { $0.confirmationEffect = .flash }
+                }
+            }
+        )
+    }
+
+    private func layerEffectBinding(_ id: UUID) -> Binding<LEDReactionEffect> {
+        Binding(
+            get: { currentLayer(id)?.confirmationEffect ?? .flash },
+            set: { effect in mutateLayer(id) { $0.confirmationEffect = effect } }
+        )
+    }
+
+    private func layerBrightnessBinding(_ id: UUID) -> Binding<Double> {
+        Binding(
+            get: { Double(currentLayer(id)?.confirmationBrightness ?? 255) },
+            set: { value in mutateLayer(id) { $0.confirmationBrightness = UInt8(clamping: Int(value.rounded())) } }
+        )
+    }
+
+    private func layerDurationBinding(_ id: UUID) -> Binding<Double> {
+        Binding(
+            get: { Double(currentLayer(id)?.confirmationDurationMilliseconds ?? 180) },
+            set: { value in mutateLayer(id) { $0.confirmationDurationMilliseconds = Int(value.rounded()) } }
+        )
+    }
+
+    private func layerRepeatBinding(_ id: UUID) -> Binding<Int> {
+        Binding(
+            get: { currentLayer(id)?.confirmationRepeatCount ?? 1 },
+            set: { value in mutateLayer(id) { $0.confirmationRepeatCount = value } }
+        )
     }
 
     private func reactionRow(_ event: LEDReactionEvent) -> some View {
@@ -446,6 +624,14 @@ private struct LEDReactionEditor: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
+                Button {
+                    appState.previewReaction(event)
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Reaktion testen")
+                .accessibilityLabel("\(event.title) testen")
                 ColorPicker("Farbe", selection: reactionColorBinding(event), supportsOpacity: false)
                     .labelsHidden()
                 Picker("Effekt", selection: reactionEffectBinding(event)) {

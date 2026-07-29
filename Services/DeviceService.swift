@@ -34,8 +34,14 @@ final class DeviceService {
         }
     }
 
-    func refresh() {
-        state = .scanning
+    /// Re-checks the USB inventory. Background checks deliberately retain the
+    /// last visible connection state while `ioreg` runs: switching through
+    /// `.scanning` every time makes the Pad indicator (and the upload button)
+    /// flicker despite an unchanged, healthy device.
+    func refresh(reportDiagnostics: Bool = true, showsScanningState: Bool = true) {
+        if showsScanningState {
+            state = .scanning
+        }
         let report = detector.detect()
         diagnostics.setRawIORegistry(report.rawIORegistry)
         detectedDevices = report.candidates
@@ -45,14 +51,20 @@ final class DeviceService {
         if let device = report.device {
             if device.support == .supported {
                 state = .connected(device)
-                diagnostics.append(.success, "Unterstütztes Gerät erkannt", detail: "\(device.name) · \(device.vendorIDHex):\(device.productIDHex)")
+                if reportDiagnostics {
+                    diagnostics.append(.success, "Unterstütztes Gerät erkannt", detail: "\(device.name) · \(device.vendorIDHex):\(device.productIDHex)")
+                }
             } else {
                 state = .unsupported(device)
-                diagnostics.append(.warning, device.support == .related ? "CH57x-HID erkannt, aber nicht konfigurierbar" : "Nicht unterstütztes USB-Gerät", detail: device.diagnosticSummary)
+                if reportDiagnostics {
+                    diagnostics.append(.warning, device.support == .related ? "CH57x-HID erkannt, aber nicht konfigurierbar" : "Nicht unterstütztes USB-Gerät", detail: device.diagnosticSummary)
+                }
             }
         } else {
             state = .disconnected
-            diagnostics.append(.warning, "Kein unterstütztes Gerät", detail: report.error ?? "Unbekannter Erkennungsfehler")
+            if reportDiagnostics {
+                diagnostics.append(.warning, "Kein unterstütztes Gerät", detail: report.error ?? "Unbekannter Erkennungsfehler")
+            }
         }
     }
 

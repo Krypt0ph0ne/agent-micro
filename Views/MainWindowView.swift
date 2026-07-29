@@ -45,7 +45,7 @@ struct MainWindowView: View {
             }
         }
         .task {
-            appState.refreshDevice()
+            appState.startHardwareServices()
             appState.startAgentBridges()
             appState.reasoningAutomation.refreshPermissions()
             appState.claudeReasoningAutomation.refreshPermissions()
@@ -178,33 +178,37 @@ struct MainWindowView: View {
         )
         showFeedback(
             message: result?.succeeded == true ? "Konfiguration gültig" : "Validierung fehlgeschlagen",
-            result: result
+            detail: detail(for: result),
+            succeeded: result?.succeeded == true
         )
     }
 
     private func upload() {
-        let result = appState.device.upload(
-            profile: appState.profiles.selectedProfile,
-            keyboardLayout: appState.profiles.keyboardLayout
-        )
-        if result?.succeeded == true {
-            appState.profiles.markSynchronized()
-            // The upload leaves the configured idle state active. Reapplying
-            // here immediately overlays any live agent status on top of it.
-            appState.refreshAgentLEDs()
+        guard appState.profiles.hasUnsyncedChanges else {
+            showFeedback(
+                message: "Aktuelles Setup bereits übertragen",
+                detail: "Auf dem Pad ist bereits die ausgewählte Profil- und Layer-Konfiguration aktiv.",
+                succeeded: true
+            )
+            return
         }
+
+        let transfer = appState.transferCurrentConfiguration()
         showFeedback(
-            message: result?.succeeded == true ? "Übertragen" : "Upload fehlgeschlagen",
-            result: result
+            message: transfer?.succeeded == true
+                ? "\(transfer?.profileName ?? "Profil") · \(transfer?.layerName ?? "Layer") übertragen"
+                : "Upload fehlgeschlagen",
+            detail: transfer?.detail ?? "Die Übertragung konnte nicht gestartet werden. Prüfe die Pad-Verbindung und versuche es erneut.",
+            succeeded: transfer?.succeeded == true
         )
     }
 
-    private func showFeedback(message: String, result: ProcessResult?) {
+    private func showFeedback(message: String, detail: String, succeeded: Bool) {
         feedbackTask?.cancel()
         let feedback = ActionFeedback(
             message: message,
-            detail: detail(for: result),
-            succeeded: result?.succeeded == true
+            detail: detail,
+            succeeded: succeeded
         )
         actionFeedback = feedback
         feedbackTask = Task {

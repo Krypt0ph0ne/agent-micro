@@ -8,11 +8,24 @@ struct CodexAssignmentWizardView: View {
     @Environment(\.dismiss) private var dismiss
     let appState: AppState
     let control: HardwareControl
-    var slot: ActionSlot = .tap
+    let slot: ActionSlot
 
     @State private var selected: CodexActionDefinition?
     @State private var trigger = ""
     @State private var search = ""
+    @State private var setupError: String?
+
+    init(
+        appState: AppState,
+        control: HardwareControl,
+        slot: ActionSlot = .tap,
+        initialAction: CodexActionDefinition? = nil
+    ) {
+        self.appState = appState
+        self.control = control
+        self.slot = slot
+        _selected = State(initialValue: initialAction)
+    }
 
     private var appName: String { appState.profiles.selectedProfile.automationApp?.displayName ?? "Codex" }
 
@@ -41,6 +54,11 @@ struct CodexAssignmentWizardView: View {
             }
         }
         .frame(width: 460, height: 560)
+        .task {
+            if let selected, trigger.isEmpty {
+                prepare(selected)
+            }
+        }
     }
 
     private var header: some View {
@@ -89,10 +107,7 @@ struct CodexAssignmentWizardView: View {
 
     private func actionRow(_ action: CodexActionDefinition) -> some View {
         Button {
-            trigger = CodexTriggerPool.nextFreeTrigger(
-                in: appState.profiles.selectedProfile,
-                keeping: currentTrigger(for: action.id)
-            ) ?? ""
+            prepare(action)
             selected = action
         } label: {
             HStack(spacing: 10) {
@@ -112,6 +127,13 @@ struct CodexAssignmentWizardView: View {
         }
         .buttonStyle(.plain)
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func prepare(_ action: CodexActionDefinition) {
+        trigger = CodexTriggerRegistry.reserveNextFreeTrigger(
+            in: appState.profiles.profiles,
+            keeping: currentTrigger(for: action.id)
+        ) ?? ""
     }
 
     private func confirmStep(for action: CodexActionDefinition) -> some View {
@@ -144,57 +166,148 @@ struct CodexAssignmentWizardView: View {
                 instructions(for: action)
             }
 
+            if let setupError {
+                Label(setupError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Spacer()
 
             HStack {
                 Spacer()
                 Button("Abbrechen") { dismiss() }
-                Button("Zuweisen") {
-                    if slot == .tap { appState.removeActiveAgentAssignment(for: control) }
-                    let kind: ActionKind = appState.profiles.selectedProfile.automationApp == .claude ? .claudeShortcut : .codexShortcut
-                    appState.profiles.assignConfigurableCodexAction(action, trigger: trigger, to: control, slot: slot, kind: kind)
-                    dismiss()
+                if appName == "Codex" {
+                    Button("Nur lokal zuweisen") {
+                        assignLocally(action)
+                        dismiss()
+                    }
+                    Button("Übertragen") {
+                        let result = appState.transferConfiguredShortcut(
+                            action,
+                            trigger: trigger,
+                            control: control,
+                            slot: slot
+                        )
+                        if result?.succeeded == true {
+                            dismiss()
+                        } else {
+                            let detail = result?.detail.trimmingCharacters(in: .whitespacesAndNewlines)
+                            setupError = detail?.isEmpty == false
+                                ? "Die Taste konnte nicht übertragen werden: \(detail!)"
+                                : "Die Taste konnte nicht auf das Pad übertragen werden. Prüfe die Verbindung und versuche es erneut."
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Zuweisen") {
+                        assignLocally(action)
+                        dismiss()
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(trigger.isEmpty)
             }
+            .disabled(trigger.isEmpty)
         }
         .padding(16)
     }
 
     private var triggerCard: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Zugewiesener Trigger")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(trigger.isEmpty ? "—" : CodexTriggerPool.displayLabel(for: trigger))
-                    .font(.title2.monospaced().weight(.semibold))
-            }
-            Spacer()
-            Button {
-                if let alternative = CodexTriggerPool.alternativeTrigger(to: trigger, in: appState.profiles.selectedProfile) {
-                    trigger = alternative
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Zugewiesener Trigger")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(trigger.isEmpty ? "—" : CodexTriggerPool.displayLabel(for: trigger))
+                        .font(.title2.monospaced().weight(.semibold))
                 }
-            } label: {
-                Label("Anderer", systemImage: "arrow.triangle.2.circlepath")
+                Spacer()
+                triggerPicker
+                Button {
+                    chooseNextTrigger()
+                } label: {
+                    Label("Belegt – nächster", systemImage: "arrow.right.circle")
+                }
+                .controlSize(.small)
+                .disabled(trigger.isEmpty)
             }
-            .controlSize(.small)
-            .disabled(trigger.isEmpty)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(CodexTriggerPool.candidates.count) Kandidaten: A–Z, 0–9 und F1–F12.")
+                Text("Codex veröffentlicht seine belegten Shortcuts nicht. Ist einer dort schon belegt, markiere ihn hier; Agent Micro schlägt ihn danach nie wieder vor.")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
         .frame(maxWidth: .infinity)
         .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    private var triggerPicker: some View {
+        Menu {
+            triggerMenu("Buchstaben", candidates: CodexTriggerPool.letterCandidates)
+            triggerMenu("Zahlen", candidates: CodexTriggerPool.numberCandidates)
+            triggerMenu("F-Tasten", candidates: CodexTriggerPool.functionKeyCandidates)
+        } label: {
+            Label("Auswählen", systemImage: "chevron.up.chevron.down")
+        }
+        .controlSize(.small)
+        .disabled(availableTriggers.isEmpty)
+    }
+
+    private var availableTriggers: [String] {
+        CodexTriggerRegistry.availableTriggers(
+            in: appState.profiles.profiles,
+            keeping: trigger
+        )
+    }
+
+    @ViewBuilder
+    private func triggerMenu(_ title: String, candidates: [String]) -> some View {
+        let available = Set(availableTriggers)
+        Menu(title) {
+            ForEach(candidates.filter(available.contains), id: \.self) { candidate in
+                Button(CodexTriggerPool.displayLabel(for: candidate)) {
+                    CodexTriggerRegistry.reserve(candidate)
+                    trigger = candidate
+                }
+            }
+        }
+        .disabled(candidates.allSatisfy { !available.contains($0) })
+    }
+
+    private func chooseNextTrigger() {
+        if let alternative = CodexTriggerRegistry.reserveAlternativeTrigger(
+            to: trigger,
+            in: appState.profiles.profiles
+        ) {
+            trigger = alternative
+        } else {
+            trigger = ""
+        }
+    }
+
     private func instructions(for action: CodexActionDefinition) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("So in \(appName) zuweisen")
+            Text(appName == "Codex" ? "Schnelleinrichtung" : "So in \(appName) zuweisen")
                 .font(.caption.weight(.semibold))
-            step(1, "Öffne in \(appName) ", trailing: appName == "Claude" ? "die Datei ~/.claude/keybindings.json." : "Settings › Keyboard Shortcuts.")
-            step(2, appName == "Claude" ? "Trage die Aktions-ID ein: " : "Suche den Eintrag ", trailing: appName == "Claude" ? "„\(action.codexCommandID ?? action.id)".appending(".") : "„\(action.title)".appending("."))
-            step(3, appName == "Claude" ? "…gebunden an die Tastenkombination " : "Klicke ihn an und drücke die Tastenkombination ", trailing: CodexTriggerPool.displayLabel(for: trigger) + ".")
-            step(4, "Danach in Agent Micro ", trailing: "Übertragen klicken, um den Trigger auf das Pad zu laden.")
+            if appName == "Codex" {
+                step(1, "Klicke unten auf ", trailing: "„Übertragen“, damit \(control.shortTitle) den Trigger sendet.")
+                step(2, "Öffne in Codex ", trailing: "Settings › Keyboard Shortcuts und suche „\(action.title)“.")
+                step(3, "Klicke beim Treffer auf ", trailing: "„+“ und drücke einmal die physische \(control.shortTitle).")
+                Text("Verwende dabei \(CodexTriggerPool.displayLabel(for: trigger)). Agent Micro öffnet keine Codex-Ansicht mehr automatisch.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tint)
+            } else {
+                step(1, "Öffne in Claude ", trailing: "die Datei ~/.claude/keybindings.json.")
+                step(2, "Trage die Aktions-ID ein: ", trailing: "„\(action.codexCommandID ?? action.id)“.")
+                step(3, "Binde sie an ", trailing: CodexTriggerPool.displayLabel(for: trigger) + ".")
+                step(4, "Danach in Agent Micro ", trailing: "Übertragen klicken.")
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -219,5 +332,11 @@ struct CodexAssignmentWizardView: View {
         let binding = appState.profiles.selectedProfile.binding(for: control)
         let action = slot == .tap ? binding.action : binding.holdAction
         return action?.codexActionID == actionID ? action?.deviceMacro : nil
+    }
+
+    private func assignLocally(_ action: CodexActionDefinition) {
+        if slot == .tap { appState.removeActiveAgentAssignment(for: control) }
+        let kind: ActionKind = appState.profiles.selectedProfile.automationApp == .claude ? .claudeShortcut : .codexShortcut
+        appState.profiles.assignConfigurableCodexAction(action, trigger: trigger, to: control, slot: slot, kind: kind)
     }
 }

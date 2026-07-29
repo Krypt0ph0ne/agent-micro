@@ -11,11 +11,11 @@ enum CodexActionExecution: String, Codable, Hashable {
 
     var title: String {
         switch self {
-        case .keyboardShortcut: "Direkter Shortcut"
-        case .configurableShortcut: "In Codex konfigurierbar"
+        case .keyboardShortcut: AppLanguage.text("Direkter Shortcut", "Direct shortcut")
+        case .configurableShortcut: AppLanguage.text("In Codex konfigurierbar", "Configurable in Codex")
         case .deepLink: "Codex Deep Link"
-        case .unavailable: "Nicht stabil verfügbar"
-        case .hostEvent: "Nur an Agent Micro melden"
+        case .unavailable: AppLanguage.text("Nicht stabil verfügbar", "Not reliably available")
+        case .hostEvent: AppLanguage.text("Nur an Agent Micro melden", "Send to Agent Micro only")
         }
     }
 }

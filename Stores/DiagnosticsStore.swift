@@ -11,10 +11,22 @@ struct DiagnosticEntry: Identifiable, Hashable {
     var detail: String
 }
 
+/// A compact, local-only audit row for status handling.  It intentionally
+/// stores only a short thread identifier and no prompt/title content.
+struct AgentStatusTrace: Identifiable, Hashable {
+    var id = UUID()
+    var date = Date()
+    var threadShortID: String
+    var source: AgentStatusSource
+    var status: CodexAgentStatus
+    var ledReaction: String
+}
+
 @MainActor
 @Observable
 final class DiagnosticsStore {
     private(set) var entries: [DiagnosticEntry] = []
+    private(set) var statusTraces: [AgentStatusTrace] = []
     private(set) var rawIORegistry: String = "Noch nicht erfasst."
 
     func append(_ level: DiagnosticEntry.Level, _ title: String, detail: String = "") {
@@ -31,6 +43,19 @@ final class DiagnosticsStore {
 
     func setRawIORegistry(_ value: String) {
         rawIORegistry = value
+    }
+
+    func recordStatus(threadID: String, source: AgentStatusSource, status: CodexAgentStatus, ledReaction: String) {
+        statusTraces.insert(
+            AgentStatusTrace(
+                threadShortID: String(threadID.prefix(8)),
+                source: source,
+                status: status,
+                ledReaction: ledReaction
+            ),
+            at: 0
+        )
+        if statusTraces.count > 100 { statusTraces.removeLast(statusTraces.count - 100) }
     }
 }
 

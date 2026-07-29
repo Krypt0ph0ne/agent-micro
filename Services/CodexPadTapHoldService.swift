@@ -77,10 +77,10 @@ final class CodexPadTapHoldService {
         pressStates[control] = state
         guard let hold = profileProvider().binding(for: control).holdAction else { return }
         if KeystrokeSynthesizer.post(macro: hold.deviceMacro) {
-            lastResolvedAction = "Halten: \(hold.label)"
+            lastResolvedAction = "Halten: \(hold.displayLabel)"
         } else if hold.isEnabled {
             onAppAction?(hold, control)
-            lastResolvedAction = "Halten: \(hold.label)"
+            lastResolvedAction = "Halten: \(hold.displayLabel)"
         }
     }
 
@@ -92,10 +92,10 @@ final class CodexPadTapHoldService {
         guard !state.holdFired else { return }
         let tap = binding.action
         if KeystrokeSynthesizer.post(macro: tap.deviceMacro) {
-            lastResolvedAction = "Tippen: \(tap.label)"
+            lastResolvedAction = "Tippen: \(tap.displayLabel)"
         } else if tap.isEnabled {
             onAppAction?(tap, control)
-            lastResolvedAction = "Tippen: \(tap.label)"
+            lastResolvedAction = "Tippen: \(tap.displayLabel)"
         }
     }
 

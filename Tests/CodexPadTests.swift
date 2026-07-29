@@ -15,6 +15,21 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(decoded.ledReactions.count, LEDReactionEvent.allCases.count)
     }
 
+    func testLegacyLayerBlinkSettingsMigrateToFullConfirmationEffect() throws {
+        let layer = ProfileLayer(name: "Alt", controls: [], blinkRed: 12, blinkGreen: 34, blinkBlue: 56, blinkCount: 2)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(layer)) as! [String: Any]
+        json.removeValue(forKey: "confirmationEffect")
+        json.removeValue(forKey: "confirmationBrightness")
+        json.removeValue(forKey: "confirmationDurationMilliseconds")
+        json.removeValue(forKey: "confirmationRepeatCount")
+        let migrated = try JSONDecoder().decode(ProfileLayer.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(migrated.confirmationEffect, .flash)
+        XCTAssertEqual(migrated.confirmationRepeatCount, 2)
+        XCTAssertEqual(migrated.confirmation.red, 12)
+        XCTAssertEqual(migrated.confirmation.green, 34)
+        XCTAssertEqual(migrated.confirmation.blue, 56)
+    }
+
     func testReasoningTriggerProfileUsesConfirmedLocalShortcuts() {
         let profile = ProfileFactory.codexReasoningTriggers(catalog: CodexActionCatalog())
         XCTAssertEqual(profile.action(for: .encoderLeft).deviceMacro, "f22")
@@ -75,6 +90,49 @@ final class CodexPadTests: XCTestCase {
         // fixed device macro, since it's only meaningful once a menu is open.
         XCTAssertNil(claudeCatalog.keyboardAction(id: "select-menu-item"))
         XCTAssertEqual(claudeCatalog.action(id: "select-menu-item")?.execution, .configurableShortcut)
+    }
+
+    func testClaudeDesktopSessionUsesReadableTitleProjectAndShortID() throws {
+        let data = Data("""
+        {
+          "sessionId": "local_1cdac978-4c4d-452c-87ca-d3769b994e0a",
+          "cliSessionId": "8566a8f9-bd20-4f55-bb33-7675859812ed",
+          "title": "Agent Micro pre-release adjustments",
+          "cwd": "/tmp/worktree",
+          "originCwd": "/Users/test/Agent Micro",
+          "createdAt": 1780000000000,
+          "lastActivityAt": 1780001000000,
+          "isArchived": false
+        }
+        """.utf8)
+        let session = try JSONDecoder().decode(ClaudeDesktopSession.self, from: data)
+        let thread = session.threadDescriptor
+        XCTAssertEqual(thread.id, "local_1cdac978-4c4d-452c-87ca-d3769b994e0a")
+        XCTAssertEqual(thread.displayTitle, "Agent Micro pre-release adjustments")
+        XCTAssertEqual(thread.projectName, "Agent Micro")
+        XCTAssertEqual(thread.preview, "Agent Micro · 1cdac978")
+        XCTAssertEqual(thread.alternateID, "8566a8f9-bd20-4f55-bb33-7675859812ed")
+        XCTAssertEqual(thread.navigationID, "8566a8f9-bd20-4f55-bb33-7675859812ed")
+    }
+
+    func testClaudeNavigationUsesDesktopAndCLIResumeRoutes() {
+        XCTAssertEqual(
+            CodexThreadStore.navigationURL(for: "session_01XMavBeqfaCXC5dbAMrn6ba", app: .claude)?.absoluteString,
+            "claude://code/session_01XMavBeqfaCXC5dbAMrn6ba"
+        )
+        XCTAssertNil(CodexThreadStore.navigationURL(for: "local_1cdac978-4c4d-452c-87ca-d3769b994e0a", app: .claude))
+        XCTAssertEqual(
+            CodexThreadStore.navigationURL(for: "8566a8f9-bd20-4f55-bb33-7675859812ed", app: .claude)?.absoluteString,
+            "claude://resume?session=8566a8f9-bd20-4f55-bb33-7675859812ed"
+        )
+    }
+
+    func testPetCatalogContainsOneRealToggleAction() {
+        let catalog = CodexActionCatalog()
+        XCTAssertNotNil(catalog.action(id: "toggle-pet"))
+        XCTAssertEqual(catalog.action(id: "toggle-pet")?.codexCommandID, "openPetOverlay")
+        XCTAssertNil(catalog.action(id: "wake-pet"))
+        XCTAssertNil(catalog.action(id: "tuck-away-pet"))
     }
 
     @MainActor
@@ -154,6 +212,33 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(untouchedIdle.red, 10, "a custom recolor away from the original green must not be overwritten")
         XCTAssertEqual(untouchedIdle.green, 20)
         XCTAssertEqual(untouchedIdle.blue, 30)
+    }
+
+    @MainActor
+    func testLegacyPetActionsCollapseToSingleToggleWithoutChangingTrigger() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-micro-pet-migration-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Profiles.json")
+        let catalog = CodexActionCatalog()
+        let claudeCatalog = CodexActionCatalog(resourceName: "ClaudeActions", app: .claude)
+        var profile = ProfileFactory.codex(catalog: catalog)
+        profile.setAction(
+            KeyboardAction(
+                kind: .codexShortcut,
+                label: "Wake Pet",
+                icon: "pawprint",
+                deviceMacro: "cmd-ctrl-opt-shift-p",
+                codexActionID: "wake-pet"
+            ),
+            for: .key2
+        )
+        try ProfileFileCodec.encode([profile, ProfileFactory.claude(catalog: claudeCatalog)]).write(to: url)
+
+        let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
+        let migrated = store.profiles.first(where: { $0.name == "Codex" })!.action(for: .key2)
+        XCTAssertEqual(migrated.codexActionID, "toggle-pet")
+        XCTAssertEqual(migrated.label, "Pet anzeigen")
+        XCTAssertEqual(migrated.deviceMacro, "cmd-ctrl-opt-shift-p")
     }
 
     @MainActor
@@ -690,10 +775,10 @@ final class CodexPadTests: XCTestCase {
     /// whether) a pending hold fires, instead of waiting on a real `Timer`.
     @MainActor
     private final class FakeScheduler {
-        private(set) var pendingFires: [() -> Void] = []
+        private(set) var pendingFires: [@MainActor @Sendable () -> Void] = []
         private(set) var cancelCount = 0
 
-        func schedule(interval: TimeInterval, fire: @escaping () -> Void) -> () -> Void {
+        func schedule(interval: TimeInterval, fire: @escaping @MainActor @Sendable () -> Void) -> () -> Void {
             pendingFires.append(fire)
             let index = pendingFires.count - 1
             return { [weak self] in
@@ -708,29 +793,38 @@ final class CodexPadTests: XCTestCase {
     }
 
     @MainActor
-    func testQuickAssignFiresAtTheThresholdAndReassignsAnAlreadyBoundAgentButton() {
-        func thread(_ id: String) -> CodexThreadDescriptor {
+    func testQuickAssignOpensPickerAtThresholdAndCommitsOnlyOnRelease() {
+        func thread(_ id: String, age: TimeInterval) -> CodexThreadDescriptor {
             CodexThreadDescriptor(
                 id: id, title: id, preview: "", cwd: "/tmp",
-                parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
+                parentThreadID: nil, agentNickname: nil, agentRole: nil,
+                updatedAt: Date().addingTimeInterval(age), status: .idle
             )
         }
-        var nextCandidate = thread("thread-recent")
+        let current = thread("thread-current", age: -20)
+        let newer = thread("thread-newer", age: 0)
+        var currentAssignment = current.id
         var assignedThread: CodexThreadDescriptor?
         var assignedControl: HardwareControl?
+        var openedControl: HardwareControl?
+        var finished: [Bool] = []
         let scheduler = FakeScheduler()
 
         let service = CodexQuickAssignService(
             isEnabled: { true },
             isDesignatedAgentControl: { _ in true },
             isTapHoldConfigured: { _ in false },
-            fallbackThread: { nextCandidate },
+            candidateThreads: { _ in [newer, current] },
+            assignedThreadID: { _ in currentAssignment },
+            appName: { "Codex" },
             schedule: scheduler.schedule
         )
         service.onAssign = { thread, control in
             assignedThread = thread
             assignedControl = control
         }
+        service.onTap = { openedControl = $0 }
+        service.onSelectionFinished = { finished.append($0) }
 
         func event(_ phase: CodexPadPhysicalEvent.Phase) -> CodexPadPhysicalEvent {
             CodexPadPhysicalEvent(sequence: 0, control: HardwareControl.key1.reportedControlIndex, phase: phase)
@@ -741,26 +835,51 @@ final class CodexPadTests: XCTestCase {
         service.handle(event(.released))
         XCTAssertEqual(scheduler.cancelCount, 1)
         XCTAssertNil(assignedThread)
+        XCTAssertEqual(openedControl, .key1)
 
-        // The assignment happens as soon as the threshold elapses — while
-        // still held — not only once the button is released.
+        // The threshold opens the picker but keeps the current assignment as
+        // the safe selection. Releasing without rotation is a no-op.
         service.handle(event(.pressed))
         scheduler.fireLatest()
-        XCTAssertEqual(assignedThread?.id, "thread-recent")
-        XCTAssertEqual(assignedControl, .key1)
-
-        // The later release must not undo or repeat the assignment.
-        assignedThread = nil
+        XCTAssertTrue(service.isSelecting)
+        XCTAssertEqual(service.picker?.selectedThread?.id, current.id)
+        XCTAssertNil(assignedThread)
         service.handle(event(.released))
         XCTAssertNil(assignedThread)
+        XCTAssertEqual(finished, [false])
 
-        // Holding the same, already-assigned button again reassigns it in one
-        // step rather than requiring an unassign first.
-        nextCandidate = thread("thread-newer")
+        // A new hold plus one turn toward newer commits only when the agent
+        // key is released.
         service.handle(event(.pressed))
         scheduler.fireLatest()
+        service.handle(CodexPadPhysicalEvent(
+            sequence: 0,
+            control: HardwareControl.encoderLeft.reportedControlIndex,
+            phase: .triggered
+        ))
+        XCTAssertEqual(service.picker?.selectedThread?.id, newer.id)
+        XCTAssertNil(assignedThread)
+        service.handle(event(.released))
         XCTAssertEqual(assignedThread?.id, "thread-newer")
         XCTAssertEqual(assignedControl, .key1)
+        XCTAssertEqual(finished, [false, true])
+        currentAssignment = newer.id
+    }
+
+    func testAgentActionOwnsHoldAndClearsGenericSecondBinding() {
+        var profile = ProfileFactory.safe()
+        profile.setHoldAction(.profileSwitch, thresholdMilliseconds: 400, for: .key1)
+        XCTAssertTrue(profile.binding(for: .key1).isTapHold)
+
+        profile.setAction(
+            KeyboardAction(kind: .codexAgent, label: "Codex Agent", icon: "terminal.fill"),
+            for: .key1
+        )
+        XCTAssertNil(profile.holdAction(for: .key1))
+        XCTAssertFalse(profile.binding(for: .key1).isTapHold)
+
+        profile.setHoldAction(.profileSwitch, thresholdMilliseconds: 400, for: .key1)
+        XCTAssertNil(profile.holdAction(for: .key1), "Agent controls reserve hold for thread reassignment")
     }
 
     @MainActor
@@ -771,10 +890,9 @@ final class CodexPadTests: XCTestCase {
             isEnabled: { true },
             isDesignatedAgentControl: { _ in false },
             isTapHoldConfigured: { _ in false },
-            fallbackThread: { CodexThreadDescriptor(
-                id: "thread-recent", title: "Recent", preview: "", cwd: "/tmp",
-                parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
-            ) },
+            candidateThreads: { _ in [] },
+            assignedThreadID: { _ in nil },
+            appName: { "Codex" },
             schedule: scheduler.schedule
         )
         service.onAssign = { thread, _ in assignedThread = thread }
@@ -787,47 +905,22 @@ final class CodexPadTests: XCTestCase {
         XCTAssertNil(assignedThread)
     }
 
-    func testExtractThreadIDFindsAUUIDInArbitraryClipboardText() {
-        XCTAssertEqual(
-            CodexQuickAssignService.extractThreadID(from: "019f5a19-e864-7543-bbca-c6ffdca652ac"),
-            "019f5a19-e864-7543-bbca-c6ffdca652ac"
+    func testRecentPickerCandidatesKeepOldCurrentAssignmentWithinTenRows() {
+        let now = Date()
+        let threads = (0..<12).map { index in
+            CodexThreadDescriptor(
+                id: "thread-\(index)", title: "\(index)", preview: "", cwd: "/tmp",
+                parentThreadID: nil, agentNickname: nil, agentRole: nil,
+                updatedAt: now.addingTimeInterval(TimeInterval(-index)), status: .idle
+            )
+        }
+        let result = CodexQuickAssignService.recentCandidates(
+            from: threads,
+            assignedThreadID: "thread-11"
         )
-        XCTAssertEqual(
-            CodexQuickAssignService.extractThreadID(from: "Session: 019F5A19-E864-7543-BBCA-C6FFDCA652AC (copied)"),
-            "019F5A19-E864-7543-BBCA-C6FFDCA652AC"
-        )
-        XCTAssertNil(CodexQuickAssignService.extractThreadID(from: "not a session id"))
-        XCTAssertNil(CodexQuickAssignService.extractThreadID(from: ""))
-    }
-
-    @MainActor
-    func testQuickAssignPrefersAClipboardThreadOverTheRecencyFallback() {
-        let clipboardPick = CodexThreadDescriptor(
-            id: "thread-from-clipboard", title: "Copied", preview: "", cwd: "/tmp",
-            parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
-        )
-        let recencyPick = CodexThreadDescriptor(
-            id: "thread-recent", title: "Recent", preview: "", cwd: "/tmp",
-            parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
-        )
-        var assignedThread: CodexThreadDescriptor?
-        let scheduler = FakeScheduler()
-
-        let service = CodexQuickAssignService(
-            isEnabled: { true },
-            isDesignatedAgentControl: { _ in true },
-            isTapHoldConfigured: { _ in false },
-            clipboardThread: { clipboardPick },
-            fallbackThread: { recencyPick },
-            schedule: scheduler.schedule
-        )
-        service.onAssign = { thread, _ in assignedThread = thread }
-
-        let control = HardwareControl.key2
-        service.handle(CodexPadPhysicalEvent(sequence: 0, control: control.reportedControlIndex, phase: .pressed))
-        scheduler.fireLatest()
-
-        XCTAssertEqual(assignedThread?.id, "thread-from-clipboard")
+        XCTAssertEqual(result.count, 10)
+        XCTAssertTrue(result.contains(where: { $0.id == "thread-11" }))
+        XCTAssertFalse(result.contains(where: { $0.id == "thread-9" }))
     }
 
     @MainActor
@@ -858,6 +951,52 @@ final class CodexPadTests: XCTestCase {
     }
 
     @MainActor
+    func testLegacyClaudeCLIAssignmentMigratesToReadableDesktopSession() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agent-micro-claude-assignment-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("ClaudeAgentKeyAssignments.json")
+        let cliID = "8566a8f9-bd20-4f55-bb33-7675859812ed"
+        let desktopID = "local_1cdac978-4c4d-452c-87ca-d3769b994e0a"
+        try JSONEncoder().encode([
+            AgentKeyAssignment(
+                control: .key1,
+                threadID: cliID,
+                threadTitle: "codex-micro-3c",
+                isSubagent: false
+            )
+        ]).write(to: url)
+
+        let bridge = CodexEventBridge()
+        let store = CodexThreadStore(bridge: bridge, automationApp: .claude, persistenceURL: url)
+        bridge.onThreads?([
+            CodexThreadDescriptor(
+                id: desktopID,
+                title: "Agent Micro pre-release adjustments",
+                preview: "Agent Micro · 1cdac978",
+                cwd: "/Users/test/Agent Micro",
+                parentThreadID: nil,
+                agentNickname: nil,
+                agentRole: "Claude Desktop",
+                updatedAt: .now,
+                status: .idle,
+                alternateID: cliID,
+                navigationID: cliID
+            )
+        ])
+
+        let migrated = try XCTUnwrap(store.assignment(for: .key1))
+        XCTAssertEqual(migrated.threadID, desktopID)
+        XCTAssertEqual(migrated.navigationID, cliID)
+        XCTAssertEqual(migrated.threadTitle, "Agent Micro pre-release adjustments")
+        XCTAssertEqual(migrated.threadProject, "Agent Micro")
+
+        let restored = CodexThreadStore(bridge: CodexEventBridge(), automationApp: .claude, persistenceURL: url)
+        XCTAssertEqual(restored.assignment(for: .key1)?.threadID, desktopID)
+        XCTAssertEqual(restored.assignment(for: .key1)?.navigationID, cliID)
+    }
+
+    @MainActor
     func testAgentStatusArrivingBeforeThreadListIsNotLost() {
         let bridge = CodexEventBridge()
         let persistenceURL = FileManager.default.temporaryDirectory
@@ -878,7 +1017,7 @@ final class CodexPadTests: XCTestCase {
         var changeCount = 0
         store.onStatusChange = { changeCount += 1 }
 
-        bridge.onStatus?(thread.id, .running)
+        bridge.onStatus?(thread.id, .running, .event)
         bridge.onThreads?([thread])
 
         XCTAssertEqual(store.status(for: .key1), .running)
@@ -886,7 +1025,170 @@ final class CodexPadTests: XCTestCase {
     }
 
     @MainActor
-    func testCompletedFlashRestoresIdleInsteadOfTurningBoardDark() {
+    func testCompletedAcknowledgementChangesPresentationOnlyUntilNewWork() {
+        let bridge = CodexEventBridge()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexpad-completed-ack-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, persistenceURL: url)
+        let thread = CodexThreadDescriptor(
+            id: "completed-thread", title: "Done", preview: "", cwd: "/tmp",
+            parentThreadID: nil, agentNickname: nil, agentRole: nil,
+            updatedAt: .now, status: .completed
+        )
+        store.assign(thread, to: .key1)
+        bridge.onThreads?([thread])
+
+        XCTAssertEqual(store.status(for: .key1), .completed)
+        XCTAssertEqual(store.presentedStatus(for: .key1), .completed)
+        XCTAssertTrue(store.acknowledgeCompleted(for: .key1))
+        XCTAssertEqual(store.status(for: .key1), .completed)
+        XCTAssertEqual(store.presentedStatus(for: .key1), .idle)
+
+        bridge.onStatus?(thread.id, .running, .event)
+        XCTAssertEqual(store.presentedStatus(for: .key1), .running)
+        bridge.onStatus?(thread.id, .completed, .event)
+        XCTAssertEqual(store.presentedStatus(for: .key1), .completed)
+    }
+
+    @MainActor
+    func testEventStatusWinsOverIdleSnapshotUntilInputResolvesAndTerminalTriggersOnce() {
+        let bridge = CodexEventBridge()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-status-flow-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, persistenceURL: url)
+        let thread = CodexThreadDescriptor(
+            id: "status-flow-thread", title: "Test", preview: "", cwd: "/tmp/project",
+            parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
+        )
+        store.assign(thread, to: .key1)
+        bridge.onThreads?([thread])
+
+        var transitions: [(CodexAgentStatus, AgentStatusSource)] = []
+        store.onStatusUpdate = { _, status, source in transitions.append((status, source)) }
+        bridge.onStatus?(thread.id, .running, .event)
+        bridge.onStatus?(thread.id, .needsAttention, .event)
+        var staleRunning = thread
+        staleRunning.status = .running
+        bridge.onThreads?([staleRunning]) // a separate app-server often sees only "running"
+        bridge.onThreads?([thread]) // a stale idle reconciliation must not hide input
+        XCTAssertEqual(store.status(for: .key1), .needsAttention)
+
+        bridge.onStatus?(thread.id, .running, .event)
+        bridge.onStatus?(thread.id, .completed, .event)
+        bridge.onStatus?(thread.id, .completed, .event)
+        XCTAssertEqual(transitions.filter { $0.0 == .completed }.count, 1)
+        XCTAssertEqual(transitions.last?.1, .event)
+
+        bridge.onThreads?([thread])
+        XCTAssertEqual(
+            store.status(for: .key1),
+            .completed,
+            "A stale idle list snapshot must not erase the terminal event"
+        )
+        XCTAssertTrue(store.acknowledgeCompleted(for: .key1))
+        XCTAssertEqual(store.presentedStatus(for: .key1), .idle)
+    }
+
+    @MainActor
+    func testIdleReconciliationCannotOverwriteKnownAgentStates() {
+        let bridge = CodexEventBridge()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexpad-stale-idle-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, persistenceURL: url)
+        let idleThread = CodexThreadDescriptor(
+            id: "stale-idle-thread", title: "Test", preview: "", cwd: "/tmp/project",
+            parentThreadID: nil, agentNickname: nil, agentRole: nil,
+            updatedAt: .now, status: .idle
+        )
+        store.assign(idleThread, to: .key1)
+        bridge.onThreads?([idleThread])
+
+        for protectedStatus in [
+            CodexAgentStatus.running,
+            .needsAttention,
+            .completed,
+            .failed,
+            .interrupted
+        ] {
+            bridge.onStatus?(idleThread.id, protectedStatus, .event)
+            XCTAssertEqual(store.status(for: .key1), protectedStatus)
+
+            // Covers the descriptor path used by thread/list and thread/read.
+            bridge.onThreads?([idleThread])
+            XCTAssertEqual(
+                store.status(for: .key1),
+                protectedStatus,
+                "An idle descriptor snapshot must not overwrite \(protectedStatus)"
+            )
+
+            // Covers the explicit synchronized-status callback from thread/read.
+            bridge.onStatus?(idleThread.id, .idle, .snapshot)
+            XCTAssertEqual(
+                store.status(for: .key1),
+                protectedStatus,
+                "An idle status snapshot must not overwrite \(protectedStatus)"
+            )
+        }
+
+        // A real event remains authoritative and can intentionally return the
+        // thread to idle.
+        bridge.onStatus?(idleThread.id, .idle, .event)
+        XCTAssertEqual(store.status(for: .key1), .idle)
+    }
+
+    @MainActor
+    func testMissedAttentionEventRecoveredBySnapshotReachesLEDOutput() {
+        let bridge = CodexEventBridge()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-attention-led-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, persistenceURL: url)
+        var thread = CodexThreadDescriptor(
+            id: "attention-snapshot", title: "Test", preview: "", cwd: "/tmp/project",
+            parentThreadID: nil, agentNickname: nil, agentRole: nil, updatedAt: .now, status: .idle
+        )
+        store.assign(thread, to: .key1)
+        bridge.onThreads?([thread])
+
+        var batches: [[[UInt8]]] = []
+        let feedback = CodexPadLEDFeedbackService { batches.append($0) }
+        let profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        store.onStatusChange = {
+            feedback.showAgentStatuses([.key1: store.status(for: .key1)], profile: profile)
+        }
+
+        // No event callback: this represents reconciliation after a missed
+        // thread/status/changed notification.
+        thread.status = .needsAttention
+        bridge.onThreads?([thread])
+
+        XCTAssertEqual(store.status(for: .key1), .needsAttention)
+        let expected = profile.reaction(for: .agentNeedsAttention)
+        let keyPacket = batches.last?.first(where: { $0[4] == HardwareControl.key1.firmwareControlIndex })
+        XCTAssertEqual(keyPacket?[5], expected.effect.firmwareEffect.rawValue)
+        XCTAssertEqual(keyPacket?[6], expected.red)
+        XCTAssertEqual(keyPacket?[7], expected.green)
+        XCTAssertEqual(keyPacket?[8], expected.blue)
+    }
+
+    @MainActor
+    func testLayerConfirmationUsesSteadyFramesAndOneGlobalOffGap() async {
+        var batches: [[[UInt8]]] = []
+        let feedback = CodexPadLEDFeedbackService { batches.append($0) }
+        let profile = ProfileFactory.safe()
+        var layer = profile.layers[0]
+        layer.confirmationEffect = .blink
+        layer.confirmationDurationMilliseconds = 80
+        layer.confirmationRepeatCount = 2
+
+        feedback.flashLayerConfirmation(profile: profile, layer: layer)
+        try? await Task.sleep(for: .milliseconds(320))
+
+        let onBatches = batches.filter { $0.count == HardwareControl.buttons.count && $0.allSatisfy { $0[3] == 0x10 } }
+        XCTAssertGreaterThanOrEqual(onBatches.count, 2)
+        XCTAssertTrue(onBatches.prefix(2).allSatisfy { $0.allSatisfy { $0[5] == LEDEffect.steady.rawValue } })
+        XCTAssertEqual(batches.filter { $0.count == 1 && $0[0][3] == 0x12 }.count, 1)
+    }
+
+    @MainActor
+    func testCompletedStatusRemainsVisibleUntilItIsAcknowledged() {
         var batches: [[[UInt8]]] = []
         let feedback = CodexPadLEDFeedbackService { batches.append($0) }
         let profile = ProfileFactory.safe()
@@ -895,13 +1197,210 @@ final class CodexPadTests: XCTestCase {
         feedback.showAgentStatuses(statuses, profile: profile)
         feedback.showAgentStatuses(statuses, profile: profile)
 
-        let restored = batches.last ?? []
-        XCTAssertEqual(restored.count, HardwareControl.buttons.count)
-        XCTAssertTrue(restored.allSatisfy {
-            $0[3] == 0x10
-                && $0[5] == profile.idleLighting.effect.rawValue
-                && $0[10] == profile.idleLighting.brightness
+        let completed = profile.reaction(for: .agentCompleted)
+        let keyPacket = batches.last?.first(where: { $0[4] == HardwareControl.key1.firmwareControlIndex })
+        XCTAssertEqual(keyPacket?[5], completed.effect.firmwareEffect.rawValue)
+        XCTAssertEqual([keyPacket?[6], keyPacket?[7], keyPacket?[8]], [completed.red, completed.green, completed.blue])
+    }
+
+    @MainActor
+    func testTerminalTransitionStopsBeforeIdleCanRender() async {
+        var batches: [[[UInt8]]] = []
+        let feedback = CodexPadLEDFeedbackService { batches.append($0) }
+        var profile = ProfileFactory.safe()
+        profile.setReaction(.init(
+            event: .agentCompleted,
+            effect: .pulse,
+            red: 0,
+            green: 220,
+            blue: 70,
+            brightness: 255,
+            periodMilliseconds: 200,
+            disablesIdle: true
+        ))
+        profile.setReaction(.init(
+            event: .agentIdle,
+            effect: .steady,
+            red: 255,
+            green: 255,
+            blue: 255,
+            brightness: 56,
+            periodMilliseconds: 200,
+            disablesIdle: true
+        ))
+
+        feedback.showAgentStatuses([.key1: .completed], profile: profile)
+        feedback.showStatusTransition(.completed, for: .key1, profile: profile)
+        feedback.showAgentStatuses([.key1: .idle], profile: profile)
+        try? await Task.sleep(for: .milliseconds(260))
+
+        let finalKeyPacket = batches.last?.first(where: { $0[4] == HardwareControl.key1.firmwareControlIndex })
+        XCTAssertEqual(finalKeyPacket?[5], LEDEffect.steady.rawValue)
+        XCTAssertEqual([finalKeyPacket?[6], finalKeyPacket?[7], finalKeyPacket?[8]], [255, 255, 255])
+    }
+
+    @MainActor
+    func testThreadPickerPulsesAndConfirmsAcrossAllSixKeys() {
+        var batches: [[[UInt8]]] = []
+        let feedback = CodexPadLEDFeedbackService { batches.append($0) }
+        var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        profile.setReaction(.init(
+            event: .threadAssigned,
+            effect: .flash,
+            red: 12,
+            green: 34,
+            blue: 56,
+            brightness: 210,
+            periodMilliseconds: 180,
+            disablesIdle: false
+        ))
+
+        feedback.beginThreadPickerSelection(profile: profile)
+        let pulse = batches.last ?? []
+        XCTAssertEqual(pulse.count, HardwareControl.buttons.count)
+        XCTAssertTrue(pulse.allSatisfy {
+            $0[5] == LEDEffect.pulse.rawValue
+                && $0[6...10] == [12, 34, 56, 10, 210]
         })
+
+        feedback.finishThreadPickerSelection(profile: profile, confirmed: true)
+        let flash = batches.last ?? []
+        XCTAssertEqual(flash.count, HardwareControl.buttons.count)
+        XCTAssertTrue(flash.allSatisfy {
+            $0[5] == LEDEffect.steady.rawValue
+                && $0[6...10] == [12, 34, 56, 9, 210]
+        })
+    }
+
+    @MainActor
+    func testRunningStatusInvalidatesEveryPendingIdlePulseFrame() async {
+        var batches: [[[UInt8]]] = []
+        let feedback = CodexPadLEDFeedbackService { batches.append($0) }
+        var profile = ProfileFactory.safe()
+        profile.setReaction(.init(
+            event: .agentIdle,
+            effect: .pulse,
+            red: 255,
+            green: 255,
+            blue: 255,
+            brightness: 180,
+            periodMilliseconds: 200,
+            disablesIdle: true,
+            minBrightness: 40
+        ))
+        profile.setReaction(.init(
+            event: .agentRunning,
+            effect: .pulse,
+            red: 10,
+            green: 132,
+            blue: 255,
+            brightness: 255,
+            periodMilliseconds: 200,
+            disablesIdle: true
+        ))
+
+        feedback.showAgentStatuses([.key1: .idle], profile: profile)
+        try? await Task.sleep(for: .milliseconds(45))
+        let runningStart = batches.count
+        feedback.showAgentStatuses([.key1: .running], profile: profile)
+        try? await Task.sleep(for: .milliseconds(90))
+
+        let runningPackets = batches.dropFirst(runningStart)
+            .flatMap { $0 }
+            .filter { $0[4] == HardwareControl.key1.firmwareControlIndex }
+        XCTAssertFalse(runningPackets.isEmpty)
+        XCTAssertTrue(runningPackets.allSatisfy {
+            $0[5] == LEDEffect.pulse.rawValue && $0[6...8] == [10, 132, 255]
+        })
+        XCTAssertFalse(runningPackets.contains { $0[6...8] == [255, 255, 255] })
+    }
+
+    @MainActor
+    func testNativeAgentPulseDoesNotContinuouslyWriteOverHID() async {
+        var batches: [[[UInt8]]] = []
+        let feedback = CodexPadLEDFeedbackService { batches.append($0) }
+        var profile = ProfileFactory.safe()
+        profile.setReaction(.init(
+            event: .agentRunning,
+            effect: .pulse,
+            red: 10,
+            green: 132,
+            blue: 255,
+            brightness: 255,
+            periodMilliseconds: 200,
+            disablesIdle: true
+        ))
+
+        feedback.showAgentStatuses([.key1: .running], profile: profile)
+        let batchesAfterRender = batches.count
+        let keyPacket = batches.last?.first {
+            $0[4] == HardwareControl.key1.firmwareControlIndex
+        }
+        XCTAssertEqual(keyPacket?[5], LEDEffect.pulse.rawValue)
+
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(
+            batches.count,
+            batchesAfterRender,
+            "A firmware-native agent pulse must not generate continuous host HID writes"
+        )
+    }
+
+    @MainActor
+    func testDictationRangePulseSuppressesTerminalAgentReactionUntilRelease() async {
+        var batches: [[[UInt8]]] = []
+        let feedback = CodexPadLEDFeedbackService { batches.append($0) }
+        var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
+        profile.setReaction(.init(
+            event: .dictation,
+            effect: .pulse,
+            red: 255,
+            green: 255,
+            blue: 255,
+            brightness: 100,
+            periodMilliseconds: 200,
+            disablesIdle: false,
+            minBrightness: 70
+        ))
+        profile.setReaction(.init(
+            event: .agentCompleted,
+            effect: .flash,
+            red: 1,
+            green: 2,
+            blue: 3,
+            brightness: 255,
+            periodMilliseconds: 200,
+            disablesIdle: true
+        ))
+
+        feedback.handle(
+            CodexPadPhysicalEvent(
+                sequence: 0,
+                control: HardwareControl.key4.reportedControlIndex,
+                phase: .pressed
+            ),
+            profile: profile
+        )
+        try? await Task.sleep(for: .milliseconds(45))
+        let firstAgentBatch = batches.count
+
+        feedback.showStatusTransition(.completed, for: .key1, profile: profile)
+        try? await Task.sleep(for: .milliseconds(70))
+
+        let batchesDuringDictation = batches.dropFirst(firstAgentBatch)
+        XCTAssertFalse(batchesDuringDictation.isEmpty)
+        XCTAssertFalse(
+            batchesDuringDictation.flatMap { $0 }.contains {
+                $0[4] == HardwareControl.key1.firmwareControlIndex && $0[6...8] == [1, 2, 3]
+            },
+            "A terminal agent reaction must not replace the active dictation range pulse."
+        )
+        XCTAssertTrue(
+            batchesDuringDictation.allSatisfy { batch in
+                batch.count == HardwareControl.buttons.count
+                    && batch.allSatisfy { $0[5] == LEDEffect.steady.rawValue && (70...100).contains($0[10]) }
+            }
+        )
     }
 
     func testCodexPadDictationUsesCommandF17HoldBinding() throws {
@@ -1119,6 +1618,44 @@ final class CodexPadTests: XCTestCase {
         XCTAssertFalse(KeystrokeSynthesizer.canSynthesize("f24"))
         XCTAssertFalse(KeystrokeSynthesizer.canSynthesize(nil))
         XCTAssertFalse(KeystrokeSynthesizer.canSynthesize(""))
+        XCTAssertTrue(KeystrokeSynthesizer.canSynthesize("cmd-slash", layout: .germanISO))
+    }
+
+    // MARK: - Codex rollout status fallback
+
+    func testRolloutParserTracksApprovalUntilItsConcreteOutputArrives() {
+        var parser = CodexRolloutStatusParser()
+        let approval = """
+        {"type":"response_item","payload":{"type":"custom_tool_call","call_id":"approval-1","name":"exec","input":"{\\"sandbox_permissions\\":\\"require_escalated\\"}"}}
+        """
+        let unrelatedOutput = """
+        {"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"other"}}
+        """
+        let approvalOutput = """
+        {"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"approval-1"}}
+        """
+
+        XCTAssertEqual(parser.consume(line: approval), .needsAttention)
+        XCTAssertNil(parser.consume(line: unrelatedOutput))
+        XCTAssertEqual(parser.consume(line: approvalOutput), .running)
+    }
+
+    func testRolloutParserMapsCompletionFailureAndInterruption() {
+        var parser = CodexRolloutStatusParser()
+        XCTAssertEqual(parser.consume(line: #"{"type":"event_msg","payload":{"type":"task_complete"}}"#), .completed)
+        XCTAssertEqual(parser.consume(line: #"{"type":"event_msg","payload":{"type":"error"}}"#), .failed)
+        XCTAssertEqual(
+            parser.consume(line: #"{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#),
+            .interrupted
+        )
+    }
+
+    func testPadReconnectDecisionRequiresARealConnectionAndDetectsReplug() {
+        XCTAssertFalse(AppState.requiresPadReinitialization(previousID: "pad-1", newID: nil, forced: true))
+        XCTAssertFalse(AppState.requiresPadReinitialization(previousID: "pad-1", newID: "pad-1", forced: false))
+        XCTAssertTrue(AppState.requiresPadReinitialization(previousID: nil, newID: "pad-1", forced: false))
+        XCTAssertTrue(AppState.requiresPadReinitialization(previousID: "pad-1", newID: "pad-2", forced: false))
+        XCTAssertTrue(AppState.requiresPadReinitialization(previousID: "pad-1", newID: "pad-1", forced: true))
     }
 
     // MARK: - Assignment wizard trigger pool
@@ -1137,6 +1674,13 @@ final class CodexPadTests: XCTestCase {
         XCTAssertNotEqual(CodexTriggerPool.alternativeTrigger(to: "cmd-ctrl-opt-shift-b", in: profile), "cmd-ctrl-opt-shift-b")
     }
 
+    func testTriggerPoolIncludesLettersNumbersAndFunctionKeys() {
+        XCTAssertEqual(CodexTriggerPool.candidates.count, 48)
+        XCTAssertEqual(CodexTriggerPool.letterCandidates.first, "cmd-ctrl-opt-shift-a")
+        XCTAssertTrue(CodexTriggerPool.numberCandidates.contains("cmd-ctrl-opt-shift-0"))
+        XCTAssertTrue(CodexTriggerPool.functionKeyCandidates.contains("cmd-ctrl-opt-shift-f12"))
+    }
+
     func testTriggerPoolKeepsOwnTriggerWhenReediting() {
         var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
         profile.setAction(
@@ -1147,6 +1691,60 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(
             CodexTriggerPool.nextFreeTrigger(in: profile, keeping: "cmd-ctrl-opt-shift-a"),
             "cmd-ctrl-opt-shift-a"
+        )
+    }
+
+    func testTriggerRegistryPersistsOfferedTriggersAcrossProfiles() {
+        let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let codex = ProfileFactory.codex(catalog: CodexActionCatalog())
+        let claude = ProfileFactory.claude(catalog: CodexActionCatalog(resourceName: "ClaudeActions", app: .claude))
+        XCTAssertEqual(
+            CodexTriggerRegistry.reserveNextFreeTrigger(in: [codex, claude], defaults: defaults),
+            "cmd-ctrl-opt-shift-a"
+        )
+        XCTAssertEqual(
+            CodexTriggerRegistry.reserveNextFreeTrigger(in: [claude, codex], defaults: defaults),
+            "cmd-ctrl-opt-shift-b"
+        )
+        XCTAssertTrue(CodexTriggerRegistry.reservedTriggers(defaults: defaults).contains("cmd-ctrl-opt-shift-a"))
+    }
+
+    func testTriggerRegistryAdvancesPastEveryPreviouslyOfferedCandidate() {
+        let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let profiles = [ProfileFactory.codex(catalog: CodexActionCatalog())]
+        CodexTriggerRegistry.reserve("cmd-ctrl-opt-shift-a", defaults: defaults)
+        CodexTriggerRegistry.reserve("cmd-ctrl-opt-shift-b", defaults: defaults)
+
+        XCTAssertEqual(
+            CodexTriggerRegistry.reserveAlternativeTrigger(
+                to: "cmd-ctrl-opt-shift-b",
+                in: profiles,
+                defaults: defaults
+            ),
+            "cmd-ctrl-opt-shift-c"
+        )
+    }
+
+    func testTriggerRegistrySkipsTriggersUsedInAnotherProfile() {
+        let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let codex = ProfileFactory.codex(catalog: CodexActionCatalog())
+        var claude = ProfileFactory.claude(catalog: CodexActionCatalog(resourceName: "ClaudeActions", app: .claude))
+        claude.setAction(
+            KeyboardAction(kind: .claudeShortcut, label: "Bereits belegt", deviceMacro: "cmd-ctrl-opt-shift-a"),
+            for: .key1
+        )
+        XCTAssertEqual(
+            CodexTriggerRegistry.reserveNextFreeTrigger(in: [codex, claude], defaults: defaults),
+            "cmd-ctrl-opt-shift-b"
         )
     }
 

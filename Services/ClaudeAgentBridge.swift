@@ -15,11 +15,31 @@ private struct ClaudeAgentSession: Decodable {
     let startedAt: Double?
     let sessionId: String
     let name: String?
+    let firstPrompt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case pid, cwd, kind, startedAt, sessionId, name, firstPrompt, prompt, initialPrompt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pid = try container.decodeIfPresent(Int.self, forKey: .pid)
+        cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+        startedAt = try container.decodeIfPresent(Double.self, forKey: .startedAt)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        firstPrompt = try container.decodeIfPresent(String.self, forKey: .firstPrompt)
+            ?? container.decodeIfPresent(String.self, forKey: .prompt)
+            ?? container.decodeIfPresent(String.self, forKey: .initialPrompt)
+    }
 
     var threadDescriptor: CodexThreadDescriptor {
         CodexThreadDescriptor(
             id: sessionId,
-            title: name ?? "",
+            title: name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? firstPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? "",
             preview: "",
             cwd: cwd ?? "",
             parentThreadID: nil,
@@ -29,6 +49,53 @@ private struct ClaudeAgentSession: Decodable {
             status: .idle
         )
     }
+}
+
+/// Claude Desktop keeps one compact metadata file per Code-tab session. This
+/// is the same index the Desktop sidebar uses and, unlike `claude agents`,
+/// includes inactive sessions as well. The fields below are intentionally
+/// limited to identity, title, project and timestamps; transcript contents are
+/// never read.
+struct ClaudeDesktopSession: Decodable, Sendable {
+    let sessionId: String
+    let cliSessionId: String?
+    let title: String?
+    let cwd: String?
+    let originCwd: String?
+    let createdAt: Double?
+    let lastActivityAt: Double?
+    let isArchived: Bool?
+
+    var projectPath: String { originCwd ?? cwd ?? "" }
+
+    var threadDescriptor: CodexThreadDescriptor {
+        let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let shortID = String(sessionId.replacingOccurrences(of: "local_", with: "").prefix(8))
+        let project = projectPath.isEmpty ? nil : URL(fileURLWithPath: projectPath).lastPathComponent
+        return CodexThreadDescriptor(
+            id: sessionId,
+            title: cleanTitle.isEmpty ? "Claude-Sitzung · \(shortID)" : cleanTitle,
+            preview: [project, shortID].compactMap { $0 }.joined(separator: " · "),
+            cwd: projectPath,
+            parentThreadID: nil,
+            agentNickname: nil,
+            agentRole: "Claude Desktop",
+            updatedAt: Self.date(milliseconds: lastActivityAt ?? createdAt) ?? .distantPast,
+            status: .idle,
+            alternateID: cliSessionId,
+            navigationID: cliSessionId
+        )
+    }
+
+    private static func date(milliseconds: Double?) -> Date? {
+        guard let milliseconds else { return nil }
+        return Date(timeIntervalSince1970: milliseconds / 1000)
+    }
+}
+
+private struct ClaudeSessionSnapshot: Sendable {
+    var threads: [CodexThreadDescriptor]
+    var cliToDesktopID: [String: String]
 }
 
 private struct ClaudeBridgeError: Error {
@@ -57,6 +124,10 @@ final class ClaudeAgentBridge: AgentBridge {
     /// The last hook event seen per session, the running state status is
     /// derived from; survives file truncation since it lives in memory.
     private var sessionLastEvent: [String: String] = [:]
+    /// Hook payloads use the CLI UUID while Desktop navigation uses its
+    /// `local_…` session ID. Keep the bridge between both identities so live
+    /// status and direct opening refer to the same visible row.
+    private var cliToDesktopID: [String: String] = [:]
 
     private(set) var connectionState: CodexBridgeConnectionState = .disconnected
     private(set) var lastError: String?
@@ -67,7 +138,11 @@ final class ClaudeAgentBridge: AgentBridge {
     private(set) var hooksStatusError: String?
 
     var onThreads: (([CodexThreadDescriptor]) -> Void)?
-    var onStatus: ((String, CodexAgentStatus) -> Void)?
+    var onStatus: ((String, CodexAgentStatus, AgentStatusSource) -> Void)?
+
+    var liveStatusAvailability: AgentLiveStatusAvailability {
+        isHooksStatusEnabled ? .available : .notActivated
+    }
 
     init() {
         isHooksStatusEnabled = UserDefaults.standard.bool(forKey: Self.hooksEnabledDefaultsKey)
@@ -128,6 +203,10 @@ final class ClaudeAgentBridge: AgentBridge {
         pollOnce()
     }
 
+    func refreshRecentThreads() {
+        refreshThreads()
+    }
+
     func reconnectNow() {
         stop()
         start()
@@ -135,22 +214,89 @@ final class ClaudeAgentBridge: AgentBridge {
 
     private func pollOnce() {
         Task.detached(priority: .utility) { [weak self] in
-            let result = await Self.runAgentsJSON()
+            let result = await Self.loadSessionSnapshot()
             await self?.handlePollResult(result)
         }
     }
 
-    private func handlePollResult(_ result: Result<[ClaudeAgentSession], ClaudeBridgeError>) {
+    private func handlePollResult(_ result: Result<ClaudeSessionSnapshot, ClaudeBridgeError>) {
         switch result {
-        case .success(let sessions):
-            connectionState = .connected(serverVersion: "claude agents")
+        case .success(let snapshot):
+            connectionState = .connected(serverVersion: "Claude Desktop · \(snapshot.threads.count) Sitzungen")
             lastError = nil
-            onThreads?(sessions.map(\.threadDescriptor))
+            cliToDesktopID = snapshot.cliToDesktopID
+            onThreads?(snapshot.threads)
         case .failure(let error):
             connectionState = .failed(error.message)
             lastError = error.message
             logger.error("\(error.message, privacy: .public)")
         }
+    }
+
+    private nonisolated static func loadSessionSnapshot() async -> Result<ClaudeSessionSnapshot, ClaudeBridgeError> {
+        let desktopSessions = loadDesktopSessions()
+        let activeResult = await runAgentsJSON()
+        let activeSessions: [ClaudeAgentSession]
+        switch activeResult {
+        case .success(let sessions):
+            activeSessions = sessions
+        case .failure where !desktopSessions.isEmpty:
+            activeSessions = []
+        case .failure(let error):
+            return .failure(error)
+        }
+
+        var cliToDesktopID: [String: String] = [:]
+        var threadsByID: [String: CodexThreadDescriptor] = [:]
+        for session in desktopSessions where session.isArchived != true {
+            threadsByID[session.sessionId] = session.threadDescriptor
+            if let cliID = session.cliSessionId, !cliID.isEmpty {
+                cliToDesktopID[cliID] = session.sessionId
+            }
+        }
+
+        for active in activeSessions {
+            if let desktopID = cliToDesktopID[active.sessionId], var descriptor = threadsByID[desktopID] {
+                descriptor.status = .running
+                descriptor.updatedAt = .now
+                threadsByID[desktopID] = descriptor
+            } else {
+                var descriptor = active.threadDescriptor
+                descriptor.status = .running
+                descriptor.preview = [
+                    descriptor.projectName,
+                    String(active.sessionId.prefix(8))
+                ].compactMap { $0 }.joined(separator: " · ")
+                threadsByID[descriptor.id] = descriptor
+            }
+        }
+
+        return .success(ClaudeSessionSnapshot(
+            threads: threadsByID.values.sorted { $0.updatedAt > $1.updatedAt },
+            cliToDesktopID: cliToDesktopID
+        ))
+    }
+
+    private nonisolated static func loadDesktopSessions() -> [ClaudeDesktopSession] {
+        guard let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Claude/claude-code-sessions", isDirectory: true),
+            let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else { return [] }
+
+        var sessions: [ClaudeDesktopSession] = []
+        for case let url as URL in enumerator {
+            guard url.pathExtension == "json",
+                  url.lastPathComponent.hasPrefix("local_"),
+                  let data = try? Data(contentsOf: url),
+                  let session = try? JSONDecoder().decode(ClaudeDesktopSession.self, from: data)
+            else { continue }
+            sessions.append(session)
+        }
+        return sessions
     }
 
     private nonisolated static func runAgentsJSON() async -> Result<[ClaudeAgentSession], ClaudeBridgeError> {
@@ -345,8 +491,10 @@ final class ClaudeAgentBridge: AgentBridge {
             changedSessions.insert(sessionId)
         }
 
-        for sessionId in changedSessions where trackedThreadIDs.contains(sessionId) {
-            onStatus?(sessionId, Self.status(forHookEvent: sessionLastEvent[sessionId]))
+        for sessionId in changedSessions {
+            let visibleID = cliToDesktopID[sessionId] ?? sessionId
+            guard trackedThreadIDs.contains(visibleID) else { continue }
+            onStatus?(visibleID, Self.status(forHookEvent: sessionLastEvent[sessionId]), .hook)
         }
 
         if size > UInt64(Self.statusFileTruncateThreshold) {

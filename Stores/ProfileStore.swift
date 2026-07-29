@@ -88,7 +88,9 @@ final class ProfileStore {
     }
     var selectedProfileID: UUID {
         didSet {
+            guard selectedProfileID != oldValue else { return }
             UserDefaults.standard.set(selectedProfileID.uuidString, forKey: Self.selectedProfileDefaultsKey)
+            onSelectedProfileChange?()
         }
     }
     /// Which built-in profiles (Codex/Claude) are currently offered for
@@ -128,6 +130,7 @@ final class ProfileStore {
     /// `didSet` below), so `AppState` can debounce an automatic hardware
     /// sync without `ProfileStore` needing to know `DeviceService` exists.
     var onChange: (() -> Void)?
+    var onSelectedProfileChange: (() -> Void)?
 
     init(catalog: CodexActionCatalog, claudeCatalog: CodexActionCatalog, persistenceURL: URL? = nil) {
         self.catalog = catalog
@@ -158,7 +161,8 @@ final class ProfileStore {
         let refreshedClaude = Self.migrateStaleClaudeCatalogBindings(in: taggedApps, claudeCatalog: claudeCatalog)
         let encoderMigrated = Self.migrateLegacyCodexReasoningBindings(in: refreshedClaude)
         let dictationTagged = Self.migrateLegacyDictationBindings(in: encoderMigrated, catalog: catalog)
-        let idleColorMigrated = Self.migrateLegacyGreenIdleReaction(in: dictationTagged)
+        let petMigrated = Self.migrateLegacyPetActions(in: dictationTagged)
+        let idleColorMigrated = Self.migrateLegacyGreenIdleReaction(in: petMigrated)
         let initial = Self.applyDictationSource(dictationSource, to: idleColorMigrated, catalog: catalog, claudeCatalog: claudeCatalog)
         self.profiles = initial
         let codexID = initial.first(where: { $0.name == "Codex" })?.id
@@ -248,6 +252,9 @@ final class ProfileStore {
     /// `slot` chooses whether the trigger becomes the tap or the hold action,
     /// so the wizard offers the same configurable actions in both places.
     func assignConfigurableCodexAction(_ definition: CodexActionDefinition, trigger: String, to control: HardwareControl, slot: ActionSlot = .tap, kind: ActionKind = .codexShortcut) {
+        // Keep manual/local assignments collision-free for future wizard runs,
+        // including assignments restored from a different profile.
+        CodexTriggerRegistry.reserve(trigger)
         let action = KeyboardAction(
             kind: kind,
             label: definition.title,
@@ -351,6 +358,32 @@ final class ProfileStore {
         profile.layers[index].blinkGreen = green
         profile.layers[index].blinkBlue = blue
         profile.layers[index].blinkCount = max(1, count)
+        profile.layers[index].confirmationRepeatCount = max(1, count)
+        profile.updatedAt = .now
+        replace(profile)
+    }
+
+    func updateLayerConfirmation(
+        _ layerID: UUID,
+        effect: LEDReactionEffect,
+        red: UInt8,
+        green: UInt8,
+        blue: UInt8,
+        brightness: UInt8,
+        durationMilliseconds: Int,
+        repeats: Int
+    ) {
+        var profile = selectedProfile
+        guard let index = profile.layers.firstIndex(where: { $0.id == layerID }) else { return }
+        profile.layers[index].confirmationEffect = effect
+        profile.layers[index].blinkRed = red
+        profile.layers[index].blinkGreen = green
+        profile.layers[index].blinkBlue = blue
+        profile.layers[index].confirmationBrightness = brightness
+        profile.layers[index].confirmationDurationMilliseconds = max(80, durationMilliseconds)
+        profile.layers[index].confirmationRepeatCount = max(1, repeats)
+        // Keep old readers and exported profiles coherent too.
+        profile.layers[index].blinkCount = max(1, repeats)
         profile.updatedAt = .now
         replace(profile)
     }
@@ -412,7 +445,9 @@ final class ProfileStore {
         commitChange()
     }
 
-    func markSynchronized() {
+    func markSynchronized(profileID: UUID? = nil, layerID: UUID? = nil) {
+        if let profileID, profileID != selectedProfileID { return }
+        if let layerID, selectedProfile.activeLayerID != layerID { return }
         hasUnsyncedChanges = false
     }
 
@@ -643,6 +678,43 @@ final class ProfileStore {
                 migrated.setAction(globalDictation, for: control)
                 changed = true
             }
+            return changed ? migrated : profile
+        }
+    }
+
+    /// Codex exposes one `openPetOverlay` command. Early Agent Micro builds
+    /// incorrectly modeled it as separate wake/tuck actions. Preserve every
+    /// user's chosen trigger while collapsing either historic id onto the
+    /// real toggle action.
+    private static func migrateLegacyPetActions(in profiles: [MacropadProfile]) -> [MacropadProfile] {
+        let retiredIDs: Set<String> = ["wake-pet", "tuck-away-pet"]
+        func migratedAction(_ action: KeyboardAction?) -> KeyboardAction? {
+            guard let action, let id = action.codexActionID, retiredIDs.contains(id) else { return action }
+            return KeyboardAction(
+                kind: action.kind,
+                label: "Pet anzeigen",
+                icon: "pawprint",
+                deviceMacro: action.deviceMacro,
+                codexActionID: "toggle-pet"
+            )
+        }
+
+        return profiles.map { profile in
+            var migrated = profile
+            var changed = false
+            for layerIndex in migrated.layers.indices {
+                for bindingIndex in migrated.layers[layerIndex].controls.indices {
+                    let binding = migrated.layers[layerIndex].controls[bindingIndex]
+                    let tap = migratedAction(binding.action)
+                    let hold = migratedAction(binding.holdAction)
+                    if tap != binding.action || hold != binding.holdAction {
+                        migrated.layers[layerIndex].controls[bindingIndex].action = tap ?? .disabled
+                        migrated.layers[layerIndex].controls[bindingIndex].holdAction = hold
+                        changed = true
+                    }
+                }
+            }
+            if changed { migrated.updatedAt = .now }
             return changed ? migrated : profile
         }
     }

@@ -12,17 +12,17 @@ enum KeystrokeSynthesizer {
     /// `true` when every comma-separated chord in the expression maps to a
     /// known virtual key. Media, mouse and other non-keyboard expressions are
     /// rejected so the UI can refuse to build an un-synthesizable hold action.
-    static func canSynthesize(_ macro: String?) -> Bool {
+    static func canSynthesize(_ macro: String?, layout: KeyboardLayout = .automatic) -> Bool {
         guard let chords = chords(from: macro) else { return false }
-        return chords.allSatisfy { mapChord($0) != nil }
+        return chords.allSatisfy { mapChord($0, layout: layout.resolved) != nil }
     }
 
     @discardableResult
-    static func post(macro: String?) -> Bool {
+    static func post(macro: String?, layout: KeyboardLayout = .automatic) -> Bool {
         guard let chords = chords(from: macro) else { return false }
         var mapped: [(key: CGKeyCode, flags: CGEventFlags)] = []
         for chord in chords {
-            guard let resolved = mapChord(chord) else { return false }
+            guard let resolved = mapChord(chord, layout: layout.resolved) else { return false }
             mapped.append(resolved)
         }
         let source = CGEventSource(stateID: .hidSystemState)
@@ -49,10 +49,22 @@ enum KeystrokeSynthesizer {
         up?.post(tap: .cghidEventTap)
     }
 
-    private static func mapChord(_ chord: String) -> (key: CGKeyCode, flags: CGEventFlags)? {
+    private static func mapChord(
+        _ chord: String,
+        layout: KeyboardLayout
+    ) -> (key: CGKeyCode, flags: CGEventFlags)? {
         let parts = chord.split(separator: "-").map(String.init)
-        guard let keyName = parts.last, let key = virtualKeyCodes[keyName] else { return nil }
-        var flags: CGEventFlags = []
+        guard let keyName = parts.last else { return nil }
+        let intrinsic: (key: Int, flags: CGEventFlags)?
+        if layout == .germanISO, let german = germanVirtualKeys[keyName] {
+            intrinsic = german
+        } else if let key = virtualKeyCodes[keyName] {
+            intrinsic = (key, [])
+        } else {
+            intrinsic = nil
+        }
+        guard let intrinsic else { return nil }
+        var flags = intrinsic.flags
         for modifier in parts.dropLast() {
             switch modifier {
             case "cmd", "gui", "win", "rcmd", "rwin": flags.insert(.maskCommand)
@@ -62,7 +74,7 @@ enum KeystrokeSynthesizer {
             default: return nil
             }
         }
-        return (CGKeyCode(key), flags)
+        return (CGKeyCode(intrinsic.key), flags)
     }
 
     /// US-ANSI virtual key codes keyed by the macro token names CodexPad uses.
@@ -91,5 +103,17 @@ enum KeystrokeSynthesizer {
         "f7": 0x62, "f8": 0x64, "f9": 0x65, "f10": 0x6D, "f11": 0x67, "f12": 0x6F,
         "f13": 0x69, "f14": 0x6B, "f15": 0x71, "f16": 0x6A, "f17": 0x40,
         "f18": 0x4F, "f19": 0x50, "f20": 0x5A
+    ]
+
+    /// Character-correct virtual keys for the German ISO input source. Most
+    /// letters/digits share the ANSI position; punctuation does not. In
+    /// particular "/" is ⇧7, while the US slash position is "-" on German
+    /// keyboards (and therefore used to trigger Codex's zoom-out command).
+    private static let germanVirtualKeys: [String: (key: Int, flags: CGEventFlags)] = [
+        "slash": (0x1A, .maskShift),
+        "minus": (0x2C, []),
+        "semicolon": (0x2B, .maskShift),
+        "comma": (0x2B, []),
+        "period": (0x2F, [])
     ]
 }

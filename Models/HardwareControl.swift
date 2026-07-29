@@ -8,23 +8,23 @@ enum HardwareControl: String, CaseIterable, Codable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .key1: "Taste 1"
-        case .key2: "Taste 2"
-        case .key3: "Taste 3"
-        case .key4: "Taste 4"
-        case .key5: "Taste 5"
-        case .key6: "Taste 6"
-        case .encoderLeft: "Encoder links"
-        case .encoderPress: "Encoder drücken"
-        case .encoderRight: "Encoder rechts"
+        case .key1: AppLanguage.text("Taste 1", "Key 1")
+        case .key2: AppLanguage.text("Taste 2", "Key 2")
+        case .key3: AppLanguage.text("Taste 3", "Key 3")
+        case .key4: AppLanguage.text("Taste 4", "Key 4")
+        case .key5: AppLanguage.text("Taste 5", "Key 5")
+        case .key6: AppLanguage.text("Taste 6", "Key 6")
+        case .encoderLeft: AppLanguage.text("Encoder links", "Dial left")
+        case .encoderPress: AppLanguage.text("Encoder drücken", "Press dial")
+        case .encoderRight: AppLanguage.text("Encoder rechts", "Dial right")
         }
     }
 
     var shortTitle: String {
         switch self {
-        case .encoderLeft: "Links drehen"
-        case .encoderPress: "Drehrad drücken"
-        case .encoderRight: "Rechts drehen"
+        case .encoderLeft: AppLanguage.text("Links drehen", "Turn left")
+        case .encoderPress: AppLanguage.text("Drehrad drücken", "Press dial")
+        case .encoderRight: AppLanguage.text("Rechts drehen", "Turn right")
         default: title
         }
     }
