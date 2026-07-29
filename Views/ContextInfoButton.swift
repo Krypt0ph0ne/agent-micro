@@ -15,7 +15,7 @@ struct ContextInfoButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(title)
+        .help("\(title)\n\n\(message)")
         .accessibilityLabel("Info: \(title)")
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 7) {

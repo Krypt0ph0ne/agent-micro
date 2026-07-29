@@ -94,10 +94,6 @@ struct LEDControlPanel: View {
 
     private var baseEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("So sehen deine Tasten aus, solange nichts passiert. Reaktionen legen sich bei Ereignissen kurz darüber und kehren danach hierher zurück.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             HStack(spacing: 8) {
                 EditorToggleRail(
                     isOn: idleBinding(\.enabled),
@@ -614,11 +610,8 @@ private struct LEDReactionEditor: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(event.title)
                         .font(.caption.weight(.medium))
-                    Text(event.detail)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
+                ContextInfoButton(title: event.title, message: event.detail)
                 Spacer(minLength: 4)
                 Button {
                     appState.previewReaction(event)

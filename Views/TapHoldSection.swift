@@ -150,7 +150,9 @@ struct TapHoldSection: View {
                     .foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Halten").font(.caption2).foregroundStyle(.secondary)
-                    Text(binding.holdAction?.displayLabel ?? "Aktion wählen").font(.body.weight(.medium)).lineLimit(1)
+                    Text(binding.holdAction?.displayLabel ?? "Aktion wählen")
+                        .font(.body.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
                 if let macro = binding.holdAction?.displayShortcut {
@@ -223,7 +225,9 @@ struct TapHoldSection: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: action.icon).frame(width: 20).foregroundStyle(.tint)
-                                Text(action.title).font(.caption.weight(.medium)).lineLimit(1)
+                                Text(action.title)
+                                    .font(.caption.weight(.medium))
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Spacer(minLength: 4)
                                 if action.id == binding.holdAction?.codexActionID {
                                     Image(systemName: "checkmark").foregroundStyle(.tint)
@@ -287,7 +291,9 @@ struct TapHoldSection: View {
             Image(systemName: icon).frame(width: 22).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.caption2).foregroundStyle(.secondary)
-                Text(value).font(.body.weight(.medium)).lineLimit(1)
+                Text(value)
+                    .font(.body.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
             Text(macro).font(.caption2.monospaced()).foregroundStyle(.secondary)

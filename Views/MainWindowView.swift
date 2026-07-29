@@ -20,7 +20,8 @@ struct MainWindowView: View {
             header
             Divider()
             DeviceEditorView(appState: appState)
-                .padding(14)
+                .padding(12)
+                .frame(maxHeight: .infinity)
             Divider()
             actionBar
         }
