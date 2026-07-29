@@ -149,7 +149,7 @@ private struct ThreadPickerPanelView: View {
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
                     }
                 }
-                Text([thread.projectName, thread.status.title].compactMap { $0 }.joined(separator: " · "))
+                Text(detail(for: thread))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -189,5 +189,13 @@ private struct ThreadPickerPanelView: View {
         case .failed: .red
         case .interrupted: .purple
         }
+    }
+
+    private func detail(for thread: CodexThreadDescriptor) -> String {
+        var parts = [thread.projectName, thread.status.title].compactMap { $0 }
+        if thread.title.hasPrefix("Claude-Sitzung ohne Titel") {
+            parts.insert(AppLanguage.text("Kein Titel in Claude Desktop", "No title in Claude Desktop"), at: min(1, parts.count))
+        }
+        return parts.joined(separator: " · ")
     }
 }

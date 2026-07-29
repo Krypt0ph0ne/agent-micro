@@ -74,7 +74,10 @@ struct ClaudeDesktopSession: Decodable, Sendable {
         let project = projectPath.isEmpty ? nil : URL(fileURLWithPath: projectPath).lastPathComponent
         return CodexThreadDescriptor(
             id: sessionId,
-            title: cleanTitle.isEmpty ? "Claude-Sitzung · \(shortID)" : cleanTitle,
+            // Claude Desktop keeps the session even before it has generated a
+            // sidebar title. Make that explicit instead of exposing a UUID as
+            // if it were the title; it is unrelated to whether a PR merged.
+            title: cleanTitle.isEmpty ? "Claude-Sitzung ohne Titel · \(shortID)" : cleanTitle,
             preview: [project, shortID].compactMap { $0 }.joined(separator: " · "),
             cwd: projectPath,
             parentThreadID: nil,

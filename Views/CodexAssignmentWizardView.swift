@@ -132,6 +132,13 @@ struct CodexAssignmentWizardView: View {
     }
 
     private func prepare(_ action: CodexActionDefinition) {
+        let app = appState.profiles.selectedProfile.automationApp ?? .codex
+        if let configured = CodexTriggerRegistry.trigger(for: action.id, app: app) {
+            // This action has already been set up in Codex. Reuse exactly that
+            // trigger when it moves to a different pad control.
+            trigger = configured
+            return
+        }
         trigger = CodexTriggerRegistry.reserveNextFreeTrigger(
             in: appState.profiles.profiles,
             keeping: currentTrigger(for: action.id)
@@ -239,6 +246,9 @@ struct CodexAssignmentWizardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(CodexTriggerPool.candidates.count) Kandidaten: A–Z, 0–9 und F1–F12.")
                 Text("Codex veröffentlicht seine belegten Shortcuts nicht. Ist einer dort schon belegt, markiere ihn hier; Agent Micro schlägt ihn danach nie wieder vor.")
+                if !knownTriggers.isEmpty {
+                    Text("Für frühere Einrichtungen: Auswählen › Bereits eingerichtet und den bereits in Codex verwendeten Trigger einmal übernehmen.")
+                }
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -254,11 +264,21 @@ struct CodexAssignmentWizardView: View {
             triggerMenu("Buchstaben", candidates: CodexTriggerPool.letterCandidates)
             triggerMenu("Zahlen", candidates: CodexTriggerPool.numberCandidates)
             triggerMenu("F-Tasten", candidates: CodexTriggerPool.functionKeyCandidates)
+            if !knownTriggers.isEmpty {
+                Divider()
+                Menu("Bereits eingerichtet") {
+                    ForEach(knownTriggers, id: \.self) { candidate in
+                        Button(CodexTriggerPool.displayLabel(for: candidate)) {
+                            trigger = candidate
+                        }
+                    }
+                }
+            }
         } label: {
             Label("Auswählen", systemImage: "chevron.up.chevron.down")
         }
         .controlSize(.small)
-        .disabled(availableTriggers.isEmpty)
+        .disabled(availableTriggers.isEmpty && knownTriggers.isEmpty)
     }
 
     private var availableTriggers: [String] {
@@ -266,6 +286,15 @@ struct CodexAssignmentWizardView: View {
             in: appState.profiles.profiles,
             keeping: trigger
         )
+    }
+
+    /// Prior versions persisted a reservation but not which action it belonged
+    /// to. Let the user recover that known Codex binding once; the subsequent
+    /// transfer writes the durable action-to-trigger mapping.
+    private var knownTriggers: [String] {
+        let fromProfiles = CodexTriggerPool.usedTriggers(in: appState.profiles.profiles)
+        let known = fromProfiles.union(CodexTriggerRegistry.reservedTriggers())
+        return CodexTriggerPool.candidates.filter { known.contains($0) && $0 != trigger }
     }
 
     @ViewBuilder

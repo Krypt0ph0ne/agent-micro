@@ -165,6 +165,9 @@ final class ProfileStore {
         let idleColorMigrated = Self.migrateLegacyGreenIdleReaction(in: petMigrated)
         let initial = Self.applyDictationSource(dictationSource, to: idleColorMigrated, catalog: catalog, claudeCatalog: claudeCatalog)
         self.profiles = initial
+        // Backfill the action-to-trigger directory from every saved layer so
+        // existing Codex setup survives moving an action to another control.
+        CodexTriggerRegistry.importExistingAssignments(from: initial)
         let codexID = initial.first(where: { $0.name == "Codex" })?.id
         let persistedID = UserDefaults.standard.string(forKey: Self.selectedProfileDefaultsKey).flatMap(UUID.init(uuidString:))
         if let persistedID, initial.contains(where: { $0.id == persistedID }) {
@@ -252,9 +255,10 @@ final class ProfileStore {
     /// `slot` chooses whether the trigger becomes the tap or the hold action,
     /// so the wizard offers the same configurable actions in both places.
     func assignConfigurableCodexAction(_ definition: CodexActionDefinition, trigger: String, to control: HardwareControl, slot: ActionSlot = .tap, kind: ActionKind = .codexShortcut) {
-        // Keep manual/local assignments collision-free for future wizard runs,
-        // including assignments restored from a different profile.
-        CodexTriggerRegistry.reserve(trigger)
+        let app: AutomationApp = kind == .claudeShortcut ? .claude : .codex
+        // Keep both the reservation and the action's established trigger,
+        // including when the action moves to another control or layer.
+        CodexTriggerRegistry.remember(trigger, for: definition.id, app: app)
         let action = KeyboardAction(
             kind: kind,
             label: definition.title,
