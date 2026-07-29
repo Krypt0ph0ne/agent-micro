@@ -70,6 +70,7 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     /// `ClaudeReasoningAutomationService` listen to the same private F22–F24
     /// HID triggers, so only the one matching the active profile may act.
     private let isActiveProfile: () -> Bool
+    var isExternallySuspended: () -> Bool = { false }
     private static let preferenceKey = "CodexPad.encoderAutomationEnabled"
     private static let migrationKey = "CodexPad.simpleEncoderV5"
     /// The dial must be held this long before a press starts driving the
@@ -163,7 +164,8 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     /// read from the same protocol for consistency, since it is unaffected by
     /// whichever macro happens to be flashed for the dial.
     func handlePhysicalEvent(_ event: CodexPadPhysicalEvent) {
-        guard isActiveProfile(), let control = HardwareControl(reportedControlIndex: event.control) else { return }
+        guard isActiveProfile(), !isExternallySuspended(),
+              let control = HardwareControl(reportedControlIndex: event.control) else { return }
         switch control {
         case .encoderPress:
             switch event.phase {
@@ -389,7 +391,8 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     }
 
     private func handleHIDValue(usagePage: Int, usage: Int, value: Int) {
-        guard isActiveProfile(), usagePage == 0x07, [0x68, 0x69, 0x6A, 0x71, 0x73].contains(usage) else { return }
+        guard isActiveProfile(), !isExternallySuspended(),
+              usagePage == 0x07, [0x68, 0x69, 0x6A, 0x71, 0x73].contains(usage) else { return }
 
         // The encoder press (F23) needs both edges to measure hold duration,
         // which this generic keyboard-HID path cannot reliably deliver on the

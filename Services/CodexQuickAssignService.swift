@@ -1,121 +1,234 @@
 import Foundation
 import Observation
 
-/// Assigns a Codex thread to a button just by holding it — the "no need to
-/// keep the CodexPad window open" path for Belegung. Works the same whether
-/// the button is currently unassigned or already holds a different thread:
-/// `CodexThreadStore.assign` replaces any existing assignment for that
-/// control outright, so a hold on an assigned key is a one-step reassignment
-/// rather than an unassign-then-assign dance.
-///
-/// Fires right when the hold threshold elapses — not on release — so the
-/// confirmation LED lands while the button is still held down and the
-/// release simply ends the press. Only ever acts on a control the user has
-/// already turned into a Codex agent key at least once (`kind == .codexAgent`);
-/// every other control's hold is left alone, e.g. a dictation key's own
-/// hold-to-record must never be reinterpreted as a reassignment.
+struct ThreadPickerPresentation: Equatable {
+    let control: HardwareControl
+    let appName: String
+    var threads: [CodexThreadDescriptor]
+    var selectedIndex: Int?
+    let assignedThreadID: String?
+
+    var selectedThread: CodexThreadDescriptor? {
+        guard let selectedIndex, threads.indices.contains(selectedIndex) else { return nil }
+        return threads[selectedIndex]
+    }
+}
+
+/// Owns the exclusive agent-key gesture:
+/// - release before 900 ms opens the assigned thread;
+/// - crossing the threshold opens a hardware-driven recent-thread picker;
+/// - encoder rotation changes its highlight;
+/// - releasing the same agent key confirms the highlight.
 @MainActor
 @Observable
 final class CodexQuickAssignService {
-    /// `UserDefaults` key shared with the Settings toggle.
-    static let enabledDefaultsKey = "quickAssignEnabled"
-
-    /// Deliberately longer than the normal tap/hold default
-    /// (`ControlBinding.defaultHoldThresholdMilliseconds`, 320ms) since this
-    /// assigns state rather than firing a one-off keystroke — an accidental
-    /// trigger is more disruptive here.
     static let holdThresholdMilliseconds = 900
+    static let maximumPickerThreads = 10
+    private static let selectionSafetyTimeoutSeconds: TimeInterval = 20
 
     private struct PendingPress {
         let cancel: () -> Void
     }
 
     private var pendingPresses: [HardwareControl: PendingPress] = [:]
+    private var selectionTimeoutTask: Task<Void, Never>?
 
     private let isEnabled: () -> Bool
     private let isDesignatedAgentControl: (HardwareControl) -> Bool
     private let isTapHoldConfigured: (HardwareControl) -> Bool
-    /// A thread explicitly identified via a copied session ID, if the
-    /// clipboard currently holds one — takes priority over `fallbackThread`
-    /// since it's a deliberate choice made in Codex itself, not a guess.
-    private let clipboardThread: () -> CodexThreadDescriptor?
-    /// The best guess absent a clipboard hint: the most recently active
-    /// thread not already bound to another key.
-    private let fallbackThread: () -> CodexThreadDescriptor?
-    /// Schedules `fire` after `interval` seconds and returns a closure that
-    /// cancels it. Real presses use a `Timer`; tests inject a fake so they
-    /// can trigger or cancel the fire deterministically without sleeping.
-    private let schedule: @MainActor (TimeInterval, @escaping () -> Void) -> () -> Void
+    private let candidateThreads: (HardwareControl) -> [CodexThreadDescriptor]
+    private let assignedThreadID: (HardwareControl) -> String?
+    private let appName: () -> String
+    private let schedule: @MainActor (TimeInterval, @escaping @MainActor @Sendable () -> Void) -> () -> Void
 
-    /// Set after `init` (rather than passed in) so callers don't need `self`
-    /// to be fully initialized yet — matches `CodexPadEventService.onPhysicalEvent`
-    /// and friends elsewhere in this codebase.
+    private(set) var picker: ThreadPickerPresentation?
+    var isSelecting: Bool { picker != nil }
+
     var onAssign: ((CodexThreadDescriptor, HardwareControl) -> Void)?
+    var onTap: ((HardwareControl) -> Void)?
+    var onPickerWillOpen: (() -> Void)?
+    var onPickerChanged: ((ThreadPickerPresentation?) -> Void)?
+    var onSelectionStarted: (() -> Void)?
+    /// `true` means a different/new thread was assigned; `false` is a safe
+    /// no-op or cancellation and must restore lighting without a flash.
+    var onSelectionFinished: ((Bool) -> Void)?
 
     init(
         isEnabled: @escaping () -> Bool,
         isDesignatedAgentControl: @escaping (HardwareControl) -> Bool,
         isTapHoldConfigured: @escaping (HardwareControl) -> Bool,
-        clipboardThread: @escaping () -> CodexThreadDescriptor? = { nil },
-        fallbackThread: @escaping () -> CodexThreadDescriptor?,
-        schedule: @escaping @MainActor (TimeInterval, @escaping () -> Void) -> () -> Void = CodexQuickAssignService.timerSchedule
+        candidateThreads: @escaping (HardwareControl) -> [CodexThreadDescriptor],
+        assignedThreadID: @escaping (HardwareControl) -> String?,
+        appName: @escaping () -> String,
+        schedule: @escaping @MainActor (TimeInterval, @escaping @MainActor @Sendable () -> Void) -> () -> Void = CodexQuickAssignService.timerSchedule
     ) {
         self.isEnabled = isEnabled
         self.isDesignatedAgentControl = isDesignatedAgentControl
         self.isTapHoldConfigured = isTapHoldConfigured
-        self.clipboardThread = clipboardThread
-        self.fallbackThread = fallbackThread
+        self.candidateThreads = candidateThreads
+        self.assignedThreadID = assignedThreadID
+        self.appName = appName
         self.schedule = schedule
     }
 
-    private static func timerSchedule(interval: TimeInterval, fire: @escaping () -> Void) -> () -> Void {
+    private static func timerSchedule(interval: TimeInterval, fire: @escaping @MainActor @Sendable () -> Void) -> () -> Void {
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { _ in
-            fire()
+            Task { @MainActor in fire() }
         }
         return { timer.invalidate() }
     }
 
-    /// Codex lets you copy a session's UUID (e.g. from its own UI); this
-    /// pulls one back out of arbitrary clipboard text so a hold can act on
-    /// "whatever chat I just copied the ID of", not just guess by recency.
-    nonisolated static func extractThreadID(from clipboardText: String) -> String? {
-        let pattern = #"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"#
-        guard let range = clipboardText.range(of: pattern, options: .regularExpression) else { return nil }
-        return String(clipboardText[range])
+    nonisolated static func recentCandidates(
+        from threads: [CodexThreadDescriptor],
+        assignedThreadID: String?,
+        limit: Int = 10
+    ) -> [CodexThreadDescriptor] {
+        guard limit > 0 else { return [] }
+        let sorted = threads.sorted { $0.updatedAt > $1.updatedAt }
+        var result = Array(sorted.prefix(limit))
+        guard
+            let assignedThreadID,
+            !result.contains(where: { $0.id == assignedThreadID }),
+            let assigned = sorted.first(where: { $0.id == assignedThreadID })
+        else { return result }
+        if result.count == limit { result.removeLast() }
+        result.append(assigned)
+        return result.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     func handle(_ event: CodexPadPhysicalEvent) {
-        guard
-            let control = HardwareControl(reportedControlIndex: event.control),
-            HardwareControl.buttons.contains(control)
-        else { return }
+        guard let control = HardwareControl(reportedControlIndex: event.control) else { return }
 
+        if control == .encoderLeft || control == .encoderRight {
+            guard event.phase == .triggered, isSelecting else { return }
+            rotate(towardOlder: control == .encoderRight)
+            return
+        }
+
+        guard HardwareControl.buttons.contains(control) else { return }
         switch event.phase {
         case .pressed:
-            cancelPending(control)
-            guard isEnabled(), isDesignatedAgentControl(control), !isTapHoldConfigured(control) else { return }
-            let cancel = schedule(Double(Self.holdThresholdMilliseconds) / 1_000) { [weak self] in
-                self?.fireAssign(control)
-            }
-            pendingPresses[control] = PendingPress(cancel: cancel)
+            beginPendingPress(control)
         case .released:
-            // Releasing before the threshold elapses is the "just a tap"
-            // case: cancel the pending fire so nothing gets assigned. If the
-            // threshold already fired, `fireAssign` has already cleared the
-            // entry, so this is a no-op — the release doesn't undo it.
-            cancelPending(control)
+            if picker?.control == control {
+                commitSelection()
+            } else if cancelPending(control) {
+                onTap?(control)
+            }
         case .triggered:
-            break
+            guard isEnabled(), isDesignatedAgentControl(control), !isTapHoldConfigured(control) else { return }
+            onTap?(control)
         }
     }
 
-    private func cancelPending(_ control: HardwareControl) {
-        pendingPresses.removeValue(forKey: control)?.cancel()
+    func refreshCandidates() {
+        guard let current = picker else { return }
+        let previouslySelectedID = current.selectedThread?.id
+        let threads = candidateThreads(current.control)
+        let selectedIndex = selectedIndex(
+            in: threads,
+            preferredID: previouslySelectedID ?? current.assignedThreadID
+        )
+        picker = ThreadPickerPresentation(
+            control: current.control,
+            appName: current.appName,
+            threads: threads,
+            selectedIndex: selectedIndex,
+            assignedThreadID: current.assignedThreadID
+        )
+        onPickerChanged?(picker)
     }
 
-    private func fireAssign(_ control: HardwareControl) {
+    func cancelSelection() {
+        pendingPresses.values.forEach { $0.cancel() }
+        pendingPresses.removeAll()
+        guard picker != nil else { return }
+        selectionTimeoutTask?.cancel()
+        selectionTimeoutTask = nil
+        picker = nil
+        onPickerChanged?(nil)
+        onSelectionFinished?(false)
+    }
+
+    private func beginPendingPress(_ control: HardwareControl) {
+        cancelPending(control)
+        guard
+            picker == nil,
+            isEnabled(),
+            isDesignatedAgentControl(control),
+            !isTapHoldConfigured(control)
+        else { return }
+        let cancel = schedule(Double(Self.holdThresholdMilliseconds) / 1_000) { [weak self] in
+            self?.beginSelection(control)
+        }
+        pendingPresses[control] = PendingPress(cancel: cancel)
+    }
+
+    private func beginSelection(_ control: HardwareControl) {
         pendingPresses.removeValue(forKey: control)
-        guard let thread = clipboardThread() ?? fallbackThread() else { return }
-        onAssign?(thread, control)
+        guard isEnabled(), isDesignatedAgentControl(control) else { return }
+        onPickerWillOpen?()
+        let assignedID = assignedThreadID(control)
+        let threads = candidateThreads(control)
+        picker = ThreadPickerPresentation(
+            control: control,
+            appName: appName(),
+            threads: threads,
+            selectedIndex: selectedIndex(in: threads, preferredID: assignedID),
+            assignedThreadID: assignedID
+        )
+        onSelectionStarted?()
+        onPickerChanged?(picker)
+        selectionTimeoutTask?.cancel()
+        selectionTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.selectionSafetyTimeoutSeconds))
+            guard !Task.isCancelled else { return }
+            self?.cancelSelection()
+        }
+    }
+
+    private func selectedIndex(in threads: [CodexThreadDescriptor], preferredID: String?) -> Int? {
+        guard !threads.isEmpty else { return nil }
+        if let preferredID {
+            return threads.firstIndex(where: { $0.id == preferredID })
+        }
+        return 0
+    }
+
+    private func rotate(towardOlder: Bool) {
+        guard var picker, !picker.threads.isEmpty else { return }
+        if let current = picker.selectedIndex {
+            picker.selectedIndex = towardOlder
+                ? (current + 1) % picker.threads.count
+                : (current - 1 + picker.threads.count) % picker.threads.count
+        } else {
+            picker.selectedIndex = towardOlder ? 0 : picker.threads.count - 1
+        }
+        self.picker = picker
+        onPickerChanged?(picker)
+    }
+
+    private func commitSelection() {
+        guard let picker else { return }
+        selectionTimeoutTask?.cancel()
+        selectionTimeoutTask = nil
+        self.picker = nil
+        onPickerChanged?(nil)
+        guard
+            let selected = picker.selectedThread,
+            selected.id != picker.assignedThreadID
+        else {
+            onSelectionFinished?(false)
+            return
+        }
+        onAssign?(selected, picker.control)
+        onSelectionFinished?(true)
+    }
+
+    @discardableResult
+    private func cancelPending(_ control: HardwareControl) -> Bool {
+        guard let pending = pendingPresses.removeValue(forKey: control) else { return false }
+        pending.cancel()
+        return true
     }
 }

@@ -15,25 +15,28 @@ struct OnboardingPermissionsStep: View {
     var body: some View {
         OnboardingStepChrome(
             icon: "lock.shield",
-            title: "Zwei Berechtigungen",
-            subtitle: "Damit Agent Micro Tasten und Drehrad empfangen und Shortcuts an Codex/Claude senden kann, braucht macOS diese Freigaben.",
-            continueTitle: isQuickMode ? "Los geht's" : "Weiter",
+            title: AppLanguage.text("Zwei Berechtigungen", "Two permissions"),
+            subtitle: AppLanguage.text(
+                "Damit Agent Micro Tasten und Drehrad empfangen und Shortcuts an Codex/Claude senden kann, braucht macOS diese Freigaben.",
+                "Agent Micro needs these macOS permissions to receive keys and dial input and send shortcuts to Codex and Claude."
+            ),
+            continueTitle: isQuickMode ? AppLanguage.text("Los geht's", "Get started") : AppLanguage.text("Weiter", "Continue"),
             onBack: onBack,
             onContinue: onContinue
         ) {
             VStack(spacing: 10) {
                 permissionRow(
-                    title: "Bedienungshilfen",
-                    detail: "Damit Agent Micro Tastenkombinationen an Codex/Claude senden kann.",
+                    title: AppLanguage.text("Bedienungshilfen", "Accessibility"),
+                    detail: AppLanguage.text("Damit Agent Micro Tastenkombinationen an Codex/Claude senden kann.", "Allows Agent Micro to send keyboard shortcuts to Codex and Claude."),
                     isGranted: monitor.hasAccessibilityPermission
                 )
                 permissionRow(
                     title: "Input Monitoring",
-                    detail: "Damit Agent Micro die Tasten und das Drehrad überhaupt empfängt.",
+                    detail: AppLanguage.text("Damit Agent Micro die Tasten und das Drehrad überhaupt empfängt.", "Allows Agent Micro to receive keys and dial input."),
                     isGranted: monitor.hasInputMonitoringPermission
                 )
                 if !bothGranted {
-                    Button("Berechtigungen anfordern") { monitor.requestPermissions() }
+                    Button(AppLanguage.text("Berechtigungen anfordern", "Request permissions")) { monitor.requestPermissions() }
                         .buttonStyle(OnboardingPrimaryButtonStyle())
                         .padding(.top, 4)
                 }
@@ -70,19 +73,22 @@ struct OnboardingAgentChoiceStep: View {
     var body: some View {
         OnboardingStepChrome(
             icon: "person.2.badge.gearshape",
-            title: "Welche Agents nutzt du?",
-            subtitle: "Das steuert, welche Profile im Menü auftauchen.",
+            title: AppLanguage.text("Welche Agents nutzt du?", "Which agents do you use?"),
+            subtitle: AppLanguage.text("Das steuert, welche Profile im Menü auftauchen.", "This controls which profiles appear in the menu."),
             continueDisabled: selected.isEmpty,
             onBack: onBack,
             onContinue: onContinue
         ) {
             VStack(spacing: 12) {
-                option(.codex, icon: "terminal.fill", title: "Nur Codex", subtitle: "Nur das Codex-Profil ist aktiv.")
-                option(.claude, icon: "sparkles", title: "Nur Claude", subtitle: "Nur das Claude-Profil ist aktiv.")
+                option(.codex, icon: "terminal.fill", title: AppLanguage.text("Nur Codex", "Codex only"), subtitle: AppLanguage.text("Nur das Codex-Profil ist aktiv.", "Only the Codex profile is active."))
+                option(.claude, icon: "sparkles", title: AppLanguage.text("Nur Claude", "Claude only"), subtitle: AppLanguage.text("Nur das Claude-Profil ist aktiv.", "Only the Claude profile is active."))
                 OnboardingChoiceCard(
                     icon: "arrow.left.arrow.right",
-                    title: "Beide",
-                    subtitle: "Codex- und Claude-Profil sind beide aktiv; weise irgendeiner Taste die Aktion „Profil wechseln“ zu, um zwischen ihnen zu springen.",
+                    title: AppLanguage.text("Beide", "Both"),
+                    subtitle: AppLanguage.text(
+                        "Codex- und Claude-Profil sind beide aktiv; weise irgendeiner Taste die Aktion „Profil wechseln“ zu, um zwischen ihnen zu springen.",
+                        "Both Codex and Claude profiles are active. Assign Switch profile to any key to move between them."
+                    ),
                     isSelected: isBoth
                 ) { selected = Set(AutomationApp.allCases) }
             }
@@ -113,8 +119,11 @@ struct OnboardingLayersStep: View {
     var body: some View {
         OnboardingStepChrome(
             icon: "square.stack.3d.up",
-            title: "Layer pro Profil",
-            subtitle: "Jedes Profil kann mehrere Layer mit unterschiedlichen Tastenbelegungen haben. Weise einer Taste die Aktion „Layer wechseln“ zu, um zwischen ihnen zu springen – das Pad blinkt kurz in der Farbe des neuen Layers, damit du auch ohne Blick in die App weißt, welcher aktiv ist.",
+            title: AppLanguage.text("Layer pro Profil", "Layers per profile"),
+            subtitle: AppLanguage.text(
+                "Jedes Profil kann mehrere Layer mit unterschiedlichen Tastenbelegungen haben. Weise einer Taste die Aktion „Layer wechseln“ zu, um zwischen ihnen zu springen – das Pad blinkt kurz in der Farbe des neuen Layers, damit du auch ohne Blick in die App weißt, welcher aktiv ist.",
+                "Each profile can have multiple layers with different key mappings. Assign Switch layer to a key to move between them. The pad briefly flashes the new layer's color so you know which one is active."
+            ),
             onBack: onBack,
             onContinue: onContinue
         ) {
@@ -122,7 +131,10 @@ struct OnboardingLayersStep: View {
                 ForEach(profile.layers) { layer in
                     layerCard(layer)
                 }
-                Text("Codex und Claude starten schon mit zwei Beispiel-Layern; weitere legst du über das Stapel-Symbol neben der Profilauswahl an. Zwischen Codex und Claude selbst wechselst du genauso einfach über die Aktion „Profil wechseln“.")
+                Text(AppLanguage.text(
+                    "Codex und Claude starten schon mit zwei Beispiel-Layern; weitere legst du über das Stapel-Symbol neben der Profilauswahl an. Zwischen Codex und Claude selbst wechselst du genauso einfach über die Aktion „Profil wechseln“.",
+                    "Codex and Claude start with two example layers. Add more with the stack icon next to the profile picker. Switch between Codex and Claude with the Switch profile action."
+                ))
                     .font(.system(size: 11))
                     .foregroundStyle(OnboardingPalette.textSecondary)
                     .multilineTextAlignment(.center)
@@ -145,13 +157,13 @@ struct OnboardingLayersStep: View {
                 Text(layer.name)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(OnboardingPalette.textPrimary)
-                Text(layer.controls.prefix(3).map(\.action.label).joined(separator: " · "))
+                Text(layer.controls.prefix(3).map(\.action.displayLabel).joined(separator: " · "))
                     .font(.system(size: 11))
                     .foregroundStyle(OnboardingPalette.textSecondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            Text("blinkt \(layer.blinkCount)×")
+            Text(AppLanguage.text("blinkt \(layer.blinkCount)×", "flashes \(layer.blinkCount)×"))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(OnboardingPalette.textSecondary)
         }
@@ -178,18 +190,18 @@ private enum BasicsCard: Int, CaseIterable {
     var title: String {
         switch self {
         case .ledStatus: "Status-LEDs"
-        case .tapHold: "Tippen vs. Halten"
-        case .dial: "Das Drehrad"
-        case .agentAssignment: "Agents zuweisen"
+        case .tapHold: AppLanguage.text("Tippen vs. Halten", "Tap vs. hold")
+        case .dial: AppLanguage.text("Das Drehrad", "The dial")
+        case .agentAssignment: AppLanguage.text("Agents zuweisen", "Assign agents")
         }
     }
 
     var subtitle: String {
         switch self {
-        case .ledStatus: "Jede Taste zeigt per Farbe und Effekt den Status ihres zugewiesenen Agents."
-        case .tapHold: "Eine Taste kann zwei Funktionen tragen – kurz tippen ist etwas anderes als gedrückt halten."
-        case .dial: "Direkt am Pad, ohne die Maus zu benutzen."
-        case .agentAssignment: "Threads landen per Halten auf einer Taste, nicht per Konfigurationsmenü."
+        case .ledStatus: AppLanguage.text("Jede Taste zeigt per Farbe und Effekt den Status ihres zugewiesenen Agents.", "Each key shows its assigned agent's status through color and effects.")
+        case .tapHold: AppLanguage.text("Eine Taste kann zwei Funktionen tragen – kurz tippen ist etwas anderes als gedrückt halten.", "A key can have two functions: a quick tap differs from holding it.")
+        case .dial: AppLanguage.text("Direkt am Pad, ohne die Maus zu benutzen.", "Control it directly on the pad without using the mouse.")
+        case .agentAssignment: AppLanguage.text("Threads landen per Halten auf einer Taste, nicht per Konfigurationsmenü.", "Assign threads by holding a key, without digging through a configuration menu.")
         }
     }
 }
@@ -215,7 +227,7 @@ struct OnboardingBasicsStep: View {
     var body: some View {
         OnboardingStepChrome(
             icon: "questionmark.circle",
-            title: BasicsCard(rawValue: page)?.title ?? "Kurz erklärt",
+            title: BasicsCard(rawValue: page)?.title ?? AppLanguage.text("Kurz erklärt", "Quick introduction"),
             subtitle: BasicsCard(rawValue: page)?.subtitle ?? "",
             onBack: onBack,
             onContinue: { if isLastCard { onContinue() } else { goTo(page + 1) } }
@@ -276,18 +288,18 @@ struct OnboardingBasicsStep: View {
         switch card {
         case .ledStatus: OnboardingLEDStatusDemo(profile: profile).cardBackground
         case .tapHold: OnboardingPadDemo(profile: profile, beats: [
-            PadDemoBeat(highlighted: .key2, caption: "Kurz tippen → löst die Tap-Aktion aus", keyGesture: .tap),
-            PadDemoBeat(highlighted: .key2, caption: "Gedrückt halten → löst eine zweite, eigene Aktion aus", badge: "Halten erkannt", keyGesture: .hold)
+            PadDemoBeat(highlighted: .key2, caption: AppLanguage.text("Kurz tippen → löst die Tap-Aktion aus", "Quick tap → triggers the tap action"), keyGesture: .tap),
+            PadDemoBeat(highlighted: .key2, caption: AppLanguage.text("Gedrückt halten → löst eine zweite, eigene Aktion aus", "Hold → triggers a separate second action"), badge: AppLanguage.text("Halten erkannt", "Hold detected"), keyGesture: .hold)
         ]).cardBackground
         case .dial: OnboardingPadDemo(profile: profile, beats: [
-            PadDemoBeat(highlighted: .encoderLeft, caption: "Drehen → Reasoning-Aufwand ändern", encoderGesture: .rotateLeft),
-            PadDemoBeat(highlighted: .encoderPress, caption: "Kurz drücken → Modellwahl öffnen", encoderGesture: .press),
-            PadDemoBeat(highlighted: .encoderPress, caption: "Halten (>350 ms) + drehen → Modell direkt wechseln", badge: "Modell gewechselt", encoderGesture: .rotateRight)
+            PadDemoBeat(highlighted: .encoderLeft, caption: AppLanguage.text("Drehen → Reasoning-Aufwand ändern", "Turn → change reasoning effort"), encoderGesture: .rotateLeft),
+            PadDemoBeat(highlighted: .encoderPress, caption: AppLanguage.text("Kurz drücken → Modellwahl öffnen", "Press → open model picker"), encoderGesture: .press),
+            PadDemoBeat(highlighted: .encoderPress, caption: AppLanguage.text("Halten (>350 ms) + drehen → Modell direkt wechseln", "Hold (>350 ms) + turn → switch model directly"), badge: AppLanguage.text("Modell gewechselt", "Model changed"), encoderGesture: .rotateRight)
         ]).cardBackground
         case .agentAssignment: OnboardingPadDemo(profile: profile, beats: [
-            PadDemoBeat(highlighted: .key1, caption: "Taste halten, während ein Thread aktiv ist", keyGesture: .hold),
-            PadDemoBeat(highlighted: .key1, caption: "Die LED zeigt danach den Live-Status", badge: "Thread zugewiesen"),
-            PadDemoBeat(highlighted: .key1, caption: "Kurz tippen öffnet den Thread jederzeit wieder", keyGesture: .tap)
+            PadDemoBeat(highlighted: .key1, caption: AppLanguage.text("Taste halten, während ein Thread aktiv ist", "Hold a key while a thread is active"), keyGesture: .hold),
+            PadDemoBeat(highlighted: .key1, caption: AppLanguage.text("Die LED zeigt danach den Live-Status", "The LED then shows its live status"), badge: AppLanguage.text("Thread zugewiesen", "Thread assigned")),
+            PadDemoBeat(highlighted: .key1, caption: AppLanguage.text("Kurz tippen öffnet den Thread jederzeit wieder", "Tap to reopen the thread at any time"), keyGesture: .tap)
         ]).cardBackground
         }
     }
@@ -392,8 +404,8 @@ struct OnboardingMicrophoneStep: View {
     var body: some View {
         OnboardingStepChrome(
             icon: "mic.fill",
-            title: "Mikrofon-Zuordnung",
-            subtitle: "Welches Diktat-Kürzel soll die Diktat-Taste am Pad auslösen?",
+            title: AppLanguage.text("Mikrofon-Zuordnung", "Microphone assignment"),
+            subtitle: AppLanguage.text("Welches Diktat-Kürzel soll die Diktat-Taste am Pad auslösen?", "Which dictation shortcut should the pad's dictation key trigger?"),
             onBack: onBack,
             onContinue: onContinue
         ) {
@@ -430,22 +442,22 @@ struct OnboardingSummaryStep: View {
 
     private var agentsSummary: String {
         selectedAgents.count == AutomationApp.allCases.count
-            ? "Codex und Claude"
+            ? AppLanguage.text("Codex und Claude", "Codex and Claude")
             : selectedAgents.first?.displayName ?? "–"
     }
 
     var body: some View {
         OnboardingStepChrome(
             icon: "checkmark.seal.fill",
-            title: "Fertig eingerichtet",
-            subtitle: "Alles lässt sich später jederzeit in den Einstellungen ändern.",
-            continueTitle: "Los geht's",
+            title: AppLanguage.text("Fertig eingerichtet", "Setup complete"),
+            subtitle: AppLanguage.text("Alles lässt sich später jederzeit in den Einstellungen ändern.", "You can change everything later in Settings."),
+            continueTitle: AppLanguage.text("Los geht's", "Get started"),
             onBack: onBack,
             onContinue: onFinish
         ) {
             VStack(spacing: 10) {
                 summaryRow(icon: "person.2.fill", title: "Agents", value: agentsSummary)
-                summaryRow(icon: "mic.fill", title: "Mikrofon", value: micSource.title)
+                summaryRow(icon: "mic.fill", title: AppLanguage.text("Mikrofon", "Microphone"), value: micSource.title)
             }
             .frame(maxWidth: 420)
         }

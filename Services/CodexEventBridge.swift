@@ -47,11 +47,15 @@ final class NDJSONLineReader: @unchecked Sendable {
 @MainActor
 @Observable
 final class CodexEventBridge: @unchecked Sendable, AgentBridge {
+    private enum ThreadListMode {
+        case full
+        case recent
+    }
+
     private enum RequestPurpose {
         case initialize
-        case listThreads
+        case listThreads(ThreadListMode)
         case readThread(String)
-        case readLatestTurn(String)
     }
 
     private let logger = Logger(subsystem: "com.codexpad.app", category: "codex-bridge")
@@ -67,18 +71,24 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
     @ObservationIgnored private var pendingRequests: [Int: RequestPurpose] = [:]
     private var reconnectTask: Task<Void, Never>?
     private var statusSyncTask: Task<Void, Never>?
+    private var rolloutSyncTask: Task<Void, Never>?
+    private var recentThreadSyncTask: Task<Void, Never>?
+    @ObservationIgnored private let rolloutObserver = CodexRolloutStatusObserver()
     private var reconnectAttempt = 0
     private var isStopping = false
     private var trackedThreadIDs: Set<String> = []
     private var statusReadsInFlight: Set<String> = []
     private var pendingElicitations: [String: Set<String>] = [:]
     private var threadListAccumulator: [CodexThreadDescriptor] = []
+    private var fullThreadListInFlight = false
+    private var recentThreadListInFlight = false
 
     private(set) var connectionState: CodexBridgeConnectionState = .disconnected
     private(set) var lastError: String?
+    let liveStatusAvailability: AgentLiveStatusAvailability = .available
 
     var onThreads: (([CodexThreadDescriptor]) -> Void)?
-    var onStatus: ((String, CodexAgentStatus) -> Void)?
+    var onStatus: ((String, CodexAgentStatus, AgentStatusSource) -> Void)?
     /// Fired for the two binary-decision approval kinds only (command
     /// execution, file change) — see `handleEvent`. The other elicitation
     /// kinds (permissions grant, free-form user input, MCP elicitation)
@@ -101,7 +111,13 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         reconnectTask = nil
         statusSyncTask?.cancel()
         statusSyncTask = nil
+        rolloutSyncTask?.cancel()
+        rolloutSyncTask = nil
+        recentThreadSyncTask?.cancel()
+        recentThreadSyncTask = nil
         statusReadsInFlight.removeAll()
+        fullThreadListInFlight = false
+        recentThreadListInFlight = false
         process?.terminationHandler = nil
         process?.terminate()
         process = nil
@@ -118,6 +134,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
 
     func track(threadIDs: Set<String>) {
         trackedThreadIDs = threadIDs
+        rolloutObserver.retain(threadIDs: threadIDs)
         statusReadsInFlight.formIntersection(threadIDs)
         guard connectionState.isConnected else { return }
         synchronizeTrackedThreads()
@@ -128,8 +145,16 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
             start()
             return
         }
-        requestThreadList()
+        requestFullThreadList()
         synchronizeTrackedThreads()
+    }
+
+    func refreshRecentThreads() {
+        guard connectionState.isConnected else {
+            start()
+            return
+        }
+        requestRecentThreadList()
     }
 
     private func connect() {
@@ -200,8 +225,22 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         ], purpose: .initialize)
     }
 
-    private func requestThreadList(cursor: String? = nil) {
-        if cursor == nil { threadListAccumulator.removeAll(keepingCapacity: true) }
+    private func requestFullThreadList(cursor: String? = nil) {
+        if cursor == nil {
+            guard !fullThreadListInFlight else { return }
+            fullThreadListInFlight = true
+            threadListAccumulator.removeAll(keepingCapacity: true)
+        }
+        requestThreadList(cursor: cursor, mode: .full)
+    }
+
+    private func requestRecentThreadList() {
+        guard !recentThreadListInFlight else { return }
+        recentThreadListInFlight = true
+        requestThreadList(cursor: nil, mode: .recent)
+    }
+
+    private func requestThreadList(cursor: String?, mode: ThreadListMode) {
         var params: [String: Any] = [
             "limit": 100,
             "sortKey": "recency_at",
@@ -212,7 +251,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
             ]
         ]
         if let cursor { params["cursor"] = cursor }
-        sendRequest(method: "thread/list", params: params, purpose: .listThreads)
+        sendRequest(method: "thread/list", params: params, purpose: .listThreads(mode))
     }
 
     private func synchronizeTrackedThreads() {
@@ -232,24 +271,29 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
-                self?.synchronizeLatestTurns()
+                self?.synchronizeTrackedThreads()
+            }
+        }
+        rolloutSyncTask?.cancel()
+        rolloutSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.synchronizeTrackedRollouts()
+                try? await Task.sleep(for: .milliseconds(350))
+            }
+        }
+        recentThreadSyncTask?.cancel()
+        recentThreadSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                self?.requestRecentThreadList()
             }
         }
     }
 
-    private func synchronizeLatestTurns() {
-        for threadID in trackedThreadIDs where !statusReadsInFlight.contains(threadID) {
-            statusReadsInFlight.insert(threadID)
-            sendRequest(
-                method: "thread/turns/list",
-                params: [
-                    "threadId": threadID,
-                    "limit": 1,
-                    "sortDirection": "desc",
-                    "itemsView": "summary"
-                ],
-                purpose: .readLatestTurn(threadID)
-            )
+    private func synchronizeTrackedRollouts() {
+        for update in rolloutObserver.poll(threadIDs: trackedThreadIDs) {
+            onStatus?(update.threadID, update.status, update.source)
         }
     }
 
@@ -284,10 +328,14 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
     private func handleResponse(_ message: [String: Any], purpose: RequestPurpose) {
         if case .readThread(let threadID) = purpose {
             statusReadsInFlight.remove(threadID)
-        } else if case .readLatestTurn(let threadID) = purpose {
-            statusReadsInFlight.remove(threadID)
         }
         if let error = message["error"] as? [String: Any] {
+            if case .listThreads(let mode) = purpose {
+                switch mode {
+                case .full: fullThreadListInFlight = false
+                case .recent: recentThreadListInFlight = false
+                }
+            }
             let detail = error["message"] as? String ?? "Unbekannter App-Server-Fehler"
             lastError = detail
             logger.error("App-server request failed: \(detail, privacy: .public)")
@@ -301,36 +349,32 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
             connectionState = .connected(serverVersion: version)
             logger.info("Connected to \(version, privacy: .public)")
             writeJSON(["method": "initialized"])
-            requestThreadList()
+            requestFullThreadList()
             synchronizeTrackedThreads()
             startStatusSynchronization()
-        case .listThreads:
+        case .listThreads(let mode):
             let data = result["data"] as? [[String: Any]] ?? []
-            threadListAccumulator.append(contentsOf: data.compactMap(parseThread))
-            if let cursor = result["nextCursor"] as? String, !cursor.isEmpty {
-                requestThreadList(cursor: cursor)
-            } else {
-                logger.info("Loaded \(self.threadListAccumulator.count, privacy: .public) Codex threads and subagents")
-                onThreads?(threadListAccumulator)
+            let descriptors = data.compactMap(parseThread)
+            if !descriptors.isEmpty { onThreads?(descriptors) }
+            switch mode {
+            case .recent:
+                recentThreadListInFlight = false
+            case .full:
+                threadListAccumulator.append(contentsOf: descriptors)
+                if let cursor = result["nextCursor"] as? String, !cursor.isEmpty {
+                    requestFullThreadList(cursor: cursor)
+                } else {
+                    fullThreadListInFlight = false
+                    logger.info("Loaded \(self.threadListAccumulator.count, privacy: .public) Codex threads and subagents")
+                }
             }
         case .readThread(let threadID):
             guard let thread = result["thread"] as? [String: Any] else { return }
             if let descriptor = parseThread(thread) { onThreads?([descriptor]) }
             if let status = synchronizedStatus(from: thread) {
                 rememberAttentionSnapshot(status, threadID: threadID)
-                onStatus?(threadID, status)
+                onStatus?(threadID, status, .snapshot)
             }
-        case .readLatestTurn(let threadID):
-            if pendingElicitations[threadID]?.isEmpty == false {
-                onStatus?(threadID, .needsAttention)
-                return
-            }
-            let latestTurn = (result["data"] as? [[String: Any]])?.first
-            onStatus?(threadID, StatusMapper.synchronizedStatus(
-                threadType: nil,
-                latestTurnStatus: latestTurn?["status"] as? String,
-                latestTurnHasCompletionTimestamp: latestTurn?["completedAt"] is NSNumber
-            ))
         }
     }
 
@@ -339,7 +383,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         case "thread/started":
             if let thread = params["thread"] as? [String: Any], let descriptor = parseThread(thread) {
                 onThreads?([descriptor])
-                onStatus?(descriptor.id, descriptor.status)
+                onStatus?(descriptor.id, descriptor.status, .event)
             }
         case "thread/status/changed":
             guard let threadID = params["threadId"] as? String,
@@ -349,24 +393,24 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
                 activeFlags: status["activeFlags"] as? [String] ?? []
             )
             rememberAttentionSnapshot(mapped, threadID: threadID)
-            onStatus?(threadID, mapped)
+            onStatus?(threadID, mapped, .event)
         case "turn/started":
             if let threadID = params["threadId"] as? String {
                 pendingElicitations[threadID] = nil
-                onStatus?(threadID, .running)
+                onStatus?(threadID, .running, .event)
             }
         case "turn/completed":
             guard let threadID = params["threadId"] as? String,
                   let turn = params["turn"] as? [String: Any],
                   let status = StatusMapper.turnStatus(turn["status"] as? String) else { return }
             pendingElicitations[threadID] = nil
-            onStatus?(threadID, status)
+            onStatus?(threadID, status, .event)
         case "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
              "applyPatchApproval", "execCommandApproval":
             guard let threadID = params["threadId"] as? String else { return }
             let opaqueID = requestID.map(String.init(describing:)) ?? UUID().uuidString
             pendingElicitations[threadID, default: []].insert(opaqueID)
-            onStatus?(threadID, .needsAttention)
+            onStatus?(threadID, .needsAttention, .event)
             guard let rpcID = JSONRPCID(requestID) else {
                 logger.error("Approval request for thread \(threadID, privacy: .public) has no usable id; cannot answer it")
                 return
@@ -383,7 +427,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
             guard let threadID = params["threadId"] as? String else { return }
             let opaqueID = requestID.map(String.init(describing:)) ?? UUID().uuidString
             pendingElicitations[threadID, default: []].insert(opaqueID)
-            onStatus?(threadID, .needsAttention)
+            onStatus?(threadID, .needsAttention, .event)
             logger.notice("Observed read-only elicitation for thread \(threadID, privacy: .public); no response will be sent")
         case "serverRequest/resolved":
             guard let threadID = params["threadId"] as? String else { return }
@@ -392,7 +436,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
                 pendingElicitations[threadID]?.remove(opaqueID)
                 onApprovalResolved?(opaqueID)
             }
-            if pendingElicitations[threadID]?.isEmpty != false { onStatus?(threadID, .running) }
+            if pendingElicitations[threadID]?.isEmpty != false { onStatus?(threadID, .running, .event) }
         case "error":
             lastError = params["message"] as? String ?? "Codex App Server meldet einen Fehler."
         default:
@@ -414,7 +458,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         }
         writeJSON(["id": requestID.jsonValue, "result": result])
         pendingElicitations[threadID]?.remove(approval.id)
-        if pendingElicitations[threadID]?.isEmpty != false { onStatus?(threadID, .running) }
+        if pendingElicitations[threadID]?.isEmpty != false { onStatus?(threadID, .running, .event) }
         logger.notice("Answered Codex approval (\(method, privacy: .public)) for thread \(threadID, privacy: .public): \(decision == .accept ? "accept" : "decline", privacy: .public)")
     }
 
@@ -486,7 +530,13 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
     private func processDidTerminate(code: Int32) {
         statusSyncTask?.cancel()
         statusSyncTask = nil
+        rolloutSyncTask?.cancel()
+        rolloutSyncTask = nil
+        recentThreadSyncTask?.cancel()
+        recentThreadSyncTask = nil
         statusReadsInFlight.removeAll()
+        fullThreadListInFlight = false
+        recentThreadListInFlight = false
         process = nil
         input = nil
         guard !isStopping else { return }

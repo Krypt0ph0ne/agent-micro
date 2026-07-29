@@ -38,6 +38,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     /// `CodexReasoningAutomationService` listen to the same private F22–F24
     /// HID triggers, so only the one matching the active profile may act.
     private let isActiveProfile: () -> Bool
+    var isExternallySuspended: () -> Bool = { false }
     private var hidManager: IOHIDManager?
     private var inputDebouncer = HIDInputDebouncer()
     /// True whenever CodexPad has sent ⌘⇧E and not yet closed the Effort menu
@@ -89,7 +90,8 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     /// — the only channel that reliably reports the encoder press's release
     /// edge on the confirmed hardware.
     func handlePhysicalEvent(_ event: CodexPadPhysicalEvent) {
-        guard isActiveProfile(), let control = HardwareControl(reportedControlIndex: event.control) else { return }
+        guard isActiveProfile(), !isExternallySuspended(),
+              let control = HardwareControl(reportedControlIndex: event.control) else { return }
         switch control {
         case .encoderPress:
             switch event.phase {
@@ -362,7 +364,8 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     }
 
     private func handleHIDValue(usagePage: Int, usage: Int, value: Int) {
-        guard isActiveProfile(), usagePage == 0x07, [0x71, 0x73].contains(usage) else { return }
+        guard isActiveProfile(), !isExternallySuspended(),
+              usagePage == 0x07, [0x71, 0x73].contains(usage) else { return }
         guard value != 0 else { return }
         let now = ProcessInfo.processInfo.systemUptime
         guard inputDebouncer.accepts(usage: usage, at: now) else { return }

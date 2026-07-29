@@ -25,7 +25,10 @@ struct MenuBarPopoverView: View {
                 DeviceCanvasView(
                     profile: appState.profiles.selectedProfile,
                     selectedControl: $selectedControl,
-                    compact: true
+                    compact: true,
+                    agentTitleForControl: {
+                        appState.activeAgentThreads.assignment(for: $0)?.threadTitle
+                    }
                 )
 
                 MenuBarSelectedControlPanel(appState: appState, control: $selectedControl)
@@ -44,6 +47,19 @@ struct MenuBarPopoverView: View {
             Picker("Profil", selection: $profiles.selectedProfileID) {
                 ForEach(profiles.visibleProfiles) { profile in
                     Text(profile.name).tag(profile.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+
+            let profile = appState.profiles.selectedProfile
+            Picker("Layer", selection: Binding(
+                get: { profile.activeLayerID },
+                set: { appState.profiles.selectLayer($0) }
+            )) {
+                ForEach(profile.layers) { layer in
+                    Text(layer.name).tag(layer.id)
                 }
             }
             .labelsHidden()
@@ -115,21 +131,19 @@ struct MenuBarPopoverView: View {
     }
 
     private func upload() {
-        let result = appState.device.upload(
-            profile: appState.profiles.selectedProfile,
-            keyboardLayout: appState.profiles.keyboardLayout
-        )
-        if result?.succeeded == true {
-            appState.profiles.markSynchronized()
-            appState.refreshAgentLEDs()
+        guard appState.profiles.hasUnsyncedChanges else {
+            showFeedback(message: "Aktuelles Setup bereits übertragen", succeeded: true)
+            return
         }
-        showFeedback(success: result?.succeeded == true)
+
+        let result = appState.transferCurrentConfiguration()
+        showFeedback(message: result?.succeeded == true ? "Übertragen" : "Fehlgeschlagen", succeeded: result?.succeeded == true)
     }
 
-    private func showFeedback(success: Bool) {
+    private func showFeedback(message: String, succeeded: Bool) {
         feedbackTask?.cancel()
-        actionFeedback = success ? "Übertragen" : "Fehlgeschlagen"
-        feedbackIsError = !success
+        actionFeedback = message
+        feedbackIsError = !succeeded
         feedbackTask = Task {
             try? await Task.sleep(for: .seconds(2.5))
             guard !Task.isCancelled else { return }
@@ -151,6 +165,8 @@ private struct MenuBarSelectedControlPanel: View {
     @Binding var control: HardwareControl
     @State private var editing: EditTarget?
     @State private var search = ""
+    @State private var isPresentingActionSheet = false
+    @State private var isPresentingHoldActionSheet = false
 
     private static let activeRecencyWindow: TimeInterval = 24 * 60 * 60
     private static let activeCap = 20
@@ -190,19 +206,19 @@ private struct MenuBarSelectedControlPanel: View {
             } else {
                 VStack(spacing: 8) {
                     keyRow
-                    if editing == .tap {
-                        actionLibrary(forHold: false)
-                    }
-                    if binding.isTapHold, editing != .tap {
+                    if binding.isTapHold {
                         holdRow
-                        if editing == .hold {
-                            actionLibrary(forHold: true)
-                        }
                     }
                 }
             }
         }
         .onChange(of: control) { _, _ in collapse() }
+        .sheet(isPresented: $isPresentingActionSheet) {
+            ActionSelectionSheet(appState: appState, control: control, context: .tap)
+        }
+        .sheet(isPresented: $isPresentingHoldActionSheet) {
+            ActionSelectionSheet(appState: appState, control: control, context: .hold)
+        }
     }
 
     private var keyRow: some View {
@@ -215,19 +231,20 @@ private struct MenuBarSelectedControlPanel: View {
                     .fill(statusColor)
                     .frame(width: 8, height: 8)
             }
-            Text(action.kind.isAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.label)
+            Text(action.kind.isAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.displayLabel)
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
+            if action.kind.isAgent, assignment != nil, appState.activeAgentThreads.liveStatusAvailability == .notActivated {
+                Text("Live-Status nicht aktiviert")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 4)
             if action.kind.isAgent {
                 reassignMenu
             }
-            Button(editing == .tap ? "Fertig" : "Ändern") {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    editing = editing == .tap ? nil : .tap
-                    search = ""
-                }
-            }
+            Button("Belegen") { isPresentingActionSheet = true }
             .controlSize(.small)
         }
         .padding(10)
@@ -240,16 +257,11 @@ private struct MenuBarSelectedControlPanel: View {
             Image(systemName: binding.holdAction?.icon ?? "hand.raised")
                 .foregroundStyle(.tint)
                 .frame(width: 20)
-            Text("Halten: \(binding.holdAction?.label ?? "–")")
+            Text("Halten: \(binding.holdAction?.displayLabel ?? "–")")
                 .font(.callout)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            Button(editing == .hold ? "Fertig" : "Ändern") {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    editing = editing == .hold ? nil : .hold
-                    search = ""
-                }
-            }
+            Button("Belegen") { isPresentingHoldActionSheet = true }
             .controlSize(.small)
         }
         .padding(.horizontal, 10)
@@ -396,14 +408,15 @@ private struct MenuBarSelectedControlPanel: View {
     }
 
     private var statusColor: Color {
+        if appState.activeAgentThreads.liveStatusAvailability == .notActivated { return .secondary }
         switch status {
-        case .unassigned: .secondary
-        case .idle: .white
-        case .running: .blue
-        case .needsAttention: .orange
-        case .completed: .green
-        case .failed: .red
-        case .interrupted: .purple
+        case .unassigned: return .secondary
+        case .idle: return .white
+        case .running: return .blue
+        case .needsAttention: return .orange
+        case .completed: return .green
+        case .failed: return .red
+        case .interrupted: return .purple
         }
     }
 }

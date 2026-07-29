@@ -52,6 +52,7 @@ struct DeviceCanvasView: View {
     let profile: MacropadProfile
     @Binding var selectedControl: HardwareControl
     var compact: Bool = false
+    var agentTitleForControl: ((HardwareControl) -> String?)? = nil
 
     private var keyGap: CGFloat { compact ? 6 : 8 }
     private var gridWidth: CGFloat { compact ? 198 : 250 }
@@ -69,6 +70,7 @@ struct DeviceCanvasView: View {
                                 KeyControlView(
                                     control: control,
                                     action: profile.action(for: control),
+                                    displayLabel: agentTitleForControl?(control),
                                     led: profile.led.setting(for: control),
                                     isSelected: selectedControl == control,
                                     compact: compact
@@ -145,6 +147,7 @@ struct DeviceCanvasView: View {
 struct KeyControlView: View {
     let control: HardwareControl
     let action: KeyboardAction
+    var displayLabel: String? = nil
     let led: KeyLEDConfiguration
     let isSelected: Bool
     var compact: Bool = false
@@ -167,7 +170,7 @@ struct KeyControlView: View {
                 // Fixed height (not a trailing Spacer) so the two-line label
                 // always gets the room it needs to actually wrap instead of
                 // being squeezed down to one line with a mid-word "…".
-                Text(action.label)
+                Text(resolvedLabel)
                     .font(.system(size: compact ? 8 : 9, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.95))
                     .lineLimit(2)
@@ -211,8 +214,13 @@ struct KeyControlView: View {
             case .off, .steady: break
             }
         }
-        .accessibilityLabel("\(control.title): \(action.label)")
+        .accessibilityLabel("\(control.title): \(resolvedLabel)")
         .accessibilityHint("Auswählen und rechts neu belegen")
+    }
+
+    private var resolvedLabel: String {
+        guard action.kind.isAgent else { return action.displayLabel }
+        return displayLabel ?? "Kein Chat zugeordnet"
     }
 
     private var keyBackground: LinearGradient {

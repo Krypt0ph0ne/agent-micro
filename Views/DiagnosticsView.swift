@@ -24,6 +24,27 @@ struct DiagnosticsView: View {
                 AgentBridgeDiagnosticsCard(title: "Codex Event Bridge", icon: "bolt.horizontal.circle", store: appState.codexThreads)
                 AgentBridgeDiagnosticsCard(title: "Claude Agent Bridge", icon: "bolt.horizontal.circle", store: appState.claudeThreads)
 
+                if !appState.diagnostics.statusTraces.isEmpty {
+                    DisclosureGroup("Statusspur (lokal, datensparsam)") {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(appState.diagnostics.statusTraces) { trace in
+                                HStack(spacing: 8) {
+                                    Text(trace.date, format: .dateTime.hour().minute().second())
+                                        .foregroundStyle(.secondary)
+                                    Text(trace.threadShortID).font(.caption.monospaced())
+                                    Text(trace.source.title)
+                                    Text(trace.status.title)
+                                    Spacer()
+                                    Text(trace.ledReaction).foregroundStyle(.secondary)
+                                }
+                                .font(.caption)
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
                 DisclosureGroup("Prozess- und App-Logs", isExpanded: $logsExpanded) {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(appState.diagnostics.entries) { entry in
@@ -85,6 +106,10 @@ private struct AgentBridgeDiagnosticsCard: View {
             LabeledContent("Verbindung", value: store.connectionState.title)
             LabeledContent("Geladene Threads", value: "\(store.threads.count)")
             LabeledContent("Tastenzuordnungen", value: "\(store.assignments.count) / 6")
+            LabeledContent("Status", value: store.liveStatusAvailability.title)
+            Text(store.sessionNavigationSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Text("Approval- und Nutzereingabe-Requests werden ausschließlich als Status beobachtet und nie beantwortet.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
