@@ -234,6 +234,7 @@ private struct MenuBarSelectedControlPanel: View {
             Text(action.kind.isAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.displayLabel)
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
+                .help(action.kind.isAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.displayLabel)
             if action.kind.isAgent, assignment != nil, appState.activeAgentThreads.liveStatusAvailability == .notActivated {
                 Text("Live-Status nicht aktiviert")
                     .font(.caption2)
@@ -260,6 +261,7 @@ private struct MenuBarSelectedControlPanel: View {
             Text("Halten: \(binding.holdAction?.displayLabel ?? "–")")
                 .font(.callout)
                 .lineLimit(1)
+                .help("Halten: \(binding.holdAction?.displayLabel ?? "–")")
             Spacer(minLength: 4)
             Button("Belegen") { isPresentingHoldActionSheet = true }
             .controlSize(.small)
@@ -321,7 +323,10 @@ private struct MenuBarSelectedControlPanel: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: item.icon).frame(width: 18).foregroundStyle(.tint)
-                Text(item.title).font(.caption.weight(.medium)).lineLimit(1)
+                Text(item.title)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .help(item.title)
                 Spacer(minLength: 4)
                 if let shortcut = item.shortcut {
                     Text(shortcut).font(.caption2.monospaced()).foregroundStyle(.secondary)
@@ -396,6 +401,7 @@ private struct MenuBarSelectedControlPanel: View {
             Text(automation.isEnabled ? "Drehrad · Reasoning-Gesten aktiv" : "Drehrad · Deaktiviert")
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
+                .help(automation.isEnabled ? "Drehrad · Reasoning-Gesten aktiv" : "Drehrad · Deaktiviert")
             Spacer(minLength: 4)
             Toggle("", isOn: isEnabled)
                 .labelsHidden()

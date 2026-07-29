@@ -1,245 +1,114 @@
 import SwiftUI
 
-private enum ThreadFilterMode: Hashable {
-    case active, all
-    case project(String)
-
-    var title: String {
-        switch self {
-        case .active: "Aktiv"
-        case .all: "Alle"
-        case .project(let cwd): (cwd as NSString).lastPathComponent
-        }
-    }
-}
-
+/// Compact status and gesture guidance for an agent-bound key.
+///
+/// Thread selection deliberately lives on the physical hold gesture. Keeping
+/// the complete thread/subagent catalog out of the main editor prevents the
+/// window from growing vertically and keeps assignment available without
+/// duplicating the hardware picker in a second UI.
 struct CodexAgentAssignmentView: View {
     let appState: AppState
     let control: HardwareControl
-    @State private var threadSearch = ""
-    @State private var filterMode: ThreadFilterMode = .active
 
-    /// How recent a thread must be to count as "active" alongside anything
-    /// currently running or waiting on input.
-    private static let activeRecencyWindow: TimeInterval = 24 * 60 * 60
-    private static let activeCap = 40
-
-    private var assignment: AgentKeyAssignment? { appState.activeAgentThreads.assignment(for: control) }
-    private var status: CodexAgentStatus { appState.activeAgentThreads.presentedStatus(for: control) }
-
-    /// Distinct working directories present across all loaded threads,
-    /// offered as the "project" filter menu.
-    private var projects: [String] {
-        Array(Set(appState.activeAgentThreads.threads.map(\.cwd).filter { !$0.isEmpty })).sorted()
+    private var assignment: AgentKeyAssignment? {
+        appState.activeAgentThreads.assignment(for: control)
     }
 
-    private var modeFilteredThreads: [CodexThreadDescriptor] {
-        let threads = appState.activeAgentThreads.threads
-        switch filterMode {
-        case .all:
-            return threads
-        case .project(let cwd):
-            return threads.filter { $0.cwd == cwd }
-        case .active:
-            let cutoff = Date().addingTimeInterval(-Self.activeRecencyWindow)
-            let running = threads.filter { $0.status == .running || $0.status == .needsAttention }
-            let recent = threads.filter { $0.status != .running && $0.status != .needsAttention && $0.updatedAt >= cutoff }
-            return Array((running + recent).prefix(Self.activeCap))
-        }
-    }
-
-    private var filteredThreads: [CodexThreadDescriptor] {
-        let query = threadSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        let threads = modeFilteredThreads
-        guard !query.isEmpty else { return Array(threads.prefix(75)) }
-        return Array(threads.filter {
-            $0.displayTitle.localizedCaseInsensitiveContains(query)
-                || $0.preview.localizedCaseInsensitiveContains(query)
-                || $0.cwd.localizedCaseInsensitiveContains(query)
-                || ($0.agentRole?.localizedCaseInsensitiveContains(query) ?? false)
-        }.prefix(75))
+    private var status: CodexAgentStatus {
+        appState.activeAgentThreads.presentedStatus(for: control)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 9, height: 9)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(assignment?.threadTitle ?? "Noch kein Thread zugeordnet")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(appState.activeAgentThreads.statusTitle(for: control))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if let assignment {
-                    Button("Öffnen") { _ = appState.activeAgentThreads.openAssignedThread(for: control) }
-                        .controlSize(.small)
-                    Button(role: .destructive) { appState.removeAgentAssignment(for: control) } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Zuordnung entfernen")
-                    .accessibilityLabel("Zuordnung \(assignment.threadTitle) entfernen")
-                }
-            }
-
-            HStack(spacing: 6) {
-                TextField("Threads & Subagenten durchsuchen", text: $threadSearch)
-                    .textFieldStyle(.roundedBorder)
-                filterMenu
-            }
-
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    if filteredThreads.isEmpty {
-                        ContentUnavailableView {
-                            Label(
-                                appState.activeAgentThreads.threads.isEmpty ? "Keine Threads geladen" : "Keine Treffer",
-                                systemImage: "rectangle.stack.badge.person.crop"
-                            )
-                        } description: {
-                            if case .active = filterMode, !appState.activeAgentThreads.threads.isEmpty {
-                                Text("Keine kürzlich aktiven Threads.")
-                            }
-                        } actions: {
-                            if case .active = filterMode, !appState.activeAgentThreads.threads.isEmpty {
-                                Button("Alle anzeigen") { filterMode = .all }
-                            }
-                        }
-                        .frame(height: 96)
-                    } else {
-                        ForEach(filteredThreads) { thread in
-                            threadRow(thread)
-                        }
-                    }
-                }
-            }
-            .frame(height: 166)
-
-            HStack(spacing: 6) {
-                Label(appState.activeAgentThreads.connectionState.title, systemImage: connectionIcon)
-                    .foregroundStyle(appState.activeAgentThreads.connectionState.isConnected ? Color.green : Color.secondary)
-                Spacer()
-                Button { appState.activeAgentThreads.refresh() } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
-                    .help("Threads neu laden")
-                Button("Neu verbinden") { appState.activeAgentThreads.reconnect() }
-                    .buttonStyle(.borderless)
-            }
-            .font(.caption)
+        VStack(alignment: .leading, spacing: 8) {
+            assignmentRow
+            Divider()
+            gestureRow
 
             if let error = appState.activeAgentThreads.connectionError {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .lineLimit(3)
+                Label {
+                    Text(error)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.caption2)
+                .foregroundStyle(.red)
+            }
+        }
+        .padding(9)
+        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var assignmentRow: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 9, height: 9)
+                .padding(.top, 4)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(assignment?.threadTitle ?? "Noch kein Chat zugeordnet")
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                Text(appState.activeAgentThreads.statusTitle(for: control))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 6)
+
+            if assignment != nil {
+                Button("Öffnen") {
+                    _ = appState.activeAgentThreads.openAssignedThread(for: control)
+                }
+                .controlSize(.small)
+
+                Button(role: .destructive) {
+                    appState.removeAgentAssignment(for: control)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Zuordnung entfernen")
+                .accessibilityLabel("Agent-Zuordnung entfernen")
             }
         }
-        .padding(10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private var filterMenu: some View {
-        Menu {
-            Button {
-                filterMode = .active
-            } label: {
-                if case .active = filterMode { Label("Aktiv", systemImage: "checkmark") } else { Text("Aktiv") }
-            }
-            Button {
-                filterMode = .all
-            } label: {
-                if case .all = filterMode { Label("Alle", systemImage: "checkmark") } else { Text("Alle") }
-            }
-            if !projects.isEmpty {
-                Divider()
-                Menu("Projekt") {
-                    ForEach(projects, id: \.self) { cwd in
-                        Button {
-                            filterMode = .project(cwd)
-                        } label: {
-                            if filterMode == .project(cwd) {
-                                Label((cwd as NSString).lastPathComponent, systemImage: "checkmark")
-                            } else {
-                                Text((cwd as NSString).lastPathComponent)
-                            }
-                        }
-                    }
-                }
-            }
-        } label: {
-            Label(filterMode.title, systemImage: "line.3.horizontal.decrease.circle")
-                .labelStyle(.titleAndIcon)
+    private var gestureRow: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Label("Tippen: öffnen", systemImage: "hand.tap")
+                .help("Kurzes Tippen öffnet den aktuell zugewiesenen Chat.")
+            Divider()
+                .frame(height: 18)
+            Label("Halten: auswählen", systemImage: "hand.raised.fill")
+                .foregroundStyle(.tint)
+                .help("Taste halten, mit dem Drehrad einen Chat wählen und zum Zuweisen loslassen.")
+            Spacer(minLength: 4)
+            ContextInfoButton(
+                title: "Chat direkt am Pad zuweisen",
+                message: "Halte die Agent-Taste etwa \(CodexQuickAssignService.holdThresholdMilliseconds) ms gedrückt. Drehe weiter gedrückt am Drehrad durch die letzten Chats und lasse die Taste beim gewünschten Chat los. Kurzes Tippen öffnet den bereits zugewiesenen Chat."
+            )
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Nach aktiven Threads oder Projekt filtern")
-    }
-
-    private func threadRow(_ thread: CodexThreadDescriptor) -> some View {
-        Button {
-            appState.assignAgentThread(thread, to: control)
-            threadSearch = ""
-        } label: {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(color(for: thread.status))
-                    .frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 5) {
-                        Text(thread.displayTitle)
-                            .font(.caption.weight(.medium))
-                            .lineLimit(1)
-                        if thread.isSubagent {
-                            Text("SUB")
-                                .font(.system(size: 8, weight: .bold))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
-                        }
-                    }
-                    Text([thread.preview, thread.status.title].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                if assignment?.threadID == thread.id {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, minHeight: 38)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(.quaternary.opacity(assignment?.threadID == thread.id ? 0.65 : 0.22), in: RoundedRectangle(cornerRadius: 7))
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
     }
 
     private var statusColor: Color {
-        if appState.activeAgentThreads.liveStatusAvailability == .notActivated { return .secondary }
-        return color(for: status)
-    }
-
-    private func color(for status: CodexAgentStatus) -> Color {
-        switch status {
-        case .unassigned: .secondary
-        case .idle: .white
-        case .running: .blue
-        case .needsAttention: .orange
-        case .completed: .green
-        case .failed: .red
-        case .interrupted: .purple
+        if appState.activeAgentThreads.liveStatusAvailability == .notActivated {
+            return .secondary
         }
-    }
-
-    private var connectionIcon: String {
-        appState.activeAgentThreads.connectionState.isConnected ? "bolt.horizontal.circle.fill" : "bolt.slash.circle"
+        switch status {
+        case .unassigned: return .secondary
+        case .idle: return .white
+        case .running: return .blue
+        case .needsAttention: return .orange
+        case .completed: return .green
+        case .failed: return .red
+        case .interrupted: return .purple
+        }
     }
 }

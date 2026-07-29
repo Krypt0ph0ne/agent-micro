@@ -28,8 +28,8 @@ final class ThreadPickerPanelController {
         }
         let panel = panel ?? makePanel()
         let rowCount = max(1, presentation.threads.count)
-        let height = min(620, 104 + rowCount * 49)
-        panel.setContentSize(NSSize(width: 430, height: height))
+        let height = min(620, 104 + rowCount * 56)
+        panel.setContentSize(NSSize(width: 460, height: height))
         center(panel, on: targetScreen())
         panel.level = .screenSaver
         panel.orderFrontRegardless()
@@ -138,7 +138,9 @@ private struct ThreadPickerPanelView: View {
                 HStack(spacing: 6) {
                     Text(thread.displayTitle)
                         .font(.subheadline.weight(selected ? .semibold : .medium))
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help(thread.displayTitle)
                     if thread.isSubagent {
                         Text("SUB")
                             .font(.system(size: 8, weight: .bold))
@@ -150,7 +152,7 @@ private struct ThreadPickerPanelView: View {
                 Text([thread.projectName, thread.status.title].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             if assigned {
@@ -164,7 +166,7 @@ private struct ThreadPickerPanelView: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(maxWidth: .infinity, minHeight: 50)
         .background(
             selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.035),
             in: RoundedRectangle(cornerRadius: 9)

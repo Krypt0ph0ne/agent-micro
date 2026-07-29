@@ -24,7 +24,7 @@ struct ControlAssignmentPanel: View {
     }
 
     private var keyAssignmentBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: control.icon)
                     .foregroundStyle(.tint)
@@ -51,15 +51,22 @@ struct ControlAssignmentPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(action.displayLabel)
                         .font(.body.weight(.semibold))
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(action.displayShortcut)
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
+                if let definition {
+                    ContextInfoButton(
+                        title: definition.title,
+                        message: definition.description
+                    )
+                }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, minHeight: 56)
+            .padding(9)
+            .frame(maxWidth: .infinity, minHeight: 50)
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             Button {
@@ -75,12 +82,7 @@ struct ControlAssignmentPanel: View {
             .buttonStyle(.bordered)
             .frame(maxWidth: .infinity)
 
-            if let definition {
-                Text(definition.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            } else if !action.kind.isAgent {
+            if definition == nil, !action.kind.isAgent {
                 Text(action.kind == .disabled ? "Dieses Bedienelement löst nichts aus." : "Eigene oder profilinterne Belegung.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -90,15 +92,15 @@ struct ControlAssignmentPanel: View {
 
             if action.kind.isAgent {
                 CodexAgentAssignmentView(appState: appState, control: control)
+            } else {
+                TapHoldSection(appState: appState, control: control)
             }
 
-            TapHoldSection(appState: appState, control: control)
-
-            Label("Klick links, Auswahl rechts.", systemImage: "cursorarrow.click")
+            Text("Auswahl am Pad oben · Bearbeitung hier darunter")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
-        .padding(12)
+        .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .sheet(isPresented: $isPresentingActionSheet) {
             ActionSelectionSheet(appState: appState, control: control, context: .tap)
@@ -139,7 +141,7 @@ struct ControlAssignmentPanel: View {
     }
 
     private var infoMessage: String {
-        "Wähle links eine Taste und danach eine Aktion. Ein Codex Agent wird lokal einem Thread oder Subagenten zugeordnet; dessen Live-Status steuert die LED. Die app-only Belegung muss einmal auf das Pad übertragen werden."
+        "Wähle oben eine Taste und danach eine Aktion. Agent-Tasten werden direkt am Pad zugewiesen: Taste halten, mit dem Drehrad einen Chat wählen und loslassen. Der Live-Status steuert die LED. Änderungen müssen einmal auf das Pad übertragen werden."
     }
 
 }

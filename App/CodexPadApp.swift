@@ -62,7 +62,7 @@ private struct RootView: View {
     var body: some View {
         if hasCompletedOnboarding {
             MainWindowView(appState: appState)
-                .frame(width: 410)
+                .frame(width: 410, height: 620)
         } else {
             OnboardingView(appState: appState) { hasCompletedOnboarding = true }
         }

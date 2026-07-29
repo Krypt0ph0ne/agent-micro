@@ -115,7 +115,9 @@ struct CodexAssignmentWizardView: View {
                     .frame(width: 24)
                     .foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(action.title).font(.body.weight(.medium)).lineLimit(1)
+                    Text(action.title)
+                        .font(.body.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(action.category).font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)

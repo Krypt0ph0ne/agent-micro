@@ -99,7 +99,8 @@ private struct ActionCatalogCard: View {
             } else if let link = action.deepLink {
                 Text(link)
                     .font(.caption2.monospaced())
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
                     .foregroundStyle(.secondary)
             }
             if let note = action.availabilityNote {

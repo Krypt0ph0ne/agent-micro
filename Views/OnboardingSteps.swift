@@ -161,6 +161,7 @@ struct OnboardingLayersStep: View {
                     .font(.system(size: 11))
                     .foregroundStyle(OnboardingPalette.textSecondary)
                     .lineLimit(1)
+                    .help(layer.controls.prefix(3).map(\.action.displayLabel).joined(separator: " · "))
             }
             Spacer(minLength: 8)
             Text(AppLanguage.text("blinkt \(layer.blinkCount)×", "flashes \(layer.blinkCount)×"))

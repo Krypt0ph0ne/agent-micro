@@ -111,12 +111,13 @@ struct ActionSelectionSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(action.title)
                     .font(.body)
-                Text(action.description)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(action.category)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
             Spacer(minLength: 8)
+            ContextInfoButton(title: action.title, message: action.description)
 
             if action.execution == .configurableShortcut {
                 if let configured = configuredAction(for: action.id) {

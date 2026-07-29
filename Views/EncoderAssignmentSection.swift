@@ -81,7 +81,9 @@ struct EncoderAssignmentSection: View {
             Image(systemName: icon).frame(width: 22).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 1) {
                 Text(gesture).font(.caption2).foregroundStyle(.secondary)
-                Text(value).font(.body.weight(.medium)).lineLimit(2)
+                Text(value)
+                    .font(.body.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
         }
@@ -102,7 +104,7 @@ struct PermissionStatus: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             Text(isGranted ? "Erteilt" : "Fehlt")
                 .foregroundStyle(isGranted ? Color.green : Color.orange)

@@ -177,6 +177,7 @@ struct KeyControlView: View {
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(height: compact ? 18 : 22, alignment: .top)
+                    .help(resolvedLabel)
                 Spacer(minLength: 0)
                 HStack(spacing: compact ? 4 : 5) {
                     Circle()
@@ -215,7 +216,7 @@ struct KeyControlView: View {
             }
         }
         .accessibilityLabel("\(control.title): \(resolvedLabel)")
-        .accessibilityHint("Auswählen und rechts neu belegen")
+        .accessibilityHint("Auswählen und darunter neu belegen")
     }
 
     private var resolvedLabel: String {
