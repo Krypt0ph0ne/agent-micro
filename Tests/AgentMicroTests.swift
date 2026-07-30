@@ -1,9 +1,39 @@
 import Foundation
 import Carbon.HIToolbox
 import XCTest
-@testable import CodexPad
+@testable import AgentMicro
 
-final class CodexPadTests: XCTestCase {
+final class AgentMicroTests: XCTestCase {
+    func testAgentMicroMigratesLegacyPreferencesAndApplicationSupport() throws {
+        let suiteName = "AgentMicroTests.migration.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("de", forKey: "CodexPad.appLanguage")
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentMicroMigration-\(UUID().uuidString)", isDirectory: true)
+        let oldDirectory = root.appendingPathComponent("CodexPad", isDirectory: true)
+        let legacyFile = oldDirectory.appendingPathComponent("Profiles.json")
+        try FileManager.default.createDirectory(at: oldDirectory, withIntermediateDirectories: true)
+        try Data("legacy".utf8).write(to: legacyFile)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        AgentMicroDataMigration.run(
+            defaults: defaults,
+            applicationSupportDirectory: root
+        )
+
+        XCTAssertEqual(defaults.string(forKey: "AgentMicro.appLanguage"), "de")
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: root
+                    .appendingPathComponent("Agent Micro", isDirectory: true)
+                    .appendingPathComponent("Profiles.json")
+                    .path
+            )
+        )
+    }
+
     func testProfileSerializationRoundTrip() throws {
         let catalog = CodexActionCatalog()
         let profile = ProfileFactory.codex(catalog: catalog)
@@ -150,9 +180,9 @@ final class CodexPadTests: XCTestCase {
         // runs on the same machine; clear it first so the "default is .codex"
         // assertion below is deterministic rather than depending on whatever a
         // previous run last left behind.
-        UserDefaults.standard.removeObject(forKey: "CodexPad.dictationSource")
+        UserDefaults.standard.removeObject(forKey: "AgentMicro.dictationSource")
         let store = ProfileStore(catalog: catalog, claudeCatalog: claudeCatalog, persistenceURL: url)
-        defer { UserDefaults.standard.removeObject(forKey: "CodexPad.dictationSource") }
+        defer { UserDefaults.standard.removeObject(forKey: "AgentMicro.dictationSource") }
 
         func dictationMacro(in profileName: String) -> String? {
             store.profiles.first(where: { $0.name == profileName })?.controls
@@ -475,8 +505,8 @@ final class CodexPadTests: XCTestCase {
     }
 
     func testLiveCH57xDetectionWhenHardwareTestsAreRequested() throws {
-        guard ProcessInfo.processInfo.environment["CODEXPAD_HARDWARE_TEST"] == "1" else {
-            throw XCTSkip("Set CODEXPAD_HARDWARE_TEST=1 only on the Mac with the attached test pad.")
+        guard ProcessInfo.processInfo.environment["AGENT_MICRO_HARDWARE_TEST"] == "1" else {
+            throw XCTSkip("Set AGENT_MICRO_HARDWARE_TEST=1 only on the Mac with the attached test pad.")
         }
         let report = DeviceDetector().detect()
         XCTAssertEqual(report.device?.vendorID, 0x1189, report.error ?? "Kein Gerät")
@@ -1058,7 +1088,7 @@ final class CodexPadTests: XCTestCase {
     @MainActor
     func testEventStatusWinsOverIdleSnapshotUntilInputResolvesAndTerminalTriggersOnce() {
         let bridge = CodexEventBridge()
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-status-flow-\(UUID().uuidString).json")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("agentmicro-status-flow-\(UUID().uuidString).json")
         let store = CodexThreadStore(bridge: bridge, persistenceURL: url)
         let thread = CodexThreadDescriptor(
             id: "status-flow-thread", title: "Test", preview: "", cwd: "/tmp/project",

@@ -5,7 +5,7 @@ enum CodexActionExecution: String, Codable, Hashable {
     case configurableShortcut
     case deepLink
     case unavailable
-    /// Answers something CodexPad itself is tracking (e.g. a pending
+    /// Answers something Agent Micro itself is tracking (e.g. a pending
     /// approval) — reported to the app only, no keyboard macro sent.
     case hostEvent
 

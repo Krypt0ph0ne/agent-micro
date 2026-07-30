@@ -4,10 +4,10 @@ import Foundation
 /// Turns a `ch57x-keyboard-tool` style macro expression (for example
 /// `cmd-shift-p` or `h,i`) into synthetic key events. This is only used for
 /// app-mediated controls such as tap-vs-hold, where the pad itself sends no HID
-/// macro and CodexPad decides which action to emit.
+/// macro and Agent Micro decides which action to emit.
 ///
 /// Posting synthetic events to other applications requires the Accessibility
-/// permission, which CodexPad already requests for the encoder automation.
+/// permission, which Agent Micro already requests for the encoder automation.
 enum KeystrokeSynthesizer {
     /// `true` when every comma-separated chord in the expression maps to a
     /// known virtual key. Media, mouse and other non-keyboard expressions are
@@ -77,7 +77,7 @@ enum KeystrokeSynthesizer {
         return (CGKeyCode(intrinsic.key), flags)
     }
 
-    /// US-ANSI virtual key codes keyed by the macro token names CodexPad uses.
+    /// US-ANSI virtual key codes keyed by the macro token names Agent Micro uses.
     /// These are the stable Carbon `kVK_*` values.
     private static let virtualKeyCodes: [String: Int] = [
         // Letters

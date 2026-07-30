@@ -31,7 +31,7 @@ child.on("exit", (code, signal) => {
   if (code && code !== 0) process.stderr.write(`app-server exited with code ${code} (${signal ?? "no signal"})\n`);
 });
 
-const timeout = setTimeout(() => finish({ mode, threadId, status: "timeout" }, 2), Number(process.env.CODEXPAD_PROBE_TIMEOUT_MS ?? 120_000));
+const timeout = setTimeout(() => finish({ mode, threadId, status: "timeout" }, 2), Number(process.env.AGENT_MICRO_PROBE_TIMEOUT_MS ?? 120_000));
 
 lines.on("line", (line) => {
   let message;
@@ -45,7 +45,7 @@ lines.on("line", (line) => {
     if (label === "initialize") {
       child.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
       if (mode === "inspect" || mode === "turns") {
-        const inspectedThreadId = process.env.CODEXPAD_THREAD_ID;
+        const inspectedThreadId = process.env.AGENT_MICRO_THREAD_ID;
         if (!inspectedThreadId) return finish({ mode, status: "missing_thread_id" }, 2);
         threadId = inspectedThreadId;
         if (mode === "turns") {
@@ -62,7 +62,7 @@ lines.on("line", (line) => {
           sortDirection: "desc",
           sourceKinds: ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"],
         };
-        if (process.env.CODEXPAD_SEARCH_TERM) listParams.searchTerm = process.env.CODEXPAD_SEARCH_TERM;
+        if (process.env.AGENT_MICRO_SEARCH_TERM) listParams.searchTerm = process.env.AGENT_MICRO_SEARCH_TERM;
         send("thread/list", listParams, "threadList");
         return;
       }
@@ -103,7 +103,7 @@ lines.on("line", (line) => {
       threadId = message.result.thread.id;
       const text = mode === "approval"
         ? "Create the file /private/tmp/codexpad-approval-probe using a shell command now."
-        : "Reply exactly CODEXPAD_COMPLETE and do not use any tools.";
+        : "Reply exactly AGENT_MICRO_COMPLETE and do not use any tools.";
       send("turn/start", { threadId, input: [{ type: "text", text, text_elements: [] }] }, "turnStart");
     }
     return;
@@ -131,6 +131,6 @@ lines.on("line", (line) => {
 });
 
 send("initialize", {
-  clientInfo: { name: "codexpad-status-probe", title: "CodexPad Status Probe", version: "1.0" },
+  clientInfo: { name: "agentmicro-status-probe", title: "Agent Micro Status Probe", version: "1.0" },
   capabilities: { experimentalApi: true, requestAttestation: false, mcpServerOpenaiFormElicitation: false },
 }, "initialize");

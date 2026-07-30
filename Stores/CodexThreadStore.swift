@@ -33,7 +33,7 @@ final class CodexThreadStore {
         self.bridge = bridge
         self.automationApp = automationApp
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("CodexPad", isDirectory: true)
+            .appendingPathComponent("Agent Micro", isDirectory: true)
         let defaultFilename = automationApp == .claude ? "ClaudeAgentKeyAssignments.json" : "AgentKeyAssignments.json"
         self.persistenceURL = persistenceURL ?? base.appendingPathComponent(defaultFilename)
         self.assignments = Self.load(from: self.persistenceURL)

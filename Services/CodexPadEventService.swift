@@ -22,7 +22,7 @@ struct CodexPadPhysicalEvent: Identifiable, Equatable {
 /// limited to satisfying Foundation's Timer callback contract.
 @Observable
 final class CodexPadEventService: @unchecked Sendable {
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "pad-events")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "pad-events")
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var reportBuffer: UnsafeMutablePointer<UInt8>?

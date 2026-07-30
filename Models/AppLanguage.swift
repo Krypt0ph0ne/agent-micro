@@ -4,7 +4,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     case german = "de"
     case english = "en"
 
-    static let defaultsKey = "CodexPad.appLanguage"
+    static let defaultsKey = "AgentMicro.appLanguage"
 
     var id: String { rawValue }
     var locale: Locale { Locale(identifier: rawValue) }

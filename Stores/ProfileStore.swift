@@ -60,10 +60,10 @@ enum ProfileFileCodec {
 @MainActor
 @Observable
 final class ProfileStore {
-    private static let selectedProfileDefaultsKey = "CodexPad.selectedProfileID"
-    private static let keyboardLayoutDefaultsKey = "CodexPad.keyboardLayout"
-    private static let dictationSourceDefaultsKey = "CodexPad.dictationSource"
-    private static let enabledAutomationAppsDefaultsKey = "CodexPad.enabledAutomationApps"
+    private static let selectedProfileDefaultsKey = "AgentMicro.selectedProfileID"
+    private static let keyboardLayoutDefaultsKey = "AgentMicro.keyboardLayout"
+    private static let dictationSourceDefaultsKey = "AgentMicro.dictationSource"
+    private static let enabledAutomationAppsDefaultsKey = "AgentMicro.enabledAutomationApps"
     private let persistenceURL: URL
     private let catalog: CodexActionCatalog
     private let claudeCatalog: CodexActionCatalog
@@ -125,7 +125,7 @@ final class ProfileStore {
     /// recovered profile-by-profile (or, in the worst case, discarded). Nil
     /// on a clean load.
     private(set) var lastLoadWarning: String?
-    private static let logger = Logger(subsystem: "com.codexpad.app", category: "profile-store")
+    private static let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "profile-store")
     /// Fired whenever a change is committed (including the `keyboardLayout`
     /// `didSet` below), so `AppState` can debounce an automatic hardware
     /// sync without `ProfileStore` needing to know `DeviceService` exists.
@@ -512,7 +512,7 @@ final class ProfileStore {
 
     private static func applicationSupportDirectory() -> URL {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return root.appendingPathComponent("CodexPad", isDirectory: true)
+        return root.appendingPathComponent("Agent Micro", isDirectory: true)
     }
 
     /// Loads `Profiles.json`. A clean decode is the fast path; if the whole

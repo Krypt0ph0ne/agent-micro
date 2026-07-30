@@ -1,7 +1,7 @@
 import Observation
 import ServiceManagement
 
-/// Thin wrapper around `SMAppService.mainApp` so CodexPad can optionally
+/// Thin wrapper around `SMAppService.mainApp` so Agent Micro can optionally
 /// launch at login — the background/menu-bar mode is only actually useful
 /// for hold-to-assign if the app is already running.
 @MainActor

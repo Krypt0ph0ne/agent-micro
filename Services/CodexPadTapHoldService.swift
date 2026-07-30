@@ -6,7 +6,7 @@ import Observation
 /// long the key stays down and synthesizes either the tap (primary) action or
 /// the hold (secondary) action once the threshold is crossed.
 ///
-/// Only the custom CodexPad firmware reports these edges, so on the plain
+/// Only the custom Agent Micro firmware reports these edges, so on the plain
 /// CH57x-2 path a tap-vs-hold control simply keeps sending its primary macro
 /// straight from the device and this service never sees an event.
 @MainActor

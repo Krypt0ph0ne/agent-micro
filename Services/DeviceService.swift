@@ -5,7 +5,7 @@ import OSLog
 @MainActor
 @Observable
 final class DeviceService {
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "device")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "device")
     private let detector: DeviceDetector
     private let processClient: CH57xProcessClient
     private let codexPadClient: CodexPadHIDClient

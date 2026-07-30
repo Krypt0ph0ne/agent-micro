@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify fresh-clone helper provenance
+        run: |
+          test ! -d References/ch57x-keyboard-tool/.git
+          test "$(tr -d '[:space:]' < References/ch57x-keyboard-tool/UPSTREAM_COMMIT)" = "aff33824af889022eb130db4c01c4c0bbaa8ab89"
+      - name: Test vendored Rust helper
+        run: cargo test --locked --manifest-path References/ch57x-keyboard-tool/Cargo.toml
+      - name: Test Agent Micro
+        run: swift test
+      - name: Compile and merge both helper architectures
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --locked --release --target aarch64-apple-darwin --manifest-path References/ch57x-keyboard-tool/Cargo.toml
+          cargo build --locked --release --target x86_64-apple-darwin --manifest-path References/ch57x-keyboard-tool/Cargo.toml
+          lipo -create \
+            References/ch57x-keyboard-tool/target/aarch64-apple-darwin/release/ch57x-keyboard-tool \
+            References/ch57x-keyboard-tool/target/x86_64-apple-darwin/release/ch57x-keyboard-tool \
+            -output /tmp/agent-micro-helper-universal
+          test "$(lipo -archs /tmp/agent-micro-helper-universal | tr ' ' '\n' | sort | xargs)" = "arm64 x86_64"
+      - name: Compile Universal 2 app executable
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          APP_BINARY="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/AgentMicro"
+          test "$(lipo -archs "$APP_BINARY" | tr ' ' '\n' | sort | xargs)" = "arm64 x86_64"
+      - name: Check shell scripts
+        run: bash -n script/*.sh
+      - name: Check repository hygiene
+        run: |
+          test -f LICENSE
+          test -f THIRD_PARTY_NOTICES.md
+          test -f ASSETS.md
+          git diff --check
+          ! git ls-files | grep -E '(^|/)(\\.env|.*\\.p12|.*\\.mobileprovision|Profiles\\.json)$'
+          ! git grep -IEn '(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY)'

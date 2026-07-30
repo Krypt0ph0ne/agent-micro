@@ -19,7 +19,7 @@ private final class CodexPadKeyboardReportBuffer: @unchecked Sendable {
 /// the separate vendor-defined event protocol omits or renumbers the key.
 @MainActor
 final class CodexPadKeyboardStateService: @unchecked Sendable {
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "keyboard-state")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "keyboard-state")
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var reportBuffer: CodexPadKeyboardReportBuffer?

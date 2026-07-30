@@ -6,24 +6,31 @@ let package = Package(
     defaultLocalization: "de",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "CodexPad", targets: ["CodexPad"]),
-        .executable(name: "CodexPadHIDProbe", targets: ["CodexPadHIDProbe"])
+        .executable(name: "AgentMicro", targets: ["AgentMicro"]),
+        .executable(name: "AgentMicroHIDProbe", targets: ["AgentMicroHIDProbe"])
     ],
     targets: [
         .executableTarget(
-            name: "CodexPad",
+            name: "AgentMicro",
             path: ".",
-            exclude: ["References", "Tests", "Tools", "script", "LICENSES", "Examples", "README.md", ".codex", "dist", "DesignQA", "design-qa.md", "Support/ch57x-keyboard-tool"],
+            exclude: [
+                "References", "Tests", "Tools", "script", "LICENSES", "Examples",
+                "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "CONTRIBUTING.md",
+                "CODE_OF_CONDUCT.md", "SECURITY.md", "PRIVACY.md", "TRADEMARKS.md",
+                "ASSETS.md",
+                ".github", ".codex", "dist", "DesignQA", "design-qa.md",
+                "Support/ch57x-keyboard-tool"
+            ],
             sources: ["App", "Models", "Stores", "Services", "Views", "Support"],
             resources: [.process("Resources")]
         ),
         .executableTarget(
-            name: "CodexPadHIDProbe",
+            name: "AgentMicroHIDProbe",
             path: "Tools/HIDProbe"
         ),
         .testTarget(
-            name: "CodexPadTests",
-            dependencies: ["CodexPad"],
+            name: "AgentMicroTests",
+            dependencies: ["AgentMicro"],
             path: "Tests"
         )
     ]

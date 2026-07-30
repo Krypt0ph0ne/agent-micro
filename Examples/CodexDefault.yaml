@@ -1,4 +1,4 @@
-# CodexPad's built-in Codex profile, rendered as ch57x-keyboard-tool YAML.
+# Agent Micro's built-in Codex profile, rendered as ch57x-keyboard-tool YAML.
 model: ch57x-2
 orientation: normal
 rows: 2
@@ -9,7 +9,7 @@ layers:
       - ['cmd-shift-leftbracket', 'cmd-opt-n', 'cmd-shift-rightbracket']
       - ['ctrl-shift-d', 'cmd-n', 'ctrl-shift-g']
     knobs:
-      # F22/F23/F24 are handled by CodexPad's fixed encoder automation.
+      # F22/F23/F24 are handled by Agent Micro's fixed encoder automation.
       - ccw: 'f22'
         press: 'f23'
         cw: 'f24'

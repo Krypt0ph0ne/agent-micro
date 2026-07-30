@@ -11,7 +11,7 @@ import OSLog
 @MainActor
 @Observable
 final class ApprovalCoordinator {
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "approval-coordinator")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "approval-coordinator")
 
     private let codexBridge: CodexEventBridge
     private let ledFeedback: CodexPadLEDFeedbackService
