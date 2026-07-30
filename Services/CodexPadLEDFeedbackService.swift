@@ -11,7 +11,7 @@ final class CodexPadLEDFeedbackService {
     /// 50 Hz keeps host-rendered brightness-range pulses visually smooth.
     private static let rangePulseTickMilliseconds = 20
 
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "led-feedback")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "led-feedback")
     private let encoder = CodexPadPacketEncoder()
     private let send: ([[UInt8]]) -> Void
     private var animationTask: Task<Void, Never>?

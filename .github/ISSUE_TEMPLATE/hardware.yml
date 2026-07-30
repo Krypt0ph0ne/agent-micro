@@ -1,0 +1,36 @@
+name: Hardware compatibility
+description: Report a tested macro-pad hardware revision
+title: "[Hardware]: "
+labels: ["hardware"]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Brand, model, and listing identifier
+    validations:
+      required: true
+  - type: input
+    id: usb
+    attributes:
+      label: USB VID:PID before flashing
+      placeholder: "1189:8890"
+    validations:
+      required: true
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Operation performed
+      options:
+        - Detection only
+        - Factory profile upload
+        - Custom firmware preflight
+        - Custom firmware flash
+    validations:
+      required: true
+  - type: textarea
+    id: observations
+    attributes:
+      label: Observations
+      description: Do not attach device dumps or unique IDs.
+    validations:
+      required: true

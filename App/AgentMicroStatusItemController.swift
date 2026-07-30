@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Menu bar presence so CodexPad stays reachable after the main window is
+/// Menu bar presence so Agent Micro stays reachable after the main window is
 /// closed. The app no longer quits when its last window closes (see
-/// `CodexPadAppDelegate`), so this is the only way back into the UI without
+/// `AgentMicroAppDelegate`), so this is the only way back into the UI without
 /// relaunching — which matters because the Codex event bridge, HID listening
 /// and hold-to-assign quick assign all keep running in the background.
 ///
@@ -12,7 +12,7 @@ import SwiftUI
 /// dropdown menu, so the day-to-day "which key does what" check doesn't
 /// require opening the main window.
 @MainActor
-final class CodexPadStatusItemController: NSObject {
+final class AgentMicroStatusItemController: NSObject {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
 

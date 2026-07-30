@@ -60,7 +60,7 @@ struct CH57xProcessClient {
         if let resource = Bundle.main.url(forResource: "ch57x-keyboard-tool", withExtension: nil) {
             return resource
         }
-        if let override = ProcessInfo.processInfo.environment["CODEXPAD_HELPER"], !override.isEmpty {
+        if let override = ProcessInfo.processInfo.environment["AGENT_MICRO_HELPER"], !override.isEmpty {
             return URL(fileURLWithPath: override)
         }
         let workspaceHelper = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

@@ -17,12 +17,12 @@ import OSLog
 @MainActor
 @Observable
 final class ClaudeReasoningAutomationService: EncoderAutomationService {
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "claude-encoder")
-    private static let preferenceKey = "CodexPad.claudeEncoderAutomationEnabled"
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "claude-encoder")
+    private static let preferenceKey = "AgentMicro.claudeEncoderAutomationEnabled"
     private static let modelListHoldThresholdSeconds: TimeInterval = 0.35
     static var modelListHoldThresholdMilliseconds: Int { Int(modelListHoldThresholdSeconds * 1000) }
     /// How long the Effort menu stays open after the last plain-rotate step
-    /// before CodexPad closes it again on its own.
+    /// before Agent Micro closes it again on its own.
     private static let autoCloseIdleSeconds: TimeInterval = 1.6
     /// Minimum real gap enforced between any two posted key events. Unlike
     /// Codex's plain rotate (a direct, stateless shortcut), Claude's effort
@@ -41,10 +41,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     var isExternallySuspended: () -> Bool = { false }
     private var hidManager: IOHIDManager?
     private var inputDebouncer = HIDInputDebouncer()
-    /// True whenever CodexPad has sent ⌘⇧E and not yet closed the Effort menu
+    /// True whenever Agent Micro has sent ⌘⇧E and not yet closed the Effort menu
     /// again (plain-rotate gesture).
     private var isEffortMenuOpen = false
-    /// True whenever CodexPad has sent ⌘⇧I and not yet closed the Model menu
+    /// True whenever Agent Micro has sent ⌘⇧I and not yet closed the Model menu
     /// again (hold+rotate gesture).
     private var isModelMenuOpen = false
     private var autoCloseTimer: Timer?
@@ -85,7 +85,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         updateMonitoring()
     }
 
-    /// Model-list-navigation entry point fed by CodexPad's own firmware
+    /// Model-list-navigation entry point fed by Agent Micro's own firmware
     /// protocol, mirroring `CodexReasoningAutomationService.handlePhysicalEvent`
     /// — the only channel that reliably reports the encoder press's release
     /// edge on the confirmed hardware.

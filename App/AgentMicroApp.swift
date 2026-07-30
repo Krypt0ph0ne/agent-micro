@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 @main
-struct CodexPadApp: App {
-    @NSApplicationDelegateAdaptor(CodexPadAppDelegate.self) private var appDelegate
+struct AgentMicroApp: App {
+    @NSApplicationDelegateAdaptor(AgentMicroAppDelegate.self) private var appDelegate
     private var appState: AppState { appDelegate.appState }
 
     var body: some Scene {
@@ -57,7 +57,7 @@ private struct LanguageAwareView<Content: View>: View {
 /// through the first-run permission walkthrough at least once.
 private struct RootView: View {
     let appState: AppState
-    @AppStorage("CodexPad.hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("AgentMicro.hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     var body: some View {
         if hasCompletedOnboarding {
@@ -70,9 +70,15 @@ private struct RootView: View {
 }
 
 @MainActor
-final class CodexPadAppDelegate: NSObject, NSApplicationDelegate {
-    let appState = AppState()
-    private let statusItemController = CodexPadStatusItemController()
+final class AgentMicroAppDelegate: NSObject, NSApplicationDelegate {
+    let appState: AppState
+    private let statusItemController = AgentMicroStatusItemController()
+
+    override init() {
+        AgentMicroDataMigration.run()
+        appState = AppState()
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)

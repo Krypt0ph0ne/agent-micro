@@ -4,9 +4,9 @@ import Foundation
 /// A trigger remains reserved after the wizard closes so it cannot later be
 /// suggested for a different action or profile.
 enum CodexTriggerRegistry {
-    static let defaultsKey = "CodexPad.reservedConfigurableShortcutTriggers"
-    static let assignmentsDefaultsKey = "CodexPad.configurableShortcutAssignments"
-    static let confirmedAssignmentsDefaultsKey = "CodexPad.confirmedConfigurableShortcutAssignments"
+    static let defaultsKey = "AgentMicro.reservedConfigurableShortcutTriggers"
+    static let assignmentsDefaultsKey = "AgentMicro.configurableShortcutAssignments"
+    static let confirmedAssignmentsDefaultsKey = "AgentMicro.confirmedConfigurableShortcutAssignments"
 
     static func reservedTriggers(defaults: UserDefaults = .standard) -> Set<String> {
         Set((defaults.stringArray(forKey: defaultsKey) ?? []).map { $0.lowercased() })

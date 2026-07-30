@@ -23,7 +23,7 @@ struct CodexPadPacketEncoder {
     func packets(profile: MacropadProfile, layout: KeyboardLayout = .usANSI) throws -> [[UInt8]] {
         try HardwareControl.allCases.map { control -> [UInt8] in
             let binding = profile.binding(for: control)
-            // Tap-vs-hold controls are driven by CodexPad itself: the
+            // Tap-vs-hold controls are driven by Agent Micro itself: the
             // firmware only reports the physical edges while the app
             // synthesizes the resolved behavior, so nothing is bound on the
             // device itself.

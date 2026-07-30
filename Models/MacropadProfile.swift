@@ -9,7 +9,7 @@ struct ControlBinding: Codable, Hashable, Identifiable {
     var control: HardwareControl
     var action: KeyboardAction
     /// Optional second function fired when the key is held past the threshold.
-    /// When present, the control is driven by CodexPad (app-only) instead of the
+    /// When present, the control is driven by Agent Micro (app-only) instead of the
     /// firmware, so the tap and the hold action can differ.
     var holdAction: KeyboardAction?
     var holdThresholdMilliseconds: Int?
@@ -862,7 +862,7 @@ enum ProfileFactory {
     }
 
     /// F22/F23/F24 are private triggers with no built-in Codex meaning, so the
-    /// firmware never bypasses CodexPad here: every rotate and press edge
+    /// firmware never bypasses Agent Micro here: every rotate and press edge
     /// reaches `CodexReasoningAutomationService`, which then decides whether
     /// to emit the direct F18/F19 reasoning shortcuts or (in model-list
     /// navigation mode) arrow-key menu navigation.

@@ -5,7 +5,7 @@ import Observation
 import OSLog
 import UserNotifications
 
-/// Single source of truth for the two TCC grants CodexPad's automation
+/// Single source of truth for the two TCC grants Agent Micro's automation
 /// needs (Accessibility to post keystrokes, Input Monitoring to read the
 /// pad's HID reports). Every service that used to call
 /// `AXIsProcessTrusted()`/`CGPreflightListenEventAccess()` itself now reads
@@ -13,13 +13,13 @@ import UserNotifications
 /// exactly one place that can notice a revocation.
 ///
 /// Refreshed both when the app becomes active (catches "user just came back
-/// from System Settings") and on a background timer, since CodexPad mostly
+/// from System Settings") and on a background timer, since Agent Micro mostly
 /// lives in the menu bar with no window open — without the timer, a
 /// revocation while headless would never be re-detected.
 @MainActor
 @Observable
 final class PermissionMonitor {
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "permissions")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "permissions")
     private static let pollIntervalSeconds: TimeInterval = 7
 
     private(set) var hasAccessibilityPermission: Bool

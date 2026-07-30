@@ -65,14 +65,14 @@ private enum CodexDismissibleArea: String {
 @MainActor
 @Observable
 final class CodexReasoningAutomationService: EncoderAutomationService {
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "encoder")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "encoder")
     /// True while the Codex profile is selected; both this service and
     /// `ClaudeReasoningAutomationService` listen to the same private F22–F24
     /// HID triggers, so only the one matching the active profile may act.
     private let isActiveProfile: () -> Bool
     var isExternallySuspended: () -> Bool = { false }
-    private static let preferenceKey = "CodexPad.encoderAutomationEnabled"
-    private static let migrationKey = "CodexPad.simpleEncoderV5"
+    private static let preferenceKey = "AgentMicro.encoderAutomationEnabled"
+    private static let migrationKey = "AgentMicro.simpleEncoderV5"
     /// The dial must be held this long before a press starts driving the
     /// Model Picker; short presses fall through untouched.
     private static let modelListHoldThresholdSeconds: TimeInterval = 0.35
@@ -120,7 +120,7 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     }
 
     /// TCC permissions can change while System Settings is in front. Refresh
-    /// them whenever CodexPad becomes active and reopen HID only after access
+    /// them whenever Agent Micro becomes active and reopen HID only after access
     /// was actually granted.
     func refreshPermissions() {
         permissionMonitor.refresh()
@@ -155,7 +155,7 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         toggle(.modelPicker)
     }
 
-    /// Model-list-navigation entry point fed by CodexPad's own firmware
+    /// Model-list-navigation entry point fed by Agent Micro's own firmware
     /// protocol (`CodexPadEventService`), which is the only channel that
     /// reliably reports the encoder press's release edge: the generic
     /// keyboard-HID interface only ever delivers the key-down for this

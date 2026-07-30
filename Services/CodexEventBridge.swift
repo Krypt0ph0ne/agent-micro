@@ -58,14 +58,14 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         case readThread(String)
     }
 
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "codex-bridge")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "codex-bridge")
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var input: FileHandle?
     /// The app-server stream is split into NDJSON lines and deserialized off the
     /// main thread; only the finished objects are handed back to the main actor.
     /// An active Codex session streams a lot, and doing this parse on the main
     /// thread froze the UI. The reader is only ever touched on `parseQueue`.
-    @ObservationIgnored nonisolated private let parseQueue = DispatchQueue(label: "com.codexpad.bridge.parse")
+    @ObservationIgnored nonisolated private let parseQueue = DispatchQueue(label: "io.github.krypt0ph0ne.agentmicro.bridge.parse")
     @ObservationIgnored nonisolated private let lineReader = NDJSONLineReader()
     @ObservationIgnored private var nextRequestID = 1
     @ObservationIgnored private var pendingRequests: [Int: RequestPurpose] = [:]
@@ -221,7 +221,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
 
     private func sendInitialize() {
         sendRequest(method: "initialize", params: [
-            "clientInfo": ["name": "codexpad", "title": "CodexPad", "version": "1.0"],
+            "clientInfo": ["name": "agentmicro", "title": "Agent Micro", "version": "1.0"],
             "capabilities": [
                 "experimentalApi": true,
                 "requestAttestation": false,

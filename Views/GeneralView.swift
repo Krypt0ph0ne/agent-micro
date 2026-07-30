@@ -63,7 +63,7 @@ struct GeneralView: View {
                 }
             }
             Section("Sicherheitsmodell") {
-                Text("Agent Micro speichert Profile und Agent-Zuordnungen ausschließlich unter Application Support/CodexPad. Der Event-Bridge-Service startet den lokalen Codex App Server über stdio, beobachtet Thread-, Turn-, Approval- und Nutzereingabe-Ereignisse und beantwortet Approval-Anfragen niemals. Codex-Tasten öffnen den offiziellen Thread-Link. Claude-Tasten verwenden für Desktop-Sitzungen die lokale Code-Route und für reine CLI-Sitzungen Claudes Resume-Link; Mausautomation wird nicht verwendet.")
+                Text("Agent Micro speichert Profile und Agent-Zuordnungen ausschließlich unter Application Support/Agent Micro. Der Event-Bridge-Service startet den lokalen Codex App Server über stdio und beobachtet Thread-, Turn-, Approval- und Nutzereingabe-Ereignisse. Approval-Antworten werden nur nach einem ausdrücklich zugewiesenen physischen Tastendruck gesendet, niemals automatisch. Codex- und Claude-Tasten öffnen ausschließlich vorhandene Desktop-Sitzungen; Mausautomation wird nicht verwendet.")
                     .fixedSize(horizontal: false, vertical: true)
             }
             Section("LED") {

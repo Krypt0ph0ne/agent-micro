@@ -120,9 +120,9 @@ private struct ClaudeBridgeError: Error {
 @MainActor
 @Observable
 final class ClaudeAgentBridge: AgentBridge {
-    private let logger = Logger(subsystem: "com.codexpad.app", category: "claude-bridge")
+    private let logger = Logger(subsystem: "io.github.krypt0ph0ne.agentmicro", category: "claude-bridge")
     private static let pollIntervalSeconds: TimeInterval = 2
-    private static let hooksEnabledDefaultsKey = "CodexPad.claudeHooksStatusEnabled"
+    private static let hooksEnabledDefaultsKey = "AgentMicro.claudeHooksStatusEnabled"
     private static let hookEventNames = ["Notification", "Stop", "SubagentStop", "UserPromptSubmit", "PreToolUse"]
     /// Once the tailed status file grows past this, it's truncated — every
     /// line up to that point has already been folded into `sessionLastEvent`,
@@ -151,7 +151,7 @@ final class ClaudeAgentBridge: AgentBridge {
     private(set) var connectionState: CodexBridgeConnectionState = .disconnected
     private(set) var lastError: String?
     /// Off by default: only true once the user has explicitly enabled the
-    /// hooks bridge in Settings, which is when CodexPad first writes to
+    /// hooks bridge in Settings, which is when Agent Micro first writes to
     /// `~/.claude/settings.json`.
     private(set) var isHooksStatusEnabled: Bool
     private(set) var hooksStatusError: String?
@@ -218,7 +218,7 @@ final class ClaudeAgentBridge: AgentBridge {
     /// `~/.claude/settings.json`. Only ever called from an explicit Settings
     /// toggle — never automatically. Existing hooks the user already has for
     /// these events are preserved; only entries whose command exactly matches
-    /// CodexPad's own hook script are added or removed.
+    /// Agent Micro's own hook script are added or removed.
     func setHooksStatusEnabled(_ enabled: Bool) {
         do {
             if enabled {
@@ -396,17 +396,17 @@ final class ClaudeAgentBridge: AgentBridge {
 
     // MARK: - Opt-in hooks status bridge
 
-    private static func codexPadSupportDirectory() -> URL {
+    private static func agentMicroSupportDirectory() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("CodexPad", isDirectory: true)
+            .appendingPathComponent("Agent Micro", isDirectory: true)
     }
 
     private static func hookScriptURL() -> URL {
-        codexPadSupportDirectory().appendingPathComponent("claude-hook-status.sh")
+        agentMicroSupportDirectory().appendingPathComponent("claude-hook-status.sh")
     }
 
     private static func statusFileURL() -> URL {
-        codexPadSupportDirectory().appendingPathComponent("ClaudeSessionStatus.jsonl")
+        agentMicroSupportDirectory().appendingPathComponent("ClaudeSessionStatus.jsonl")
     }
 
     private static func settingsURL() -> URL {
