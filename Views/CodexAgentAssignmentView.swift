@@ -56,6 +56,14 @@ struct CodexAgentAssignmentView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if assignment != nil,
+                   appState.activeAgentThreads.liveStatusAvailability == .sessionListOnly {
+                    Text(appState.activeAgentThreads.liveStatusAvailability.detail)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help(appState.activeAgentThreads.liveStatusAvailability.title)
+                }
             }
 
             Spacer(minLength: 6)
@@ -97,10 +105,10 @@ struct CodexAgentAssignmentView: View {
         .foregroundStyle(.secondary)
     }
 
+    /// Mirrors the LED exactly. Greying this out while the pad showed the real
+    /// colour was the inconsistency; the coarser availability level is
+    /// communicated as its own caption instead.
     private var statusColor: Color {
-        if appState.activeAgentThreads.liveStatusAvailability == .notActivated {
-            return .secondary
-        }
         switch status {
         case .unassigned: return .secondary
         case .idle: return .white

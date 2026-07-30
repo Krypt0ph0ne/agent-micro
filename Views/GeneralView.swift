@@ -52,7 +52,7 @@ struct GeneralView: View {
                     get: { appState.claudeAgentBridge.isHooksStatusEnabled },
                     set: { appState.claudeAgentBridge.setHooksStatusEnabled($0) }
                 ))
-                Text("Standardmäßig aus. `claude agents --json` liefert nur eine Liste laufender Sessions, keinen Live-Status. Aktivieren trägt fünf Hook-Einträge (Notification, Stop, SubagentStop, UserPromptSubmit, PreToolUse) in dein globales ~/.claude/settings.json ein, die nur eine Statuszeile pro Ereignis protokollieren – sie greifen nie in eine laufende Session ein und beeinflussen kein Ergebnis. Diese Hooks gelten für jede Claude-Code-Session auf diesem Rechner, nicht nur für am Pad zugewiesene Agenten. Vorhandene eigene Hooks für diese Ereignisse bleiben unverändert; Deaktivieren entfernt ausschließlich die von Agent Micro eingetragenen Einträge wieder.")
+                Text("Standardmäßig aus. Ohne Hooks liefert `claude agents --json` bereits Läuft und Bereit – aber weder „Eingabe erforderlich“ noch Abschluss oder Fehler. Aktivieren trägt fünf Hook-Einträge (Notification, Stop, SubagentStop, UserPromptSubmit, PreToolUse) in dein globales ~/.claude/settings.json ein, die nur eine Statuszeile pro Ereignis protokollieren – sie greifen nie in eine laufende Session ein und beeinflussen kein Ergebnis. Diese Hooks gelten für jede Claude-Code-Session auf diesem Rechner, nicht nur für am Pad zugewiesene Agenten. Vorhandene eigene Hooks für diese Ereignisse bleiben unverändert; Deaktivieren entfernt ausschließlich die von Agent Micro eingetragenen Einträge wieder.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -86,6 +86,11 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
     private(set) var connectionState: CodexBridgeConnectionState = .disconnected
     private(set) var lastError: String?
     let liveStatusAvailability: AgentLiveStatusAvailability = .available
+    /// The app-server pushes turn, approval and rollout events, so a
+    /// `thread/list` read is only ever reconciliation. Never change this to
+    /// `.authoritativeForRunning`: it would let a stale idle list snapshot
+    /// erase a live Codex turn, which is the bug the merge rule exists for.
+    let snapshotAuthority: AgentSnapshotAuthority = .reconciliationOnly
 
     var onThreads: (([CodexThreadDescriptor]) -> Void)?
     var onStatus: ((String, CodexAgentStatus, AgentStatusSource) -> Void)?

@@ -235,11 +235,13 @@ private struct MenuBarSelectedControlPanel: View {
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
                 .help(action.kind.isAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.displayLabel)
-            if action.kind.isAgent, assignment != nil, appState.activeAgentThreads.liveStatusAvailability == .notActivated {
-                Text("Live-Status nicht aktiviert")
+            if action.kind.isAgent, assignment != nil,
+               appState.activeAgentThreads.liveStatusAvailability == .sessionListOnly {
+                Text(appState.activeAgentThreads.liveStatusAvailability.title)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .help(appState.activeAgentThreads.liveStatusAvailability.detail)
             }
             Spacer(minLength: 4)
             if action.kind.isAgent {
@@ -413,8 +415,8 @@ private struct MenuBarSelectedControlPanel: View {
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 9))
     }
 
+    /// Mirrors the LED exactly — see `CodexAgentAssignmentView.statusColor`.
     private var statusColor: Color {
-        if appState.activeAgentThreads.liveStatusAvailability == .notActivated { return .secondary }
         switch status {
         case .unassigned: return .secondary
         case .idle: return .white

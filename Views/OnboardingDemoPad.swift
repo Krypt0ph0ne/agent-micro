@@ -114,7 +114,9 @@ private struct DemoKeyCell: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Text(control.title.replacingOccurrences(of: "Taste ", with: ""))
+            // Just the number: stripping the literal "Taste " left the English
+            // titles as "Key 1", which no longer fits the cell.
+            Text(control.title.split(separator: " ").last.map(String.init) ?? control.title)
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.75))
             Circle()

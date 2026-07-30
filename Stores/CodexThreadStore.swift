@@ -49,7 +49,7 @@ final class CodexThreadStore {
     var liveStatusAvailability: AgentLiveStatusAvailability { bridge.liveStatusAvailability }
     var sessionNavigationSummary: String {
         automationApp == .claude
-            ? "Claude-Sitzungen werden über ihre Code-Sitzungs-ID in der bestehenden Desktop-Unterhaltung geöffnet. Sitzungen ohne Claude-Titel sind nicht mit Merge-Status verknüpft."
+            ? "Claude-Sitzungen werden über ihre Bridge-Sitzungs-ID (`session_…`) in der bestehenden Desktop-Unterhaltung geöffnet. Ältere Sitzungen ohne diese ID lassen sich nicht direkt anspringen; ein Tastendruck holt dann nur Claude nach vorn."
             : "Codex öffnet den zugewiesenen Thread per Deep Link."
     }
 
@@ -57,6 +57,10 @@ final class CodexThreadStore {
         bridge.track(threadIDs: Set(assignments.map(\.threadID)))
         bridge.start()
     }
+
+    /// Pauses the bridge while this store's profile is not selected. Nothing
+    /// persisted or in-memory is discarded, so `start()` resumes seamlessly.
+    func suspend() { bridge.suspend() }
 
     func refresh() { bridge.refreshThreads() }
     func refreshRecentThreads() { bridge.refreshRecentThreads() }
@@ -85,9 +89,12 @@ final class CodexThreadStore {
         return raw
     }
 
+    /// Always the state the LEDs are actually showing. The availability level
+    /// is a separate, secondary caption (`liveStatusAvailability`) — replacing
+    /// the status with it made the UI claim there was no live status while the
+    /// pad was pulsing blue.
     func statusTitle(for control: HardwareControl) -> String {
         guard assignment(for: control) != nil else { return CodexAgentStatus.unassigned.title }
-        guard liveStatusAvailability == .available else { return liveStatusAvailability.title }
         return presentedStatus(for: control).title
     }
 
@@ -115,8 +122,11 @@ final class CodexThreadStore {
             threadTitle: thread.displayTitle,
             isSubagent: thread.isSubagent,
             threadProject: thread.projectName,
-            navigationID: thread.navigationID
-                ?? (automationApp == .claude ? thread.alternateID : thread.id)
+            // For Claude an absent bridge ID must stay absent — the CLI UUID
+            // that used to be substituted here is rejected by Claude's route.
+            navigationID: automationApp == .claude
+                ? thread.navigationID
+                : (thread.navigationID ?? thread.id)
         ))
         assignments.sort { $0.control.reportedControlIndex < $1.control.reportedControlIndex }
         persist()
@@ -135,12 +145,20 @@ final class CodexThreadStore {
     @discardableResult
     func openAssignedThread(for control: HardwareControl) -> Bool {
         guard let assignment = assignment(for: control) else { return false }
-        let threadID = assignment.navigationID ?? assignment.threadID
         if automationApp == .claude {
-            let url = Self.navigationURL(for: threadID, app: .claude)
-            guard let url else { return activateApp() }
-            return NSWorkspace.shared.open(url)
+            // Fall back to the bridge ID the current thread list reports, so a
+            // key assigned before Claude recorded one starts working as soon as
+            // the session is resumed, without needing a re-assignment.
+            let threadID = assignment.navigationID
+                ?? threads.first(where: { $0.id == assignment.threadID })?.navigationID
+            // A press must never be a no-op: without a routable ID, or if the
+            // scheme handler declines, at least bring Claude to the front.
+            guard let threadID, let url = Self.navigationURL(for: threadID, app: .claude) else {
+                return activateApp()
+            }
+            return NSWorkspace.shared.open(url) || activateApp()
         }
+        let threadID = assignment.navigationID ?? assignment.threadID
         guard let url = Self.navigationURL(for: threadID, app: .codex) else { return false }
         return NSWorkspace.shared.open(url)
     }
@@ -149,13 +167,14 @@ final class CodexThreadStore {
         switch app {
         case .codex:
             return URL(string: "codex://threads/\(threadID)")
-        case .claude where threadID.hasPrefix("local_"):
-            return nil
         case .claude:
-            // `claude://resume?session=…` imports a CLI transcript into a new
-            // Desktop session. That is why a tap produced "General coding
-            // session" copies. `code/<bridge UUID>` instead resolves the
-            // existing Desktop session through Claude's session manager.
+            // Claude's handler validates the identifier with `/^(cse|session)_/`
+            // and bails out silently on anything else — that is why a tap with
+            // a CLI UUID or a `local_…` ID did nothing at all, not even focus
+            // the window. `claude://resume?session=…` is not a substitute: it
+            // *imports* the CLI transcript into a new Desktop session, which is
+            // where the duplicated "General coding session" entries came from.
+            guard ClaudeAgentBridge.isRoutableBridgeSessionID(threadID) else { return nil }
             return URL(string: "claude://code/\(threadID)")
         }
     }
@@ -201,7 +220,8 @@ final class CodexThreadStore {
                 thread.status = .needsAttention
             } else if let current = byID[thread.id],
                       current.status != .idle,
-                      thread.status == .idle {
+                      thread.status == .idle,
+                      !snapshotIdleMayEnd(current.status) {
                 // `thread/list` and the descriptor half of `thread/read`
                 // regularly report an idle shell while a more authoritative
                 // turn event/rollout/hook says the assigned agent is active
@@ -224,13 +244,22 @@ final class CodexThreadStore {
     /// Re-links assignments saved before Claude Desktop session navigation was
     /// available. Their CLI UUID matches `alternateID`; after migration the
     /// visible Desktop ID, readable title and project are persisted together.
+    ///
+    /// Codex descriptors carry no `alternateID`, so this stays inert for the
+    /// Codex store exactly as before.
     private func migrateAssignments(to incoming: [CodexThreadDescriptor]) {
         var changed = false
         for thread in incoming {
-            guard let alternateID = thread.alternateID else { continue }
+            guard thread.alternateID != nil || automationApp == .claude else { continue }
+            let alternateID = thread.alternateID
             for index in assignments.indices
             where assignments[index].threadID == alternateID || assignments[index].threadID == thread.id {
-                let navigationID = thread.navigationID ?? alternateID
+                // A stale CLI UUID in `navigationID` is cleared by this, since
+                // Claude's route rejects it; it is replaced as soon as Claude
+                // records a bridge ID for the session.
+                let navigationID = automationApp == .claude
+                    ? thread.navigationID
+                    : (thread.navigationID ?? alternateID)
                 if assignments[index].threadID != thread.id
                     || assignments[index].threadTitle != thread.displayTitle
                     || assignments[index].threadProject != thread.projectName
@@ -247,6 +276,19 @@ final class CodexThreadStore {
         assignments.sort { $0.control.reportedControlIndex < $1.control.reportedControlIndex }
         persist()
         bridge.track(threadIDs: Set(assignments.map(\.threadID)))
+    }
+
+    /// Whether an `idle` arriving from a list snapshot is allowed to end
+    /// `current`. For an event-driven bridge the answer is always no — that is
+    /// the Codex rule and it stays untouched. For a poll-only bridge the
+    /// snapshot is the sole liveness source, so it may end `running`, and only
+    /// `running`: attention and terminal states come from hook events, which a
+    /// vanished process does not disprove.
+    private func snapshotIdleMayEnd(_ current: CodexAgentStatus) -> Bool {
+        switch bridge.snapshotAuthority {
+        case .reconciliationOnly: false
+        case .authoritativeForRunning: current == .running
+        }
     }
 
     private func updateStatus(_ status: CodexAgentStatus, threadID: String, source: AgentStatusSource) {
@@ -274,7 +316,7 @@ final class CodexThreadStore {
             // path in addition to `merge`. It needs the same precedence rule:
             // an idle reconciliation is not evidence that a known running,
             // attention, completed, failed or interrupted state ended.
-            if status == .idle, oldStatus != .idle {
+            if status == .idle, oldStatus != .idle, !snapshotIdleMayEnd(oldStatus) {
                 return
             }
         }

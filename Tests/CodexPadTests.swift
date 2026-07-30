@@ -102,7 +102,8 @@ final class CodexPadTests: XCTestCase {
           "originCwd": "/Users/test/Agent Micro",
           "createdAt": 1780000000000,
           "lastActivityAt": 1780001000000,
-          "isArchived": false
+          "isArchived": false,
+          "bridgeSessionIds": ["session_01XMavBeqfaCXC5dbAMrn6ba"]
         }
         """.utf8)
         let session = try JSONDecoder().decode(ClaudeDesktopSession.self, from: data)
@@ -112,7 +113,9 @@ final class CodexPadTests: XCTestCase {
         XCTAssertEqual(thread.projectName, "Agent Micro")
         XCTAssertEqual(thread.preview, "Agent Micro · 1cdac978")
         XCTAssertEqual(thread.alternateID, "8566a8f9-bd20-4f55-bb33-7675859812ed")
-        XCTAssertEqual(thread.navigationID, "8566a8f9-bd20-4f55-bb33-7675859812ed")
+        // The CLI UUID identifies the session for hooks and migration, but it
+        // is not what Claude's navigation route accepts.
+        XCTAssertEqual(thread.navigationID, "session_01XMavBeqfaCXC5dbAMrn6ba")
     }
 
     func testClaudeNavigationUsesExistingDesktopSessionRoute() {
@@ -121,9 +124,11 @@ final class CodexPadTests: XCTestCase {
             "claude://code/session_01XMavBeqfaCXC5dbAMrn6ba"
         )
         XCTAssertNil(CodexThreadStore.navigationURL(for: "local_1cdac978-4c4d-452c-87ca-d3769b994e0a", app: .claude))
-        XCTAssertEqual(
-            CodexThreadStore.navigationURL(for: "8566a8f9-bd20-4f55-bb33-7675859812ed", app: .claude)?.absoluteString,
-            "claude://code/8566a8f9-bd20-4f55-bb33-7675859812ed"
+        // Verified against Claude's own handler: the CLI UUID fails its
+        // `/^(cse|session)_/` check, so the deep link is dropped without even
+        // focusing the window. Sending it is worse than not sending it.
+        XCTAssertNil(
+            CodexThreadStore.navigationURL(for: "8566a8f9-bd20-4f55-bb33-7675859812ed", app: .claude)
         )
     }
 
@@ -1133,6 +1138,234 @@ final class CodexPadTests: XCTestCase {
         // thread to idle.
         bridge.onStatus?(idleThread.id, .idle, .event)
         XCTAssertEqual(store.status(for: .key1), .idle)
+
+        XCTAssertEqual(
+            bridge.snapshotAuthority,
+            .reconciliationOnly,
+            "Codex owns its status transitions through events; a poll must never end one"
+        )
+    }
+
+    /// Claude has no event stream, so the disappearance of a session from
+    /// `claude agents --json` is the only end-of-run signal that will ever
+    /// arrive. Without this the LED pulsed blue forever after the first run.
+    @MainActor
+    func testClaudePollSnapshotEndsRunningButNotTerminalOrAttentionStates() {
+        let bridge = ClaudeAgentBridge()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-poll-idle-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, automationApp: .claude, persistenceURL: url)
+        let idleThread = CodexThreadDescriptor(
+            id: "local_poll", title: "Claude", preview: "", cwd: "/tmp/project",
+            parentThreadID: nil, agentNickname: nil, agentRole: "Claude Desktop",
+            updatedAt: .now, status: .idle,
+            alternateID: "cli-uuid", navigationID: "session_01ABC"
+        )
+        store.assign(idleThread, to: .key1)
+        bridge.onThreads?([idleThread])
+
+        var runningThread = idleThread
+        runningThread.status = .running
+        bridge.onThreads?([runningThread])
+        XCTAssertEqual(store.status(for: .key1), .running)
+
+        // The session exits: the poll reports the Desktop descriptor as idle.
+        bridge.onThreads?([idleThread])
+        XCTAssertEqual(
+            store.status(for: .key1),
+            .idle,
+            "A poll-only bridge must be allowed to end a running state"
+        )
+
+        // Hook-driven states are still protected — a vanished process is not
+        // evidence that a completed, failed or attention state never happened.
+        for protectedStatus in [
+            CodexAgentStatus.needsAttention,
+            .completed,
+            .failed,
+            .interrupted
+        ] {
+            bridge.onStatus?(idleThread.id, protectedStatus, .hook)
+            XCTAssertEqual(store.status(for: .key1), protectedStatus)
+            bridge.onThreads?([idleThread])
+            XCTAssertEqual(
+                store.status(for: .key1),
+                protectedStatus,
+                "An idle poll snapshot must not overwrite \(protectedStatus)"
+            )
+        }
+    }
+
+    /// Without the hooks the poll still yields a real running/idle state, so
+    /// the UI must name that state instead of claiming there is none — the LED
+    /// is driven from the very same value.
+    @MainActor
+    func testClaudeStatusTitleMatchesLEDStateWhenOnlySessionListIsAvailable() {
+        let bridge = ClaudeAgentBridge()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-status-title-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, automationApp: .claude, persistenceURL: url)
+        var thread = CodexThreadDescriptor(
+            id: "local_title", title: "Claude", preview: "", cwd: "/tmp/project",
+            parentThreadID: nil, agentNickname: nil, agentRole: "Claude Desktop",
+            updatedAt: .now, status: .idle,
+            alternateID: "cli-uuid", navigationID: "session_01ABC"
+        )
+        store.assign(thread, to: .key1)
+        thread.status = .running
+        bridge.onThreads?([thread])
+
+        XCTAssertEqual(store.liveStatusAvailability, .sessionListOnly)
+        XCTAssertEqual(store.status(for: .key1), .running)
+        XCTAssertEqual(
+            store.statusTitle(for: .key1),
+            CodexAgentStatus.running.title,
+            "The label must report the state the LED is showing"
+        )
+    }
+
+    /// Claude validates the deep-link identifier with `/^(cse|session)_/` and
+    /// silently drops anything else without even focusing its window, which is
+    /// why a key press used to do nothing at all.
+    func testClaudeNavigationURLAcceptsOnlyBridgeSessionIdentifiers() {
+        XCTAssertEqual(
+            CodexThreadStore.navigationURL(for: "session_01ABC", app: .claude),
+            URL(string: "claude://code/session_01ABC")
+        )
+        XCTAssertEqual(
+            CodexThreadStore.navigationURL(for: "cse_01ABC", app: .claude),
+            URL(string: "claude://code/cse_01ABC")
+        )
+        XCTAssertNil(
+            CodexThreadStore.navigationURL(for: "local_c9f6e9e5-ae9a-4f04", app: .claude),
+            "The Desktop metadata ID is not routable"
+        )
+        XCTAssertNil(
+            CodexThreadStore.navigationURL(for: "c109ee95-b1d8-4e92-992b", app: .claude),
+            "The CLI UUID is rejected by Claude's handler, so it must not be sent"
+        )
+        XCTAssertEqual(
+            CodexThreadStore.navigationURL(for: "0199", app: .codex),
+            URL(string: "codex://threads/0199"),
+            "Codex deep links stay unconditional"
+        )
+    }
+
+    /// The bridge ID is the routable identity; a Claude assignment must never
+    /// persist the CLI UUID as its navigation target again.
+    @MainActor
+    func testClaudeAssignmentPersistsBridgeSessionIDAndNeverTheCLIUUID() {
+        let bridge = ClaudeAgentBridge()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-navid-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, automationApp: .claude, persistenceURL: url)
+        let withBridgeID = CodexThreadDescriptor(
+            id: "local_withbridge", title: "Mit Bridge-ID", preview: "", cwd: "/tmp/project",
+            parentThreadID: nil, agentNickname: nil, agentRole: "Claude Desktop",
+            updatedAt: .now, status: .idle,
+            alternateID: "cli-uuid-1", navigationID: "session_01ABC"
+        )
+        let withoutBridgeID = CodexThreadDescriptor(
+            id: "local_nobridge", title: "Ohne Bridge-ID", preview: "", cwd: "/tmp/project",
+            parentThreadID: nil, agentNickname: nil, agentRole: "Claude Desktop",
+            updatedAt: .now, status: .idle,
+            alternateID: "cli-uuid-2", navigationID: nil
+        )
+
+        store.assign(withBridgeID, to: .key1)
+        XCTAssertEqual(store.assignment(for: .key1)?.navigationID, "session_01ABC")
+
+        store.assign(withoutBridgeID, to: .key2)
+        XCTAssertNil(
+            store.assignment(for: .key2)?.navigationID,
+            "An unroutable CLI UUID must not be substituted"
+        )
+
+        // A stale CLI UUID from an older build is cleared once the poll runs.
+        store.assign(withoutBridgeID, to: .key3)
+        var recorded = withoutBridgeID
+        recorded.navigationID = "session_01XYZ"
+        bridge.onThreads?([recorded])
+        XCTAssertEqual(store.assignment(for: .key3)?.navigationID, "session_01XYZ")
+    }
+
+    /// The 2s poll spawns a `claude` process per tick, so it must stay off
+    /// while the Codex profile is selected — and a stray refresh from a picker
+    /// must not quietly restart it.
+    @MainActor
+    func testSuspendedClaudeBridgeStopsPollingUntilExplicitlyStarted() {
+        let bridge = ClaudeAgentBridge()
+        bridge.start()
+        XCTAssertNotEqual(bridge.connectionState, .disconnected)
+
+        bridge.suspend()
+        XCTAssertEqual(bridge.connectionState, .disconnected)
+
+        bridge.refreshThreads()
+        XCTAssertEqual(
+            bridge.connectionState,
+            .disconnected,
+            "A refresh must not resurrect polling while suspended"
+        )
+
+        bridge.start()
+        XCTAssertNotEqual(bridge.connectionState, .disconnected)
+        bridge.suspend()
+    }
+
+    /// Codex has a push event stream, so suspending it would only lose events.
+    /// The default protocol implementation must keep it running.
+    @MainActor
+    func testSuspendIsANoOpForTheEventDrivenCodexBridge() {
+        let bridge = CodexEventBridge()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-suspend-\(UUID().uuidString).json")
+        let store = CodexThreadStore(bridge: bridge, persistenceURL: url)
+        let thread = CodexThreadDescriptor(
+            id: "codex-live", title: "Turn", preview: "", cwd: "/tmp/project",
+            parentThreadID: nil, agentNickname: nil, agentRole: nil,
+            updatedAt: .now, status: .idle
+        )
+        store.assign(thread, to: .key1)
+        bridge.onThreads?([thread])
+        bridge.onStatus?(thread.id, .running, .event)
+
+        store.suspend()
+
+        XCTAssertEqual(
+            store.status(for: .key1),
+            .running,
+            "Suspending must not disturb the Codex store's live state"
+        )
+        bridge.onStatus?(thread.id, .completed, .event)
+        XCTAssertEqual(store.status(for: .key1), .completed, "Codex events keep flowing")
+    }
+
+    /// Regression guard for the field the whole Claude navigation path hangs
+    /// on: Claude records it as an array, and only the routable entries count.
+    func testClaudeDesktopSessionDecodesBridgeSessionIDForNavigation() throws {
+        let json = """
+        {
+          "sessionId": "local_c9f6e9e5",
+          "cliSessionId": "c109ee95-b1d8",
+          "title": "Agent-Zustände",
+          "originCwd": "/tmp/project",
+          "lastActivityAt": 1785366277310,
+          "isArchived": false,
+          "bridgeSessionIds": ["session_01OLD", "session_01NEW"]
+        }
+        """
+        let session = try JSONDecoder().decode(ClaudeDesktopSession.self, from: Data(json.utf8))
+        XCTAssertEqual(session.bridgeSessionID, "session_01NEW")
+        XCTAssertEqual(session.threadDescriptor.navigationID, "session_01NEW")
+        XCTAssertEqual(session.threadDescriptor.alternateID, "c109ee95-b1d8")
+
+        let legacy = """
+        {"sessionId": "local_old", "title": "Alt", "originCwd": "/tmp"}
+        """
+        let legacySession = try JSONDecoder().decode(ClaudeDesktopSession.self, from: Data(legacy.utf8))
+        XCTAssertNil(legacySession.bridgeSessionID)
+        XCTAssertNil(legacySession.threadDescriptor.navigationID)
     }
 
     @MainActor
