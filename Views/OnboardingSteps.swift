@@ -106,6 +106,66 @@ struct OnboardingAgentChoiceStep: View {
     }
 }
 
+// MARK: - Claude live status
+
+/// The one Claude setting that genuinely needs a decision during setup: it
+/// writes to the user's own global `~/.claude/settings.json`, so it must never
+/// be enabled silently. Without it the pad still shows Läuft/Bereit from the
+/// session list — this step buys the attention and terminal states on top.
+struct OnboardingClaudeStatusStep: View {
+    let isEnabled: Bool
+    let errorMessage: String?
+    let onToggle: (Bool) -> Void
+    let onBack: () -> Void
+    let onContinue: () -> Void
+
+    var body: some View {
+        OnboardingStepChrome(
+            icon: "dot.radiowaves.left.and.right",
+            title: AppLanguage.text("Live-Status für Claude", "Live status for Claude"),
+            subtitle: AppLanguage.text(
+                "Optional. Ohne diese Option zeigt das Pad für Claude nur „Läuft“ und „Bereit“.",
+                "Optional. Without this the pad only shows Running and Ready for Claude."
+            ),
+            continueTitle: isEnabled
+                ? AppLanguage.text("Weiter", "Continue")
+                : AppLanguage.text("Ohne fortfahren", "Continue without"),
+            onBack: onBack,
+            onContinue: onContinue
+        ) {
+            VStack(spacing: 12) {
+                OnboardingChoiceCard(
+                    icon: "bell.badge.fill",
+                    title: AppLanguage.text("Vollen Live-Status aktivieren", "Enable full live status"),
+                    subtitle: AppLanguage.text(
+                        "Die Taste leuchtet zusätzlich orange bei „Eingabe erforderlich“, grün bei Abschluss und rot bei Fehlern.",
+                        "The key also lights orange for needs-input, green on completion and red on failure."
+                    ),
+                    isSelected: isEnabled
+                ) { onToggle(!isEnabled) }
+
+                Text(AppLanguage.text(
+                    "Dazu trägt Agent Micro fünf Hook-Einträge in dein globales ~/.claude/settings.json ein. Sie schreiben nur eine Statuszeile pro Ereignis, greifen nie in eine laufende Sitzung ein und beeinflussen kein Ergebnis. Sie gelten für jede Claude-Code-Sitzung auf diesem Rechner. Eigene Hooks bleiben unverändert, und Deaktivieren entfernt ausschließlich die von Agent Micro eingetragenen Zeilen.",
+                    "Agent Micro adds five hook entries to your global ~/.claude/settings.json. They only append one status line per event, never intervene in a running session and never affect a result. They apply to every Claude Code session on this Mac. Your own hooks stay untouched, and turning this off removes only the entries Agent Micro added."
+                ))
+                    .font(.system(size: 11))
+                    .foregroundStyle(OnboardingPalette.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: 420)
+        }
+    }
+}
+
 // MARK: - Layers
 
 /// Purely explanatory — layers themselves are created/edited later via the
@@ -193,7 +253,7 @@ private enum BasicsCard: Int, CaseIterable {
         case .ledStatus: "Status-LEDs"
         case .tapHold: AppLanguage.text("Tippen vs. Halten", "Tap vs. hold")
         case .dial: AppLanguage.text("Das Drehrad", "The dial")
-        case .agentAssignment: AppLanguage.text("Agents zuweisen", "Assign agents")
+        case .agentAssignment: AppLanguage.text("Thread auf eine Taste legen", "Put a thread on a key")
         }
     }
 
@@ -202,7 +262,7 @@ private enum BasicsCard: Int, CaseIterable {
         case .ledStatus: AppLanguage.text("Jede Taste zeigt per Farbe und Effekt den Status ihres zugewiesenen Agents.", "Each key shows its assigned agent's status through color and effects.")
         case .tapHold: AppLanguage.text("Eine Taste kann zwei Funktionen tragen – kurz tippen ist etwas anderes als gedrückt halten.", "A key can have two functions: a quick tap differs from holding it.")
         case .dial: AppLanguage.text("Direkt am Pad, ohne die Maus zu benutzen.", "Control it directly on the pad without using the mouse.")
-        case .agentAssignment: AppLanguage.text("Threads landen per Halten auf einer Taste, nicht per Konfigurationsmenü.", "Assign threads by holding a key, without digging through a configuration menu.")
+        case .agentAssignment: AppLanguage.text("Auf einer Agent-Taste öffnet Halten die Threadliste, das Drehrad wählt aus, Loslassen weist zu – ganz ohne Maus.", "On an agent key, holding opens the thread list, the dial picks one and releasing assigns it — no mouse involved.")
         }
     }
 }
@@ -245,7 +305,7 @@ struct OnboardingBasicsStep: View {
                         }
                     }
                 }
-                .frame(height: 250)
+                .frame(height: 306)
 
                 HStack(spacing: 8) {
                     Button {
@@ -297,11 +357,7 @@ struct OnboardingBasicsStep: View {
             PadDemoBeat(highlighted: .encoderPress, caption: AppLanguage.text("Kurz drücken → Modellwahl öffnen", "Press → open model picker"), encoderGesture: .press),
             PadDemoBeat(highlighted: .encoderPress, caption: AppLanguage.text("Halten (>350 ms) + drehen → Modell direkt wechseln", "Hold (>350 ms) + turn → switch model directly"), badge: AppLanguage.text("Modell gewechselt", "Model changed"), encoderGesture: .rotateRight)
         ]).cardBackground
-        case .agentAssignment: OnboardingPadDemo(profile: profile, beats: [
-            PadDemoBeat(highlighted: .key1, caption: AppLanguage.text("Taste halten, während ein Thread aktiv ist", "Hold a key while a thread is active"), keyGesture: .hold),
-            PadDemoBeat(highlighted: .key1, caption: AppLanguage.text("Die LED zeigt danach den Live-Status", "The LED then shows its live status"), badge: AppLanguage.text("Thread zugewiesen", "Thread assigned")),
-            PadDemoBeat(highlighted: .key1, caption: AppLanguage.text("Kurz tippen öffnet den Thread jederzeit wieder", "Tap to reopen the thread at any time"), keyGesture: .tap)
-        ]).cardBackground
+        case .agentAssignment: OnboardingAssignmentDemo(profile: profile).cardBackground
         }
     }
 }
@@ -438,6 +494,8 @@ struct OnboardingMicrophoneStep: View {
 struct OnboardingSummaryStep: View {
     let selectedAgents: Set<AutomationApp>
     let micSource: DictationSource
+    /// Nil when Claude was not selected, so the row is simply absent then.
+    let claudeLiveStatus: String?
     let onBack: () -> Void
     let onFinish: () -> Void
 
@@ -459,6 +517,13 @@ struct OnboardingSummaryStep: View {
             VStack(spacing: 10) {
                 summaryRow(icon: "person.2.fill", title: "Agents", value: agentsSummary)
                 summaryRow(icon: "mic.fill", title: AppLanguage.text("Mikrofon", "Microphone"), value: micSource.title)
+                if let claudeLiveStatus {
+                    summaryRow(
+                        icon: "dot.radiowaves.left.and.right",
+                        title: AppLanguage.text("Claude Live-Status", "Claude live status"),
+                        value: claudeLiveStatus
+                    )
+                }
             }
             .frame(maxWidth: 420)
         }

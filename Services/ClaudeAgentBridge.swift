@@ -65,8 +65,20 @@ struct ClaudeDesktopSession: Decodable, Sendable {
     let createdAt: Double?
     let lastActivityAt: Double?
     let isArchived: Bool?
+    /// The only identity Claude's own deep-link route accepts. Claude resolves
+    /// `claude://code/<id>` through `findSessionIdByBridgeSessionId`, which
+    /// matches exactly these values — not the `local_…` metadata ID and not
+    /// the CLI UUID. Sessions created before Claude started recording the
+    /// field have none, and therefore cannot be navigated to directly.
+    let bridgeSessionIds: [String]?
 
     var projectPath: String { originCwd ?? cwd ?? "" }
+
+    /// The newest bridge ID, which is the one Claude's session manager
+    /// resolves for a resumed session.
+    var bridgeSessionID: String? {
+        bridgeSessionIds?.last(where: { ClaudeAgentBridge.isRoutableBridgeSessionID($0) })
+    }
 
     var threadDescriptor: CodexThreadDescriptor {
         let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -86,7 +98,7 @@ struct ClaudeDesktopSession: Decodable, Sendable {
             updatedAt: Self.date(milliseconds: lastActivityAt ?? createdAt) ?? .distantPast,
             status: .idle,
             alternateID: cliSessionId,
-            navigationID: cliSessionId
+            navigationID: bridgeSessionID
         )
     }
 
@@ -118,6 +130,10 @@ final class ClaudeAgentBridge: AgentBridge {
     private static let statusFileTruncateThreshold = 256 * 1024
 
     private var pollTask: Task<Void, Never>?
+    /// Set while the Claude profile is not selected. Sticky on purpose: a
+    /// stray `refreshThreads()` from a picker or a view must not silently
+    /// resurrect the 2s CLI polling behind the user's back.
+    private var isSuspended = false
     /// Sessions currently bound to a pad control; kept for the opt-in hooks
     /// status bridge, which only needs to tail status for these, not every
     /// Claude Code session running on the machine.
@@ -143,8 +159,23 @@ final class ClaudeAgentBridge: AgentBridge {
     var onThreads: (([CodexThreadDescriptor]) -> Void)?
     var onStatus: ((String, CodexAgentStatus, AgentStatusSource) -> Void)?
 
+    /// Without the hooks bridge the poll still yields a real running/idle
+    /// distinction — it is coarse, not absent. Reporting `.notActivated` here
+    /// used to contradict the LED, which showed that same poll result.
     var liveStatusAvailability: AgentLiveStatusAvailability {
-        isHooksStatusEnabled ? .available : .notActivated
+        isHooksStatusEnabled ? .available : .sessionListOnly
+    }
+
+    /// `claude agents --json` is a poll, not a stream: when a session drops off
+    /// the list, that *is* the end-of-run signal and nothing else will ever
+    /// deliver it. See `AgentSnapshotAuthority`.
+    let snapshotAuthority: AgentSnapshotAuthority = .authoritativeForRunning
+
+    /// Claude validates the deep-link identifier with `/^(cse|session)_/`
+    /// before it will resolve a session; anything else makes the handler bail
+    /// out without even focusing the window.
+    nonisolated static func isRoutableBridgeSessionID(_ value: String) -> Bool {
+        value.hasPrefix("session_") || value.hasPrefix("cse_")
     }
 
     init() {
@@ -152,6 +183,7 @@ final class ClaudeAgentBridge: AgentBridge {
     }
 
     func start() {
+        isSuspended = false
         guard pollTask == nil else { return }
         connectionState = .connecting
         pollTask = Task { [weak self] in
@@ -167,6 +199,15 @@ final class ClaudeAgentBridge: AgentBridge {
         pollTask?.cancel()
         pollTask = nil
         connectionState = .disconnected
+    }
+
+    /// Every tick spawns a fresh `claude` process (a ~250 MB binary), so this
+    /// runs only while the Claude profile is selected. Assignments, tracked
+    /// IDs and the derived hook states all live on and are reused on resume.
+    func suspend() {
+        guard !isSuspended else { return }
+        isSuspended = true
+        stop()
     }
 
     func track(threadIDs: Set<String>) {
@@ -199,6 +240,7 @@ final class ClaudeAgentBridge: AgentBridge {
     }
 
     func refreshThreads() {
+        guard !isSuspended else { return }
         guard pollTask != nil else {
             start()
             return

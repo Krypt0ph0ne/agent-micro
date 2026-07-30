@@ -192,6 +192,7 @@ final class AppState {
         profiles.onSelectedProfileChange = { [weak self] in
             self?.quickAssign.cancelSelection()
             self?.claudeQuickAssign.cancelSelection()
+            self?.syncClaudeBridgeActivation()
         }
     }
 
@@ -488,8 +489,22 @@ final class AppState {
 
     func startAgentBridges() {
         codexThreads.start()
-        claudeThreads.start()
+        syncClaudeBridgeActivation()
         refreshAgentLEDs()
+    }
+
+    /// The Claude bridge polls by spawning a `claude` process every two
+    /// seconds, so it runs only while the Claude profile is selected. Codex's
+    /// bridge is deliberately left running: it is a single persistent
+    /// app-server with a push event stream, so suspending it would save no
+    /// process churn and would drop live turn and approval events.
+    private func syncClaudeBridgeActivation() {
+        if profiles.selectedProfile.automationApp == .claude {
+            claudeThreads.start()
+            claudeThreads.refresh()
+        } else {
+            claudeThreads.suspend()
+        }
     }
 
     func assignAgentThread(_ thread: CodexThreadDescriptor, to control: HardwareControl) {

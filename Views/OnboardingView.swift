@@ -15,7 +15,7 @@ struct OnboardingView: View {
     /// appear if all were included. `steps` filters this down to what's
     /// actually relevant.
     private enum Step: CaseIterable, Equatable {
-        case permissions, agents, layers, basics, microphone, summary
+        case permissions, agents, claudeStatus, layers, basics, microphone, summary
     }
 
     static let size = CGSize(width: 560, height: 590)
@@ -47,7 +47,12 @@ struct OnboardingView: View {
 
     private var steps: [Step] {
         guard mode == .guided else { return mode == .quick ? [.permissions] : [] }
-        return [.permissions, .agents, .layers, .basics, .microphone, .summary]
+        var steps: [Step] = [.permissions, .agents]
+        // Only worth asking if Claude is actually in play — the hooks bridge
+        // has no effect on the Codex profile.
+        if selectedAgents.contains(.claude) { steps.append(.claudeStatus) }
+        steps.append(contentsOf: [.layers, .basics, .microphone, .summary])
+        return steps
     }
 
     var body: some View {
@@ -301,6 +306,14 @@ struct OnboardingView: View {
                 onBack: goBack,
                 onContinue: advance
             )
+        case .claudeStatus:
+            OnboardingClaudeStatusStep(
+                isEnabled: appState.claudeAgentBridge.isHooksStatusEnabled,
+                errorMessage: appState.claudeAgentBridge.hooksStatusError,
+                onToggle: { appState.claudeAgentBridge.setHooksStatusEnabled($0) },
+                onBack: goBack,
+                onContinue: advance
+            )
         case .layers:
             OnboardingLayersStep(
                 profile: illustrativeProfile,
@@ -324,6 +337,9 @@ struct OnboardingView: View {
             OnboardingSummaryStep(
                 selectedAgents: selectedAgents,
                 micSource: micSource,
+                claudeLiveStatus: selectedAgents.contains(.claude)
+                    ? appState.claudeAgentBridge.liveStatusAvailability.title
+                    : nil,
                 onBack: goBack,
                 onFinish: finish
             )
