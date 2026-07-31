@@ -1,19 +1,19 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import Foundation
 import IOKit.hid
 import Observation
 import OSLog
 
-/// Claude Desktop exposes reasoning-effort and model switching through two
-/// separate menus, each with its own opening shortcut: ⌘⇧E opens the Effort
-/// menu, ⌘⇧I opens the Model menu; both are then navigated with ↑/↓ and
-/// confirmed with Enter. Unlike the Codex profile, there is no bare global
-/// shortcut for either. So a plain dial turn opens the Effort menu just long
-/// enough to step through it and then auto-closes it again, while holding the
-/// dial and turning instead opens the Model menu and walks it, confirming on
-/// release — the same tap-vs-hold shape as Codex's encoder, retargeted to
-/// what Claude actually has.
+/// Claude Desktop exposes effort and model as two separate composer pop-ups.
+/// Turning the dial steps the effort slider inside the effort pop-up; holding
+/// the dial and turning walks the model menu and confirms on release.
+///
+/// Every step is verified against Claude's own state rather than against the
+/// return code of the action that caused it — see `ClaudeAccessibilityControls`
+/// for why that distinction matters here (Chromium reports success for
+/// Accessibility actions it then discards).
 @MainActor
 @Observable
 final class ClaudeReasoningAutomationService: EncoderAutomationService {
@@ -21,18 +21,17 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private static let preferenceKey = "AgentMicro.claudeEncoderAutomationEnabled"
     private static let modelListHoldThresholdSeconds: TimeInterval = 0.35
     static var modelListHoldThresholdMilliseconds: Int { Int(modelListHoldThresholdSeconds * 1000) }
-    /// How long the Effort menu stays open after the last plain-rotate step
-    /// before Agent Micro closes it again on its own.
-    private static let autoCloseIdleSeconds: TimeInterval = 1.6
-    /// Minimum real gap enforced between any two posted key events. Unlike
-    /// Codex's plain rotate (a direct, stateless shortcut), Claude's effort
-    /// and model steps depend on a menu actually being open first, so a fast
-    /// rotation firing an "open menu" keystroke and an "arrow" keystroke back
-    /// to back — each scheduled from its own independent timer — could have
-    /// the arrow land before the open shortcut actually took effect. All key
-    /// posts now go through `enqueue`, a single serial queue, so ordering and
-    /// spacing are guaranteed regardless of how fast the dial is turned.
-    private static let keySpacingSeconds: TimeInterval = 0.09
+    /// How long a pop-up opened by the dial stays open after the last step.
+    /// Reopening it per detent would make a fast rotation unusable, so a burst
+    /// of turns shares one open pop-up.
+    private static let idleCloseSeconds: TimeInterval = 1.6
+    /// Polling grid for "did Claude actually do it". Chosen from the measured
+    /// live behaviour: the effort pop-up reports `AXExpanded == true` within
+    /// roughly 150 ms of the activating key.
+    private static let pollIntervalSeconds: TimeInterval = 0.05
+    private static let openTimeoutSeconds: TimeInterval = 1.0
+    private static let valueChangeTimeoutSeconds: TimeInterval = 0.6
+    private static let closeTimeoutSeconds: TimeInterval = 0.6
 
     /// True while the Claude profile is selected; both this service and
     /// `CodexReasoningAutomationService` listen to the same private F22–F24
@@ -41,17 +40,30 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     var isExternallySuspended: () -> Bool = { false }
     private var hidManager: IOHIDManager?
     private var inputDebouncer = HIDInputDebouncer()
-    /// True whenever Agent Micro has sent ⌘⇧E and not yet closed the Effort menu
-    /// again (plain-rotate gesture).
-    private var isEffortMenuOpen = false
-    /// True whenever Agent Micro has sent ⌘⇧I and not yet closed the Model menu
-    /// again (hold+rotate gesture).
-    private var isModelMenuOpen = false
-    private var autoCloseTimer: Timer?
     private var encoderHoldTimer: Timer?
     private var encoderHoldFired = false
-    private var pendingKeyActions: [() -> Void] = []
-    private var isProcessingKeyActions = false
+    private var isEncoderPressed = false
+    private var suppressCurrentEncoderPress = false
+    /// Vendor-protocol encoder events remain valid across a keyboard HID
+    /// interface re-enumeration, so they are authoritative for custom pads.
+    var usesPhysicalEncoderEvents = false {
+        didSet {
+            guard oldValue != usesPhysicalEncoderEvents else { return }
+            updateMonitoring()
+        }
+    }
+
+    /// Serializes the Accessibility work. A gesture that arrives while another
+    /// one is still driving Claude's UI is reported and dropped instead of
+    /// interleaving keystrokes into a half-open menu.
+    private var isSequenceInFlight = false
+    private var idleCloseTask: Task<Void, Never>?
+    /// Cached composer controls. Chromium invalidates elements freely, so both
+    /// are revalidated before every use.
+    private var cachedEffortPopUp: AXUIElement?
+    private var cachedModelPopUp: AXUIElement?
+    private var isEffortPopoverOpen = false
+    private var isModelMenuOpen = false
 
     private let permissionMonitor: PermissionMonitor
     private(set) var status = "Deaktiviert"
@@ -73,9 +85,13 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     }
 
     func requestPermissions() {
-        permissionMonitor.requestPermissions()
+        if usesPhysicalEncoderEvents {
+            permissionMonitor.requestAccessibilityPermission()
+        } else {
+            permissionMonitor.requestPermissions()
+        }
         updateMonitoring()
-        if !hasInputMonitoringPermission || !hasAccessibilityPermission {
+        if !hasAccessibilityPermission || (!usesPhysicalEncoderEvents && !hasInputMonitoringPermission) {
             status = "Berechtigungen fehlen noch. In den Systemeinstellungen Agent Micro aktivieren und danach zur App zurückkehren."
         }
     }
@@ -85,13 +101,31 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         updateMonitoring()
     }
 
+    // MARK: - Input
+
     /// Model-list-navigation entry point fed by Agent Micro's own firmware
     /// protocol, mirroring `CodexReasoningAutomationService.handlePhysicalEvent`
     /// — the only channel that reliably reports the encoder press's release
     /// edge on the confirmed hardware.
     func handlePhysicalEvent(_ event: CodexPadPhysicalEvent) {
-        guard isActiveProfile(), !isExternallySuspended(),
-              let control = HardwareControl(reportedControlIndex: event.control) else { return }
+        guard let control = HardwareControl(reportedControlIndex: event.control),
+              HardwareControl.encoderActions.contains(control) else { return }
+        let source = event.origin == .hardware ? "Hardware" : "Diagnose"
+        lastInput = "\(source): \(control.title) · \(String(describing: event.phase)) · #\(event.sequence)"
+        logger.info(
+            "Physical encoder received origin=\(event.origin.rawValue, privacy: .public) control=\(control.rawValue, privacy: .public) phase=\(event.phase.rawValue, privacy: .public)"
+        )
+        guard isActiveProfile() else {
+            status = "Drehrad ignoriert: Claude-Profil ist nicht aktiv."
+            logger.error("Physical encoder rejected: inactive Claude profile")
+            return
+        }
+        guard !isExternallySuspended() else {
+            status = "Drehrad wartet: Thread-Auswahl ist noch aktiv."
+            logger.error("Physical encoder rejected: thread picker is active")
+            return
+        }
+        logger.info("Physical encoder accepted by Claude automation")
         switch control {
         case .encoderPress:
             switch event.phase {
@@ -99,97 +133,358 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             case .released: endEncoderHold()
             case .triggered: break
             }
+        // Confirmed against the hardware: the control labels match the physical
+        // rotation, so turning left steps down and turning right steps up. This
+        // is the same mapping `CodexReasoningAutomationService` uses.
         case .encoderLeft:
-            // Swapped vs. the naive left=previous/right=next assumption:
-            // confirmed by hand that this hardware reports the physical
-            // rotation directions inverted relative to the encoderLeft/Right
-            // labels, so left is wired to `.next` here to match reality.
             guard event.phase == .triggered else { return }
-            driveModelMenuHighlight(.next)
+            handleRotation(.previous)
         case .encoderRight:
             guard event.phase == .triggered else { return }
-            driveModelMenuHighlight(.previous)
+            handleRotation(.next)
         case .key1, .key2, .key3, .key4, .key5, .key6:
             break
         }
     }
 
+    private func handleRotation(_ step: CodexModelListStep) {
+        if encoderHoldFired {
+            driveModelMenuHighlight(step)
+        } else if isEncoderPressed {
+            status = "Drehrad wird gehalten – nach \(Self.modelListHoldThresholdMilliseconds) ms Modelle auswählen."
+        } else {
+            stepEffort(step)
+        }
+    }
+
     private func beginEncoderHold() {
-        autoCloseTimer?.invalidate()
         encoderHoldTimer?.invalidate()
+        isEncoderPressed = true
+        suppressCurrentEncoderPress = false
         encoderHoldFired = false
-        // A fresh press physically implies the previous one was released —
-        // the hardware cannot report two `.pressed` events in a row without a
-        // `.released` in between. If `isModelMenuOpen` is still true here, a
-        // `.released` firmware report was dropped last time, leaving this
-        // flag stuck and silently blocking `fireEncoderHold()` from ever
-        // reopening the menu again (the actual bug behind "works once, then
-        // never again until the automation toggle is switched off and on").
-        // Force it closed so every new press starts from a clean slate.
-        if isModelMenuOpen {
-            isModelMenuOpen = false
-            enqueue { Self.postKey(UInt16(kVK_Escape)) }
+        guard !isSequenceInFlight else {
+            suppressCurrentEncoderPress = true
+            status = "Drehrad-Druck wartet: eine Aufwandänderung läuft noch."
+            return
         }
         encoderHoldTimer = Timer.scheduledTimer(withTimeInterval: Self.modelListHoldThresholdSeconds, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.fireEncoderHold() }
         }
     }
 
-    /// Fires the instant the hold threshold is crossed: opens the Model menu
-    /// (⌘⇧I) if it isn't already open, so the following rotate ticks can walk
-    /// it with ↑/↓.
+    /// Fires when the hold threshold is crossed and opens Claude's model menu.
     private func fireEncoderHold() {
-        encoderHoldFired = true
-        guard !isModelMenuOpen else { return }
-        guard let claude = readyClaudeApplication() else { return }
-        claude.activate(options: [.activateAllWindows])
-        isModelMenuOpen = true
-        status = "Modellmenü offen: drehen wählt, loslassen übernimmt."
-        enqueue {
-            Self.postKey(UInt16(kVK_ANSI_I), flags: [.maskCommand, .maskShift])
+        guard !suppressCurrentEncoderPress, isEncoderPressed else { return }
+        guard isActiveProfile(), !isExternallySuspended() else {
+            status = "Modellwahl abgebrochen: Profil oder Thread-Auswahl hat sich geändert."
+            return
         }
+        guard !isSequenceInFlight else { return }
+        encoderHoldFired = true
+        run { await self.openModelMenu() }
     }
 
-    /// Releasing after a short press (below the hold threshold) is the plain
-    /// tap gesture: toggle the Effort menu open/closed. Releasing after the
-    /// dial was actually held confirms the highlighted model and closes the
-    /// Model menu instead.
+    /// Releasing after a short press is the plain tap gesture: toggle the
+    /// effort pop-up. Releasing after a real hold confirms the highlighted
+    /// model and closes the model menu instead.
     private func endEncoderHold() {
         encoderHoldTimer?.invalidate()
         encoderHoldTimer = nil
+        isEncoderPressed = false
+        if suppressCurrentEncoderPress {
+            suppressCurrentEncoderPress = false
+            return
+        }
         let wasHeld = encoderHoldFired
         encoderHoldFired = false
         guard wasHeld else {
             toggleEffortMenu()
             return
         }
-        guard isModelMenuOpen else { return }
-        isModelMenuOpen = false
-        guard let claude = readyClaudeApplication() else { return }
-        claude.activate(options: [.activateAllWindows])
-        status = "Modell übernehmen …"
-        enqueue { Self.postKey(UInt16(kVK_Return)) }
-        enqueue { [weak self] in
-            Self.postKey(UInt16(kVK_Escape))
-            self?.status = "Übernommen."
+        run { await self.confirmModelSelection() }
+    }
+
+    // MARK: - Effort
+
+    /// One dial detent = one step of Claude's effort slider, verified by
+    /// re-reading the slider's own value afterwards.
+    private func stepEffort(_ direction: CodexModelListStep) {
+        guard !isModelMenuOpen else {
+            status = "Drehschritt ignoriert: das Modellmenü ist noch offen."
+            return
+        }
+        guard !isSequenceInFlight else {
+            status = "Drehschritt ignoriert: Claude verarbeitet noch die vorherige Geste."
+            return
+        }
+        run { await self.performEffortStep(direction) }
+    }
+
+    private func performEffortStep(_ direction: CodexModelListStep) async {
+        guard let context = await openEffortPopover() else { return }
+        guard let slider = ClaudeAccessibilityControls.effortSlider(in: context.application) else {
+            status = "Claudes Aufwand-Regler wurde im geöffneten Menü nicht gefunden."
+            await closeEffortPopover(context)
+            return
+        }
+
+        let previous = ClaudeAccessibilityControls.stringValue(of: slider)
+        guard let updated = await adjust(slider, direction: direction, from: previous, pid: context.pid) else {
+            // No change is not automatically a failure: at either end of the
+            // scale the slider legitimately stays put. Distinguish the two by
+            // asking whether the value is still readable at all.
+            let current = ClaudeAccessibilityControls.stringValue(of: slider)
+            if current == previous, !current.isEmpty {
+                status = direction == .next
+                    ? "Claude-Aufwand ist bereits maximal (\(current))."
+                    : "Claude-Aufwand ist bereits minimal (\(current))."
+            } else {
+                status = "Claude-Aufwand ließ sich nicht ändern (\(previous.isEmpty ? "kein Wert lesbar" : previous))."
+                await closeEffortPopover(context)
+                return
+            }
+            scheduleIdleClose(context)
+            return
+        }
+
+        status = "Claude-Aufwand: \(updated)"
+        logger.info("Claude effort changed \(previous, privacy: .public) → \(updated, privacy: .public)")
+        scheduleIdleClose(context)
+    }
+
+    /// Steps the slider and waits for its value to actually change.
+    /// `AXIncrement`/`AXDecrement` is preferred because it needs no synthetic
+    /// input at all; the arrow key is the fallback for the case where Chromium
+    /// accepts the Accessibility action and drops it, which it demonstrably
+    /// does for other actions on these controls.
+    private func adjust(
+        _ slider: AXUIElement,
+        direction: CodexModelListStep,
+        from previous: String,
+        pid: pid_t
+    ) async -> String? {
+        let action = direction == .next ? kAXIncrementAction : kAXDecrementAction
+        ClaudeAccessibilityControls.perform(action, on: slider)
+        if let changed = await waitForValueChange(of: slider, from: previous) { return changed }
+
+        let keyCode = direction == .next ? kVK_RightArrow : kVK_LeftArrow
+        ClaudeAccessibilityControls.postKey(keyCode, to: pid)
+        return await waitForValueChange(of: slider, from: previous)
+    }
+
+    private func waitForValueChange(of slider: AXUIElement, from previous: String) async -> String? {
+        await poll(timeout: Self.valueChangeTimeoutSeconds) {
+            let current = ClaudeAccessibilityControls.stringValue(of: slider)
+            return (!current.isEmpty && current != previous) ? current : nil
         }
     }
 
-    /// Only acts while the dial is held past the threshold and the Model menu
-    /// is already driven open; a plain (unheld) rotate is handled separately
-    /// by `stepEffort` in `handleHIDValue`.
-    private func driveModelMenuHighlight(_ step: CodexModelListStep) {
-        guard encoderHoldFired, isModelMenuOpen else { return }
-        guard readyClaudeApplication() != nil else { return }
-        let keyCode = step == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
-        status = step == .next ? "Nächstes Modell" : "Vorheriges Modell"
-        enqueue { Self.postKey(keyCode) }
+    func toggleEffortMenu() {
+        guard !isModelMenuOpen else {
+            status = "Menü wartet: das Modellmenü ist noch offen."
+            return
+        }
+        guard !isSequenceInFlight else {
+            status = "Menü wartet: Claude verarbeitet noch die vorherige Geste."
+            return
+        }
+        run {
+            if self.isEffortPopoverOpen, let context = self.currentContext() {
+                await self.closeEffortPopover(context)
+                return
+            }
+            guard let context = await self.openEffortPopover() else { return }
+            let value = ClaudeAccessibilityControls.effortSlider(in: context.application)
+                .map(ClaudeAccessibilityControls.stringValue(of:)) ?? ""
+            self.status = value.isEmpty ? "Aufwandmenü geöffnet." : "Aufwandmenü offen · \(value)"
+            self.scheduleIdleClose(context)
+        }
     }
+
+    // MARK: - Model menu
+
+    private func openModelMenu() async {
+        guard let context = currentContext() else { return }
+        guard let popUp = resolveModelPopUp(in: context.application) else {
+            status = "Claudes Modellauswahl wurde nicht gefunden."
+            return
+        }
+        await cancelIdleClose()
+        if isEffortPopoverOpen { await closeEffortPopover(context) }
+
+        guard await open(popUp, context: context) else {
+            status = "Claudes Modellmenü ließ sich nicht öffnen."
+            isModelMenuOpen = false
+            return
+        }
+        isModelMenuOpen = true
+        let current = ClaudeAccessibilityControls.title(of: popUp)
+        status = "Modellmenü offen (\(current)): drehen wählt, loslassen übernimmt."
+    }
+
+    /// Only acts while the model menu is verified open. Arrow keys go to
+    /// Claude's process so a menu that lost focus cannot leak keystrokes into
+    /// whatever the user is doing elsewhere.
+    private func driveModelMenuHighlight(_ step: CodexModelListStep) {
+        guard isModelMenuOpen, let context = currentContext() else { return }
+        guard let popUp = cachedModelPopUp, ClaudeAccessibilityControls.isExpanded(popUp) else {
+            isModelMenuOpen = false
+            status = "Modellmenü ist nicht mehr offen – Auswahl abgebrochen."
+            return
+        }
+        ClaudeAccessibilityControls.postKey(step == .next ? kVK_DownArrow : kVK_UpArrow, to: context.pid)
+        status = step == .next ? "Nächstes Modell" : "Vorheriges Modell"
+    }
+
+    private func confirmModelSelection() async {
+        guard isModelMenuOpen, let context = currentContext(), let popUp = cachedModelPopUp else {
+            isModelMenuOpen = false
+            return
+        }
+        let previous = ClaudeAccessibilityControls.title(of: popUp)
+        ClaudeAccessibilityControls.postKey(kVK_Return, to: context.pid)
+
+        let collapsed = await poll(timeout: Self.closeTimeoutSeconds) {
+            ClaudeAccessibilityControls.isExpanded(popUp) ? nil : true
+        } != nil
+        isModelMenuOpen = false
+        guard collapsed else {
+            await forceClose(context)
+            status = "Modellauswahl ließ sich nicht bestätigen – Menü wurde geschlossen."
+            return
+        }
+        let current = ClaudeAccessibilityControls.title(of: popUp)
+        status = current == previous ? "Modell unverändert: \(current)" : "Modell: \(current)"
+        logger.info("Claude model \(previous, privacy: .public) → \(current, privacy: .public)")
+    }
+
+    // MARK: - Pop-up handling
+
+    private struct Context {
+        let application: AXUIElement
+        let pid: pid_t
+        let runningApplication: NSRunningApplication
+    }
+
+    private func currentContext() -> Context? {
+        guard let claude = readyClaudeApplication() else { return nil }
+        return Context(
+            application: ClaudeAccessibilityControls.application(for: claude.processIdentifier),
+            pid: claude.processIdentifier,
+            runningApplication: claude
+        )
+    }
+
+    private func openEffortPopover() async -> Context? {
+        guard let context = currentContext() else { return nil }
+        guard let popUp = resolveEffortPopUp(in: context.application) else {
+            status = "Claudes Aufwand-Auswahl wurde nicht gefunden."
+            isEffortPopoverOpen = false
+            return nil
+        }
+        await cancelIdleClose()
+        guard await open(popUp, context: context) else {
+            status = "Claudes Aufwandmenü ließ sich nicht öffnen."
+            isEffortPopoverOpen = false
+            return nil
+        }
+        isEffortPopoverOpen = true
+        return context
+    }
+
+    /// Focus through Accessibility, then activate with a real key sent to
+    /// Claude. `AXPress` is deliberately not used: on this control Chromium
+    /// returns `.success` without ever expanding the pop-up.
+    private func open(_ popUp: AXUIElement, context: Context) async -> Bool {
+        if ClaudeAccessibilityControls.isExpanded(popUp) { return true }
+        context.runningApplication.activate(options: [.activateAllWindows])
+        ClaudeAccessibilityControls.focus(popUp)
+        ClaudeAccessibilityControls.postKey(kVK_Space, to: context.pid)
+        return await poll(timeout: Self.openTimeoutSeconds) {
+            ClaudeAccessibilityControls.isExpanded(popUp) ? true : nil
+        } != nil
+    }
+
+    private func closeEffortPopover(_ context: Context) async {
+        await cancelIdleClose()
+        defer { isEffortPopoverOpen = false }
+        guard let popUp = cachedEffortPopUp, ClaudeAccessibilityControls.isExpanded(popUp) else { return }
+        ClaudeAccessibilityControls.postKey(kVK_Escape, to: context.pid)
+        let collapsed = await poll(timeout: Self.closeTimeoutSeconds) {
+            ClaudeAccessibilityControls.isExpanded(popUp) ? nil : true
+        } != nil
+        if !collapsed { await forceClose(context) }
+    }
+
+    /// Last resort when a pop-up refuses to collapse. Two Escapes cover the
+    /// case where the first one only dismissed a nested element.
+    private func forceClose(_ context: Context) async {
+        for _ in 0..<2 {
+            ClaudeAccessibilityControls.postKey(kVK_Escape, to: context.pid)
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+        isEffortPopoverOpen = false
+        isModelMenuOpen = false
+    }
+
+    private func scheduleIdleClose(_ context: Context) {
+        idleCloseTask?.cancel()
+        idleCloseTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.idleCloseSeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.isEffortPopoverOpen else { return }
+            await self.closeEffortPopover(context)
+        }
+    }
+
+    private func cancelIdleClose() async {
+        idleCloseTask?.cancel()
+        idleCloseTask = nil
+    }
+
+    /// Chromium hands out short-lived elements, so a cached control is only
+    /// reused while it still answers queries.
+    private func resolveEffortPopUp(in application: AXUIElement) -> AXUIElement? {
+        if let cached = cachedEffortPopUp, ClaudeAccessibilityControls.isAlive(cached) { return cached }
+        cachedEffortPopUp = ClaudeAccessibilityControls.effortPopUp(in: application)
+        return cachedEffortPopUp
+    }
+
+    private func resolveModelPopUp(in application: AXUIElement) -> AXUIElement? {
+        if let cached = cachedModelPopUp, ClaudeAccessibilityControls.isAlive(cached) { return cached }
+        cachedModelPopUp = ClaudeAccessibilityControls.modelPopUp(in: application)
+        return cachedModelPopUp
+    }
+
+    // MARK: - Sequencing
+
+    /// Runs one Accessibility gesture at a time. Overlapping gestures are what
+    /// produced arrow keys landing in a menu that was no longer open.
+    private func run(_ work: @escaping () async -> Void) {
+        guard !isSequenceInFlight else { return }
+        isSequenceInFlight = true
+        Task { @MainActor in
+            await work()
+            self.isSequenceInFlight = false
+        }
+    }
+
+    private func poll<T>(timeout: TimeInterval, _ probe: () -> T?) async -> T? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let value = probe() { return value }
+            try? await Task.sleep(nanoseconds: UInt64(Self.pollIntervalSeconds * 1_000_000_000))
+        } while Date() < deadline
+        return probe()
+    }
+
+    // MARK: - Testing hooks
 
     /// Testing hooks for the assignment panel: skip the hold-timer wait so a
     /// button click can exercise the same state machine as a real long press.
     func testBeginHold() {
         encoderHoldTimer?.invalidate()
+        isEncoderPressed = true
+        suppressCurrentEncoderPress = false
         fireEncoderHold()
     }
 
@@ -202,96 +497,28 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         endEncoderHold()
     }
 
-    private func resetState() {
-        encoderHoldTimer?.invalidate()
-        encoderHoldTimer = nil
-        autoCloseTimer?.invalidate()
-        autoCloseTimer = nil
-        encoderHoldFired = false
-        isModelMenuOpen = false
-        isEffortMenuOpen = false
-        pendingKeyActions.removeAll()
-        isProcessingKeyActions = false
+    // MARK: - Effort vocabulary
+
+    /// Claude labels the effort slider in the app's own language. The ranking
+    /// is only used for display and tests — stepping itself never depends on
+    /// it, because the slider is moved one detent at a time and read back.
+    nonisolated static func effortRank(in text: String) -> Int? {
+        let words = Set(
+            text.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
+        )
+        if words.contains("max") || words.contains("maximum") || words.contains("maximal") { return 4 }
+        if words.contains("extra") { return 3 }
+        if words.contains("hoch") || words.contains("high") { return 2 }
+        if words.contains("mittel") || words.contains("medium") { return 1 }
+        if words.contains("niedrig") || words.contains("low") { return 0 }
+        return nil
     }
 
-    /// Appends a key-posting action to the serial queue instead of firing it
-    /// immediately. Every action runs strictly after the previous one, with a
-    /// real `keySpacingSeconds` gap in between, so an "open menu" shortcut
-    /// enqueued a moment ago is guaranteed to have already landed before a
-    /// later arrow-key action from a fast follow-up rotation runs.
-    private func enqueue(_ action: @escaping () -> Void) {
-        pendingKeyActions.append(action)
-        processQueueIfNeeded()
+    nonisolated static func targetEffortRank(current: Int, delta: Int) -> Int {
+        min(max(current + delta, 0), 4)
     }
 
-    private func processQueueIfNeeded() {
-        guard !isProcessingKeyActions, !pendingKeyActions.isEmpty else { return }
-        isProcessingKeyActions = true
-        let next = pendingKeyActions.removeFirst()
-        next()
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.keySpacingSeconds) { [weak self] in
-            guard let self else { return }
-            self.isProcessingKeyActions = false
-            self.processQueueIfNeeded()
-        }
-    }
-
-    /// Plain (unheld) rotation: Claude only exposes effort stepping while the
-    /// Effort menu (⌘⇧E) is open, so this opens it on demand, steps through it
-    /// with ↑/↓, and schedules an auto-close a moment after the dial goes
-    /// quiet again.
-    private func stepEffort(_ direction: CodexModelListStep) {
-        guard let claude = readyClaudeApplication() else { return }
-        claude.activate(options: [.activateAllWindows])
-        let keyCode = direction == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
-        status = direction == .next ? "Aufwand erhöhen" : "Aufwand verringern"
-        if !isEffortMenuOpen {
-            isEffortMenuOpen = true
-            enqueue { Self.postKey(UInt16(kVK_ANSI_E), flags: [.maskCommand, .maskShift]) }
-        }
-        // Enqueued strictly after the open shortcut above (same serial
-        // queue), so this always lands after the menu is actually open, even
-        // if the dial is rotated faster than the queue can drain.
-        enqueue { Self.postKey(keyCode) }
-        scheduleAutoClose()
-    }
-
-    private func scheduleAutoClose() {
-        autoCloseTimer?.invalidate()
-        autoCloseTimer = Timer.scheduledTimer(withTimeInterval: Self.autoCloseIdleSeconds, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.autoCloseEffortMenu() }
-        }
-    }
-
-    private func autoCloseEffortMenu() {
-        guard isEffortMenuOpen, !isModelMenuOpen else { return }
-        isEffortMenuOpen = false
-        enqueue { [weak self] in
-            Self.postKey(UInt16(kVK_Escape))
-            self?.status = "Denkaufwand-Menü geschlossen."
-        }
-    }
-
-    func toggleEffortMenu() {
-        guard let claude = readyClaudeApplication() else { return }
-        claude.activate(options: [.activateAllWindows])
-        autoCloseTimer?.invalidate()
-        if isEffortMenuOpen {
-            isEffortMenuOpen = false
-            status = "Schließen: Denkaufwand-Menü"
-            enqueue { [weak self] in
-                Self.postKey(UInt16(kVK_Escape))
-                self?.status = "Denkaufwand-Menü geschlossen."
-            }
-            return
-        }
-        isEffortMenuOpen = true
-        status = "Öffnen: Denkaufwand-Menü"
-        enqueue { [weak self] in
-            Self.postKey(UInt16(kVK_ANSI_E), flags: [.maskCommand, .maskShift])
-            self?.status = "Denkaufwand-Menü offen: erneut drücken zum Schließen."
-        }
-    }
+    // MARK: - Lifecycle
 
     private var claudeApplication: NSRunningApplication? {
         NSRunningApplication.runningApplications(withBundleIdentifier: AutomationApp.claude.bundleIdentifier)
@@ -307,16 +534,35 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             status = "Bedienungshilfen fehlen. Bitte unten Berechtigungen anfordern."
             return nil
         }
+        guard isActiveProfile(), !isExternallySuspended() else {
+            status = "Claude-Automation pausiert: Profil oder Thread-Auswahl hat sich geändert."
+            return nil
+        }
         guard let claude = claudeApplication else {
             // Claude isn't running (or was quit/relaunched since we last
             // opened a menu): whatever we assumed about its UI state no
-            // longer holds, so drop it rather than risk sending arrow keys
-            // into a menu that isn't there.
+            // longer holds, so drop it rather than risk sending keys into a
+            // menu that isn't there.
             resetState()
             status = "Claude läuft nicht."
             return nil
         }
         return claude
+    }
+
+    private func resetState() {
+        encoderHoldTimer?.invalidate()
+        encoderHoldTimer = nil
+        encoderHoldFired = false
+        isEncoderPressed = false
+        suppressCurrentEncoderPress = false
+        idleCloseTask?.cancel()
+        idleCloseTask = nil
+        isSequenceInFlight = false
+        isEffortPopoverOpen = false
+        isModelMenuOpen = false
+        cachedEffortPopUp = nil
+        cachedModelPopUp = nil
     }
 
     private func updateMonitoring() {
@@ -327,12 +573,22 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             return
         }
 
-        guard hasInputMonitoringPermission else {
+        guard hasAccessibilityPermission else {
+            status = "Bedienungshilfen fehlen – Agent Micro darf Claude nicht steuern."
+            return
+        }
+
+        guard hasInputMonitoringPermission || usesPhysicalEncoderEvents else {
             status = "Input Monitoring fehlt – macOS blockiert das Drehrad. Bitte Agent Micro unten freigeben."
             return
         }
 
-        status = "Bereit: Drehen = Reasoning-Aufwand (⌘⇧E) · Halten (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + drehen = Modell wechseln (⌘⇧I)."
+        guard !usesPhysicalEncoderEvents else {
+            status = "Bereit: Drehrad läuft über das direkte Pad-Protokoll. Nur Bedienungshilfen werden benötigt."
+            return
+        }
+
+        status = "Bereit: Drehen = Reasoning-Aufwand · Halten (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + drehen = Modell wechseln."
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let keyboardIdentity: (Int, Int) -> [String: Any] = { vendorID, productID in
@@ -367,21 +623,19 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         guard isActiveProfile(), !isExternallySuspended(),
               usagePage == 0x07, [0x71, 0x73].contains(usage) else { return }
         guard value != 0 else { return }
+        // The vendor protocol already delivered this edge; taking it twice
+        // would double every detent.
+        guard !usesPhysicalEncoderEvents else { return }
         let now = ProcessInfo.processInfo.systemUptime
         guard inputDebouncer.accepts(usage: usage, at: now) else { return }
         recordInput(usage: usage, value: value)
 
-        // Swapped vs. the naive F22=previous/F24=next assumption, matching
-        // the same left/right inversion applied in `handlePhysicalEvent`.
+        // Same direction mapping as `handlePhysicalEvent`: F22 is rotate left
+        // (step down), F24 is rotate right (step up).
         switch usage {
-        case 0x71: // F22: rotate left — suppressed mid-hold, see driveModelMenuHighlight.
-            guard !encoderHoldFired else { break }
-            stepEffort(.next)
-        case 0x73: // F24: rotate right, same guard as above.
-            guard !encoderHoldFired else { break }
-            stepEffort(.previous)
-        default:
-            break
+        case 0x71: handleRotation(.previous)
+        case 0x73: handleRotation(.next)
+        default: break
         }
     }
 
@@ -401,15 +655,5 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         DispatchQueue.main.async {
             service.handleHIDValue(usagePage: usagePage, usage: normalized.usage, value: normalized.value)
         }
-    }
-
-    private nonisolated static func postKey(_ keyCode: UInt16, flags: CGEventFlags = []) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true)
-        down?.flags = flags
-        down?.post(tap: .cghidEventTap)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: false)
-        up?.flags = flags
-        up?.post(tap: .cghidEventTap)
     }
 }

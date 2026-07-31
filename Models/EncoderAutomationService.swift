@@ -8,8 +8,12 @@ import Foundation
 protocol EncoderAutomationService: AnyObject {
     var isEnabled: Bool { get set }
     var status: String { get }
+    var lastInput: String { get }
     var hasAccessibilityPermission: Bool { get }
     var hasInputMonitoringPermission: Bool { get }
+    /// Custom Agent Micro firmware delivers encoder edges through its raw HID
+    /// protocol, so it does not need the system-wide Input Monitoring grant.
+    var usesPhysicalEncoderEvents: Bool { get }
 
     func requestPermissions()
     func refreshPermissions()

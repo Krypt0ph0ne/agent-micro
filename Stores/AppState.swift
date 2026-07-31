@@ -13,6 +13,9 @@ final class AppState {
     let inputMonitor: HIDInputMonitor
     let reasoningAutomation: CodexReasoningAutomationService
     let claudeReasoningAutomation: ClaudeReasoningAutomationService
+    /// Read-only Accessibility capture of Claude's live UI, used to verify what
+    /// the encoder automation is actually driving instead of assuming it.
+    let claudeAccessibilityInspector: ClaudeAccessibilityInspector
     let padEvents: CodexPadEventService
     let keyboardState: CodexPadKeyboardStateService
     let tapHold: CodexPadTapHoldService
@@ -69,6 +72,7 @@ final class AppState {
         self.inputMonitor = HIDInputMonitor(permissionMonitor: permissionMonitor)
         self.reasoningAutomation = CodexReasoningAutomationService(permissionMonitor: permissionMonitor, isActiveProfile: { profiles.selectedProfile.automationApp != .claude })
         self.claudeReasoningAutomation = ClaudeReasoningAutomationService(permissionMonitor: permissionMonitor, isActiveProfile: { profiles.selectedProfile.automationApp == .claude })
+        self.claudeAccessibilityInspector = ClaudeAccessibilityInspector()
         self.padEvents = CodexPadEventService()
         self.keyboardState = CodexPadKeyboardStateService()
         self.tapHold = CodexPadTapHoldService(permissionMonitor: permissionMonitor) { profiles.selectedProfile }
@@ -439,6 +443,8 @@ final class AppState {
         guard let connected else {
             quickAssign.cancelSelection()
             claudeQuickAssign.cancelSelection()
+            reasoningAutomation.usesPhysicalEncoderEvents = false
+            claudeReasoningAutomation.usesPhysicalEncoderEvents = false
             if previousID != nil {
                 padEvents.refresh(enabled: false)
                 keyboardState.refresh(enabled: false)
@@ -460,6 +466,12 @@ final class AppState {
         // endless reinitialise-and-upload loop that resets LED effects.
         observedDeviceID = newID
         let customFirmware = connected.isCodexPadFirmware
+        // The vendor event protocol includes every encoder edge and remains
+        // healthy across the keyboard interface's USB re-enumeration. Make it
+        // the automation source for custom pads; generic keyboard HID remains
+        // the fallback for third-party CH57x hardware.
+        reasoningAutomation.usesPhysicalEncoderEvents = customFirmware
+        claudeReasoningAutomation.usesPhysicalEncoderEvents = customFirmware
         padEvents.refresh(enabled: customFirmware)
         keyboardState.refresh(enabled: customFirmware)
         let transfer = transferCurrentConfiguration()

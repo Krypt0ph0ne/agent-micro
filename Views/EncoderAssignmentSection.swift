@@ -42,7 +42,11 @@ struct EncoderAssignmentSection: View {
             )
 
             HStack(spacing: 8) {
-                PermissionStatus(title: "Input Monitoring", isGranted: automation.hasInputMonitoringPermission)
+                PermissionStatus(
+                    title: "Input Monitoring",
+                    isGranted: automation.usesPhysicalEncoderEvents || automation.hasInputMonitoringPermission,
+                    grantedTitle: automation.usesPhysicalEncoderEvents ? "Nicht nötig" : "Erteilt"
+                )
                 PermissionStatus(title: "Accessibility", isGranted: automation.hasAccessibilityPermission)
             }
 
@@ -59,16 +63,31 @@ struct EncoderAssignmentSection: View {
             .controlSize(.small)
             .disabled(!automation.isEnabled)
 
-            if !automation.hasInputMonitoringPermission || !automation.hasAccessibilityPermission {
+            if !automation.hasAccessibilityPermission || (!automation.usesPhysicalEncoderEvents && !automation.hasInputMonitoringPermission) {
                 Button("Berechtigungen anfordern") { automation.requestPermissions() }
                     .controlSize(.small)
+            }
+
+            if !automation.hasAccessibilityPermission {
+                Text(AppLanguage.text(
+                    "Ist Agent Micro unter Bedienungshilfen bereits sichtbar und eingeschaltet, aber wirkungslos? Nach einem ad-hoc-signierten Update den Schalter einmal Aus → Ein schalten.",
+                    "If Agent Micro is already visible and enabled under Accessibility but does not respond, toggle it Off → On once after an ad-hoc-signed update."
+                ))
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Text(automation.status)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Label("Direkt vom Pad gesendet", systemImage: "cable.connector")
+            Label(
+                automation.usesPhysicalEncoderEvents
+                    ? AppLanguage.text("Direktes Pad-Protokoll · Input Monitoring nicht nötig", "Direct pad protocol · Input Monitoring not needed")
+                    : AppLanguage.text("Legacy-Keyboard-HID · Input Monitoring nötig", "Legacy keyboard HID · Input Monitoring required"),
+                systemImage: "cable.connector"
+            )
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -93,20 +112,33 @@ struct EncoderAssignmentSection: View {
     }
 
     private var infoMessage: String {
-        "Alle drei Encoder-Elemente (links drehen, drücken, rechts drehen) gehören zusammen und werden hier als eine Gruppe bearbeitet. Ein kurzer Dreh oder Druck ändert den Reasoning-Aufwand bzw. schaltet die Modellwahl um; wird das Rad gehalten und dabei gedreht, navigiert das stattdessen die Modellliste. Beides ist gleichzeitig aktiv, ähnlich wie Tippen/Halten bei den sechs Tasten. Nach einer Änderung an F22/F23/F24 einmal „Übertragen“ klicken."
+        let transport = automation.usesPhysicalEncoderEvents
+            ? AppLanguage.text(
+                "Das direkte Pad-Protokoll liefert diese Ereignisse ohne Input Monitoring.",
+                "The direct pad protocol delivers these events without Input Monitoring."
+            )
+            : AppLanguage.text(
+                "Legacy-CH57x-Geräte liefern F22/F23/F24 über Keyboard-HID und benötigen dafür Input Monitoring.",
+                "Legacy CH57x devices deliver F22/F23/F24 over keyboard HID and require Input Monitoring."
+            )
+        return AppLanguage.text(
+            "Alle drei Encoder-Elemente (links drehen, drücken, rechts drehen) gehören zusammen und werden hier als eine Gruppe bearbeitet. Ein kurzer Dreh oder Druck ändert den Reasoning-Aufwand bzw. schaltet die Modellwahl um; wird das Rad gehalten und dabei gedreht, navigiert das stattdessen die Modellliste. \(transport) Nach einer Änderung einmal „Übertragen“ klicken.",
+            "All three encoder controls (turn left, press, turn right) belong together and are edited as a group. A short turn or press changes reasoning effort or toggles model selection; holding the dial while turning navigates the model list instead. \(transport) After a change, click Transfer once."
+        )
     }
 }
 
 struct PermissionStatus: View {
     let title: String
     let isGranted: Bool
+    var grantedTitle = "Erteilt"
 
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
-            Text(isGranted ? "Erteilt" : "Fehlt")
+            Text(isGranted ? grantedTitle : "Fehlt")
                 .foregroundStyle(isGranted ? Color.green : Color.orange)
         }
         .font(.caption)
