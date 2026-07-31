@@ -88,6 +88,18 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     /// only drives menu navigation while this is true.
     private var encoderHoldFired = false
 
+    /// The custom Agent Micro firmware exposes encoder edges on its vendor HID
+    /// protocol. That stream survives a keyboard-interface re-enumeration
+    /// after USB reconnect, whereas a generic keyboard HID manager may remain
+    /// attached to the old interface. When available, make it authoritative
+    /// for the dial and suppress duplicate F22/F24 keyboard events.
+    var usesPhysicalEncoderEvents = false {
+        didSet {
+            guard oldValue != usesPhysicalEncoderEvents else { return }
+            updateMonitoring()
+        }
+    }
+
     private let permissionMonitor: PermissionMonitor
     private(set) var status = "Deaktiviert"
     private(set) var lastInput = "Noch kein Drehrad-Signal empfangen"
@@ -112,9 +124,13 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     }
 
     func requestPermissions() {
-        permissionMonitor.requestPermissions()
+        if usesPhysicalEncoderEvents {
+            permissionMonitor.requestAccessibilityPermission()
+        } else {
+            permissionMonitor.requestPermissions()
+        }
         updateMonitoring()
-        if !hasInputMonitoringPermission || !hasAccessibilityPermission {
+        if !hasAccessibilityPermission || (!usesPhysicalEncoderEvents && !hasInputMonitoringPermission) {
             status = "Berechtigungen fehlen noch. In den Systemeinstellungen Agent Micro aktivieren und danach zur App zurückkehren."
         }
     }
@@ -175,10 +191,18 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
             }
         case .encoderLeft:
             guard event.phase == .triggered else { return }
-            driveModelListHighlight(.previous)
+            if encoderHoldFired {
+                driveModelListHighlight(.previous)
+            } else if usesPhysicalEncoderEvents {
+                perform(.decreaseEffort)
+            }
         case .encoderRight:
             guard event.phase == .triggered else { return }
-            driveModelListHighlight(.next)
+            if encoderHoldFired {
+                driveModelListHighlight(.next)
+            } else if usesPhysicalEncoderEvents {
+                perform(.increaseEffort)
+            }
         case .key1, .key2, .key3, .key4, .key5, .key6:
             break
         }
@@ -354,8 +378,17 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
             return
         }
 
-        guard hasInputMonitoringPermission else {
+        guard hasInputMonitoringPermission || usesPhysicalEncoderEvents else {
             status = "Input Monitoring fehlt – macOS blockiert das Drehrad. Bitte Agent Micro unten freigeben."
+            return
+        }
+
+        // The custom firmware reports every encoder edge on the already-open
+        // vendor HID channel. Do not also depend on the separate keyboard
+        // interface: macOS can fail to register it in Input Monitoring after
+        // a reconnect, even though the vendor channel remains healthy.
+        guard !usesPhysicalEncoderEvents else {
+            status = "Bereit: Drehrad läuft über das direkte Pad-Protokoll. Nur Bedienungshilfen werden benötigt."
             return
         }
 
@@ -414,10 +447,10 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         case 0x71: // F22: rotate left — suppressed mid-hold so the same tick
                    // doesn't also fire the direct effort shortcut while
                    // `driveModelListHighlight` is navigating the Model Picker.
-            guard !encoderHoldFired else { break }
+            guard !usesPhysicalEncoderEvents, !encoderHoldFired else { break }
             perform(.decreaseEffort)
         case 0x73: // F24: rotate right, same guard as above.
-            guard !encoderHoldFired else { break }
+            guard !usesPhysicalEncoderEvents, !encoderHoldFired else { break }
             perform(.increaseEffort)
         default:
             break

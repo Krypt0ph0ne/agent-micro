@@ -35,7 +35,11 @@ struct OnboardingView: View {
         AppLanguage(rawValue: languageRawValue) ?? .systemDefault
     }
     private var bothPermissionsGranted: Bool {
-        monitor.hasAccessibilityPermission && monitor.hasInputMonitoringPermission
+        monitor.hasAccessibilityPermission
+            && (usesPhysicalInputProtocol || monitor.hasInputMonitoringPermission)
+    }
+    private var usesPhysicalInputProtocol: Bool {
+        appState.device.currentDevice?.isCodexPadFirmware == true
     }
 
     /// A representative profile purely for the illustrative pad diagrams —
@@ -296,6 +300,7 @@ struct OnboardingView: View {
             OnboardingPermissionsStep(
                 monitor: monitor,
                 bothGranted: bothPermissionsGranted,
+                usesPhysicalInputProtocol: usesPhysicalInputProtocol,
                 isQuickMode: mode == .quick,
                 onBack: goBack,
                 onContinue: advance

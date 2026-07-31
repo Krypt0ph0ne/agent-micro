@@ -20,6 +20,7 @@ struct DiagnosticsView: View {
 
                 DeviceDiagnosticsCard(appState: appState)
                 CodexPadProtocolCard(appState: appState)
+                ClaudeAccessibilityCard(appState: appState)
                 InputMonitorCard(appState: appState)
                 AgentBridgeDiagnosticsCard(title: "Codex Event Bridge", icon: "bolt.horizontal.circle", store: appState.codexThreads)
                 AgentBridgeDiagnosticsCard(title: "Claude Agent Bridge", icon: "bolt.horizontal.circle", store: appState.claudeThreads)
@@ -133,14 +134,81 @@ private struct CodexPadProtocolCard: View {
                 Spacer()
                 Button("Status abfragen") { appState.padEvents.requestStatus() }
             }
+            HStack {
+                Text("Live-Automationspfad")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Links testen") {
+                    appState.padEvents.injectDiagnosticPhysicalEvent(control: .encoderLeft, phase: .triggered)
+                }
+                Button("Rechts testen") {
+                    appState.padEvents.injectDiagnosticPhysicalEvent(control: .encoderRight, phase: .triggered)
+                }
+            }
+            .controlSize(.small)
             Text(appState.padEvents.status).font(.caption).foregroundStyle(.secondary)
+            LabeledContent("Automationsstatus", value: appState.activeReasoningAutomation.status)
+            LabeledContent("Letzter Encoder-Input", value: appState.activeReasoningAutomation.lastInput)
             if let firmware = appState.padEvents.firmwareStatus {
                 LabeledContent("Firmware", value: firmware.version)
                 LabeledContent("Fähigkeiten", value: String(format: "0x%02X", firmware.capabilities))
                 LabeledContent("Gedrückte Controls", value: String(format: "0x%03X", firmware.pressedMask))
             }
             if let event = appState.padEvents.events.first {
-                LabeledContent("Letztes physisches Ereignis", value: "Control \(event.control + 1) · \(String(describing: event.phase)) · #\(event.sequence)")
+                let source = event.origin == .hardware ? "Hardware" : "Diagnose"
+                LabeledContent("Letztes Ereignis", value: "\(source) · Control \(event.control + 1) · \(String(describing: event.phase)) · #\(event.sequence)")
+            }
+        }
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// Captures what Claude's UI really exposes over Accessibility. The encoder
+/// automation drives a control whose shape changes between Claude releases, so
+/// a reproducible dump is the only way to tell "the menu did not open" apart
+/// from "the menu opened but the wrong row was selected".
+private struct ClaudeAccessibilityCard: View {
+    let appState: AppState
+
+    var body: some View {
+        let inspector = appState.claudeAccessibilityInspector
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(
+                    AppLanguage.text("Claude-UI (Bedienungshilfen)", "Claude UI (Accessibility)"),
+                    systemImage: "accessibility"
+                )
+                    .font(.headline)
+                Spacer()
+                Button(AppLanguage.text("Aufwand-Schreibpfad prüfen", "Verify effort write path")) {
+                    inspector.verifyEffortWritePath()
+                }
+                .disabled(inspector.isRunning)
+                Button(AppLanguage.text("Claude-UI untersuchen", "Inspect Claude UI")) {
+                    inspector.inspect()
+                }
+                .disabled(inspector.isRunning)
+                if inspector.lastDumpURL != nil {
+                    Button(AppLanguage.text("Im Finder zeigen", "Show in Finder")) {
+                        inspector.revealLastDump()
+                    }
+                }
+            }
+            .controlSize(.small)
+            Text(AppLanguage.text(
+                "„Untersuchen“ liest Claudes Menübaum vor, während und nach dem Öffnen, ohne etwas zu verändern. „Schreibpfad prüfen“ verstellt den Aufwand testweise um einen Schritt und setzt ihn wieder zurück.",
+                "\u{201C}Inspect\u{201D} reads Claude's menu tree before, during and after opening without changing anything. \u{201C}Verify write path\u{201D} moves effort one step and restores it."
+            ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(inspector.status)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            ForEach(inspector.summary, id: \.self) { line in
+                Text(line).font(.caption)
             }
         }
         .padding(14)
@@ -217,7 +285,17 @@ private struct InputMonitorCard: View {
             }
             Text(monitor.status).font(.caption).foregroundStyle(.secondary)
             if !monitor.hasInputMonitoringPermission {
-                Text("Input Monitoring ist für vollständige globale Beobachtung wahrscheinlich erforderlich. Agent Micro liest Ereignisse nur passiv und kann sie nicht blockieren.")
+                Text(
+                    appState.device.currentDevice?.isCodexPadFirmware == true
+                        ? AppLanguage.text(
+                            "Input Monitoring fehlt nur diesem optionalen Keyboard-Testmonitor. Direkte Pad-Ereignisse und die Encoder-Automation werden über das Agent-Micro-Protokoll empfangen.",
+                            "Only this optional keyboard test monitor lacks Input Monitoring. Direct pad events and encoder automation are received through the Agent Micro protocol."
+                        )
+                        : AppLanguage.text(
+                            "Input Monitoring ist für diesen passiven Testmonitor und Legacy-Keyboard-HID erforderlich. Agent Micro liest Ereignisse nur und kann sie nicht blockieren.",
+                            "Input Monitoring is required for this passive test monitor and legacy keyboard HID. Agent Micro only reads events and cannot block them."
+                        )
+                )
                     .font(.caption).foregroundStyle(.orange)
             }
             if monitor.events.isEmpty {

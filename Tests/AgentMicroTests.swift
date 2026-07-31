@@ -4,6 +4,102 @@ import XCTest
 @testable import AgentMicro
 
 final class AgentMicroTests: XCTestCase {
+    func testPrivacySettingsDeepLinksTargetTheExpectedTCCPanes() {
+        XCTAssertEqual(
+            SystemPrivacySettingsPane.accessibility.url.absoluteString,
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        )
+        XCTAssertEqual(
+            SystemPrivacySettingsPane.inputMonitoring.url.absoluteString,
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+        )
+    }
+
+    func testClaudeEffortRankParsesCombinedGermanAndEnglishPopupLabels() {
+        XCTAssertEqual(ClaudeReasoningAutomationService.effortRank(in: "Modell: Opus 5 · Niedrig"), 0)
+        XCTAssertEqual(ClaudeReasoningAutomationService.effortRank(in: "Model: Sonnet 4.5 · Medium"), 1)
+        XCTAssertEqual(ClaudeReasoningAutomationService.effortRank(in: "Modell: Opus 5 · Hoch"), 2)
+        XCTAssertEqual(ClaudeReasoningAutomationService.effortRank(in: "Model: Opus 5 · Extra High"), 3)
+        XCTAssertEqual(ClaudeReasoningAutomationService.effortRank(in: "Modell: Opus 5 · Maximal Hoch"), 4)
+        XCTAssertNil(ClaudeReasoningAutomationService.effortRank(in: "Modell: Opus 5"))
+    }
+
+    func testClaudeEffortTargetClampsToSupportedRange() {
+        XCTAssertEqual(ClaudeReasoningAutomationService.targetEffortRank(current: 0, delta: -1), 0)
+        XCTAssertEqual(ClaudeReasoningAutomationService.targetEffortRank(current: 2, delta: -1), 1)
+        XCTAssertEqual(ClaudeReasoningAutomationService.targetEffortRank(current: 2, delta: 1), 3)
+        XCTAssertEqual(ClaudeReasoningAutomationService.targetEffortRank(current: 4, delta: 1), 4)
+    }
+
+    // Every string below was captured from a live Accessibility dump of Claude
+    // Desktop 1.24012.9 (Agent Micro → Diagnose → "Claude-UI untersuchen").
+
+    func testClaudeEffortPopUpRequiresThePopUpRoleAndNotJustMatchingText() {
+        XCTAssertTrue(ClaudeAccessibilityControls.isEffortPopUp(
+            role: kAXPopUpButtonRole,
+            text: "aufwand: hoch"
+        ))
+        // The regression this pins down: a chat message mentioning the word
+        // was matched ahead of the real control, and the automation then typed
+        // effort steps into the conversation list while reporting success.
+        XCTAssertFalse(ClaudeAccessibilityControls.isEffortPopUp(
+            role: kAXStaticTextRole,
+            text: "agent micro meldet danach: claude-aufwand angepasst."
+        ))
+        XCTAssertFalse(ClaudeAccessibilityControls.isEffortPopUp(
+            role: kAXButtonRole,
+            text: "#8 · gemergt encoder alternative modellauswahl"
+        ))
+    }
+
+    func testClaudeModelPopUpIgnoresConversationRowsNamedAfterAModel() {
+        XCTAssertTrue(ClaudeAccessibilityControls.isModelPopUp(role: kAXPopUpButtonRole, text: "opus 5"))
+        XCTAssertTrue(ClaudeAccessibilityControls.isModelPopUp(role: kAXPopUpButtonRole, text: "sonnet 5"))
+        // A real AXPopUpButton, but the one belonging to a sidebar row.
+        XCTAssertFalse(ClaudeAccessibilityControls.isModelPopUp(
+            role: kAXPopUpButtonRole,
+            text: "weitere optionen für encoder alternative modellauswahl"
+        ))
+        XCTAssertFalse(ClaudeAccessibilityControls.isModelPopUp(
+            role: kAXStaticTextRole,
+            text: "encoder alternative modellauswahl"
+        ))
+        // "Modell" alone must never select a control: it is a conversation
+        // word, not a model name.
+        XCTAssertFalse(ClaudeAccessibilityControls.isModelPopUp(
+            role: kAXPopUpButtonRole,
+            text: "modellauswahl"
+        ))
+    }
+
+    func testClaudeEffortSliderLabelsMapToRanksInBothAppLanguages() {
+        for (label, rank) in [("Niedrig", 0), ("Mittel", 1), ("Hoch", 2), ("Extra", 3), ("Max", 4)] {
+            XCTAssertEqual(ClaudeReasoningAutomationService.effortRank(in: label), rank, label)
+        }
+        for (label, rank) in [("Low", 0), ("Medium", 1), ("High", 2), ("Extra", 3), ("Max", 4)] {
+            XCTAssertEqual(ClaudeReasoningAutomationService.effortRank(in: label), rank, label)
+        }
+    }
+
+    func testDiagnosticPadEventUsesTheSamePublishedEventPathAndIsIdentifiable() throws {
+        let service = CodexPadEventService()
+        var received: [CodexPadPhysicalEvent] = []
+        service.onPhysicalEvent = { received.append($0) }
+
+        service.injectDiagnosticPhysicalEvent(control: .encoderLeft, phase: .triggered)
+        service.injectDiagnosticPhysicalEvent(control: .encoderRight, phase: .triggered)
+
+        XCTAssertEqual(received.count, 2)
+        XCTAssertEqual(received.map(\.origin), [.diagnostic, .diagnostic])
+        XCTAssertEqual(received.map(\.control), [
+            HardwareControl.encoderLeft.reportedControlIndex,
+            HardwareControl.encoderRight.reportedControlIndex
+        ])
+        XCTAssertEqual(received.map(\.phase), [.triggered, .triggered])
+        XCTAssertEqual(received.map(\.sequence), [1, 2])
+        XCTAssertEqual(service.events, received.reversed())
+    }
+
     func testAgentMicroMigratesLegacyPreferencesAndApplicationSupport() throws {
         let suiteName = "AgentMicroTests.migration.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

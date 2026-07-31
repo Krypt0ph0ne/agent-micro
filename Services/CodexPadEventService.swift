@@ -11,11 +11,25 @@ struct CodexPadFirmwareStatus: Equatable {
 
 struct CodexPadPhysicalEvent: Identifiable, Equatable {
     enum Phase: UInt8 { case released = 0, pressed = 1, triggered = 2 }
+    enum Origin: String { case hardware, diagnostic }
     let id = UUID()
     let sequence: UInt8
     let control: UInt8
     let phase: Phase
+    let origin: Origin
     let date = Date()
+
+    init(
+        sequence: UInt8,
+        control: UInt8,
+        phase: Phase,
+        origin: Origin = .hardware
+    ) {
+        self.sequence = sequence
+        self.control = control
+        self.phase = phase
+        self.origin = origin
+    }
 }
 
 /// All callbacks are scheduled on the main run loop. The Sendable marker is
@@ -28,6 +42,7 @@ final class CodexPadEventService: @unchecked Sendable {
     private var reportBuffer: UnsafeMutablePointer<UInt8>?
     private var statusTimer: Timer?
     private var lastLoggedPressedMask: UInt16?
+    private var diagnosticSequence: UInt8 = 0
     private(set) var firmwareStatus: CodexPadFirmwareStatus?
     private(set) var events: [CodexPadPhysicalEvent] = []
     private(set) var status = "Noch nicht verbunden"
@@ -98,6 +113,23 @@ final class CodexPadEventService: @unchecked Sendable {
         _ = packet.withUnsafeMutableBufferPointer {
             IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, 0, $0.baseAddress!, $0.count)
         }
+    }
+
+    /// Sends a local diagnostic event through the exact same callback and
+    /// consumer chain as a valid Raw-HID input report. This deliberately does
+    /// not bypass profile selection, suspension, permissions, or either
+    /// automation service, so it can distinguish a transport failure from a
+    /// downstream Claude/Codex automation failure without requiring hardware.
+    func injectDiagnosticPhysicalEvent(control: HardwareControl, phase: CodexPadPhysicalEvent.Phase) {
+        diagnosticSequence &+= 1
+        publish(
+            CodexPadPhysicalEvent(
+                sequence: diagnosticSequence,
+                control: control.reportedControlIndex,
+                phase: phase,
+                origin: .diagnostic
+            )
+        )
     }
 
     func sendLEDs(_ packets: [[UInt8]]) {
@@ -184,12 +216,17 @@ final class CodexPadEventService: @unchecked Sendable {
             }
             onFirmwareStatus?(newStatus)
         } else if bytes[3] == 0x81, let phase = CodexPadPhysicalEvent.Phase(rawValue: bytes[6]) {
-            let event = CodexPadPhysicalEvent(sequence: bytes[4], control: bytes[5], phase: phase)
-            logger.info("Physical event control=\(event.control, privacy: .public) phase=\(event.phase.rawValue, privacy: .public)")
-            events.insert(event, at: 0)
-            if events.count > 100 { events.removeLast(events.count - 100) }
-            onPhysicalEvent?(event)
+            publish(CodexPadPhysicalEvent(sequence: bytes[4], control: bytes[5], phase: phase))
         }
+    }
+
+    private func publish(_ event: CodexPadPhysicalEvent) {
+        logger.info(
+            "Physical event origin=\(event.origin.rawValue, privacy: .public) control=\(event.control, privacy: .public) phase=\(event.phase.rawValue, privacy: .public)"
+        )
+        events.insert(event, at: 0)
+        if events.count > 100 { events.removeLast(events.count - 100) }
+        onPhysicalEvent?(event)
     }
 }
 

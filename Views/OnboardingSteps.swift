@@ -8,6 +8,7 @@ import SwiftUI
 struct OnboardingPermissionsStep: View {
     let monitor: PermissionMonitor
     let bothGranted: Bool
+    let usesPhysicalInputProtocol: Bool
     let isQuickMode: Bool
     let onBack: () -> Void
     let onContinue: () -> Void
@@ -15,10 +16,16 @@ struct OnboardingPermissionsStep: View {
     var body: some View {
         OnboardingStepChrome(
             icon: "lock.shield",
-            title: AppLanguage.text("Zwei Berechtigungen", "Two permissions"),
+            title: usesPhysicalInputProtocol
+                ? AppLanguage.text("Eine Berechtigung", "One permission")
+                : AppLanguage.text("Zwei Berechtigungen", "Two permissions"),
             subtitle: AppLanguage.text(
-                "Damit Agent Micro Tasten und Drehrad empfangen und Shortcuts an Codex/Claude senden kann, braucht macOS diese Freigaben.",
-                "Agent Micro needs these macOS permissions to receive keys and dial input and send shortcuts to Codex and Claude."
+                usesPhysicalInputProtocol
+                    ? "Das direkte Pad-Protokoll empfängt die Eingaben selbst. macOS muss Agent Micro nur das Senden an Codex/Claude erlauben."
+                    : "Damit Agent Micro Tasten und Drehrad empfangen und Shortcuts an Codex/Claude senden kann, braucht macOS diese Freigaben.",
+                usesPhysicalInputProtocol
+                    ? "The direct pad protocol receives input itself. macOS only needs to allow Agent Micro to send shortcuts to Codex and Claude."
+                    : "Agent Micro needs these macOS permissions to receive keys and dial input and send shortcuts to Codex and Claude."
             ),
             continueTitle: isQuickMode ? AppLanguage.text("Los geht's", "Get started") : AppLanguage.text("Weiter", "Continue"),
             onBack: onBack,
@@ -32,13 +39,32 @@ struct OnboardingPermissionsStep: View {
                 )
                 permissionRow(
                     title: "Input Monitoring",
-                    detail: AppLanguage.text("Damit Agent Micro die Tasten und das Drehrad überhaupt empfängt.", "Allows Agent Micro to receive keys and dial input."),
-                    isGranted: monitor.hasInputMonitoringPermission
+                    detail: usesPhysicalInputProtocol
+                        ? AppLanguage.text("Für dieses Pad nicht nötig – Eingaben kommen über das direkte Geräteprotokoll.", "Not needed for this pad — input arrives through the direct device protocol.")
+                        : AppLanguage.text("Damit Agent Micro die Tasten und das Drehrad überhaupt empfängt.", "Allows Agent Micro to receive keys and dial input."),
+                    isGranted: usesPhysicalInputProtocol || monitor.hasInputMonitoringPermission
                 )
                 if !bothGranted {
-                    Button(AppLanguage.text("Berechtigungen anfordern", "Request permissions")) { monitor.requestPermissions() }
+                    Button(AppLanguage.text("Berechtigungen anfordern", "Request permissions")) {
+                        if usesPhysicalInputProtocol {
+                            monitor.requestAccessibilityPermission()
+                        } else {
+                            monitor.requestPermissions()
+                        }
+                    }
                         .buttonStyle(OnboardingPrimaryButtonStyle())
                         .padding(.top, 4)
+
+                    if !monitor.hasAccessibilityPermission {
+                        Text(AppLanguage.text(
+                            "Ist Agent Micro unter Bedienungshilfen schon sichtbar und eingeschaltet, reagiert aber nicht? Nach einem ad-hoc-signierten Update den Schalter einmal Aus → Ein schalten.",
+                            "If Agent Micro is already visible and enabled under Accessibility but does not respond, toggle it Off → On once after an ad-hoc-signed update."
+                        ))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .frame(maxWidth: 420)

@@ -5,9 +5,20 @@ import Observation
 import OSLog
 import UserNotifications
 
-/// Single source of truth for the two TCC grants Agent Micro's automation
-/// needs (Accessibility to post keystrokes, Input Monitoring to read the
-/// pad's HID reports). Every service that used to call
+enum SystemPrivacySettingsPane: String, CaseIterable {
+    case accessibility = "Privacy_Accessibility"
+    case inputMonitoring = "Privacy_ListenEvent"
+
+    var url: URL {
+        URL(string: "x-apple.systempreferences:com.apple.preference.security?\(rawValue)")!
+    }
+}
+
+/// Single source of truth for the TCC grants Agent Micro can use:
+/// Accessibility is required to control Codex/Claude; Input Monitoring is
+/// only required for legacy keyboard-HID input and the optional passive
+/// diagnostics monitor. The direct Agent Micro pad protocol does not need it.
+/// Every service that used to call
 /// `AXIsProcessTrusted()`/`CGPreflightListenEventAccess()` itself now reads
 /// from here instead, so there is exactly one place refreshing state and
 /// exactly one place that can notice a revocation.
@@ -46,12 +57,37 @@ final class PermissionMonitor {
         }
     }
 
-    /// Prompts macOS for both grants (each shows its own system dialog the
-    /// first time only) and refreshes immediately after.
+    /// Requests both grants for legacy keyboard-HID pads and leaves System
+    /// Settings on the first missing pane. Direct-protocol callers use
+    /// `requestAccessibilityPermission()` instead.
     func requestPermissions() {
-        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+        let targetPane: SystemPrivacySettingsPane = hasAccessibilityPermission
+            ? .inputMonitoring
+            : .accessibility
+        requestAccessibilityPrompt()
         _ = CGRequestListenEventAccess()
+        openSettings(targetPane)
         refresh()
+    }
+
+    func requestAccessibilityPermission() {
+        requestAccessibilityPrompt()
+        openSettings(.accessibility)
+        refresh()
+    }
+
+    private func requestAccessibilityPrompt() {
+        _ = AXIsProcessTrustedWithOptions(
+            ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        )
+    }
+
+    private func openSettings(_ pane: SystemPrivacySettingsPane) {
+        guard NSWorkspace.shared.open(pane.url) else {
+            logger.error("Could not open System Settings pane: \(pane.rawValue, privacy: .public)")
+            return
+        }
+        logger.info("Opened System Settings pane: \(pane.rawValue, privacy: .public)")
     }
 
     /// Local-notification authorization is its own separate, one-time prompt;
@@ -78,7 +114,7 @@ final class PermissionMonitor {
         if hasInputMonitoringPermission, !inputMonitoring {
             notifyRevoked(
                 title: "Input Monitoring entzogen",
-                body: "Drehrad und Tasten werden nicht mehr erkannt. Bitte in Systemeinstellungen → Datenschutz & Sicherheit → Input Monitoring wieder erlauben."
+                body: "Legacy-Keyboard-HID und der passive Diagnosemonitor können keine Eingaben mehr sehen. Das direkte Agent-Micro-Pad-Protokoll bleibt davon unberührt."
             )
         }
         hasAccessibilityPermission = accessibility
