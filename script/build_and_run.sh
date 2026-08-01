@@ -54,6 +54,7 @@ fi
 if [[ "${AGENT_MICRO_USE_EXISTING_HELPER:-0}" != "1" ]]; then
   echo "Building verified CH57x helper…"
   cargo build --release --manifest-path "$REFERENCE_DIR/Cargo.toml"
+  mkdir -p "$(dirname "$HELPER_DESTINATION")"
   cp "$HELPER_SOURCE" "$HELPER_DESTINATION"
   chmod +x "$HELPER_DESTINATION"
 elif [[ ! -x "$HELPER_DESTINATION" ]]; then

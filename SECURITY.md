@@ -2,8 +2,10 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest tagged release and the current
-`main` branch.
+The public Developer Preview is source-only and has no supported stable binary
+release. Security fixes target the current `main` branch. Preview tags, when
+present, are historical source snapshots rather than a promise of binary or
+long-term support.
 
 ## Reporting a vulnerability
 
