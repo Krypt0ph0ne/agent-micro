@@ -9,4 +9,10 @@ echo "Testing CH57x helper reference…"
 cargo test --manifest-path "$REFERENCE_DIR/Cargo.toml"
 
 echo "Testing Agent Micro…"
-swift test
+SWIFT_TEST_ARGUMENTS=()
+if [[ -n "${AGENT_MICRO_SWIFT_TEST_FLAGS:-}" ]]; then
+  read -r -a SWIFT_TEST_ARGUMENTS <<<"$AGENT_MICRO_SWIFT_TEST_FLAGS"
+  swift test "${SWIFT_TEST_ARGUMENTS[@]}"
+else
+  swift test
+fi

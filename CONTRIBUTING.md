@@ -14,9 +14,11 @@ Requirements:
 Run the complete local checks:
 
 ```sh
-./script/test.sh
-./script/build_and_run.sh --package-only
+./script/release_preflight.sh
 ```
+
+The preflight produces only ignored local build output. It never commits,
+tags, uploads, publishes, or installs the app.
 
 Hardware tests are opt-in because they require the exact supported pad:
 
