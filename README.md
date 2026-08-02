@@ -5,6 +5,19 @@ supported six-key CH552/CH57x macro pad with Codex and Claude desktop sessions.
 It is an independent open-source project and is not affiliated with or
 endorsed by OpenAI, Anthropic, SinLoon, Amazon, or Apple.
 
+> [!IMPORTANT]
+> **Developer Preview — source only.** There is no stable binary release and
+> no signed, downloadable macOS app. Clone the app and firmware repositories
+> and build both locally. See [DEVELOPER_PREVIEW.md](DEVELOPER_PREVIEW.md) for
+> the release scope and validation checklist.
+
+> [!WARNING]
+> Flashing the tested pad **permanently replaces its manufacturer firmware**.
+> The manufacturer firmware could not be backed up, is not distributed by this
+> project, and cannot be restored with the documented recovery procedure.
+> Continue only if you accept that the device cannot be returned to its factory
+> software state. Support is limited to the exact board identified below.
+
 This repository contains the macOS app. Custom device firmware lives in
 [`agent-micro-firmware`](https://github.com/Krypt0ph0ne/agent-micro-firmware).
 The commercial pad's PCB, enclosure, factory firmware, and product images are
@@ -41,11 +54,13 @@ the firmware repository's preflight procedure.
 | USB identity | Support |
 | --- | --- |
 | `1189:8890` | Verified factory CH57x configuration path |
-| `4249:4287` | Legacy experimental Agent Micro firmware |
-| `1209:pending` | Reserved in the app design; enabled only after pid.codes allocation |
+| `4249:4287` | Current experimental Developer Preview app/firmware path; not an allocated identity |
+| `1209:A6E1` | Requested from pid.codes; not assigned and not active |
 
-The legacy ID remains detectable for migration, but it is not a publicly
-allocated USB identity and must not be reused by new firmware releases.
+The Developer Preview uses `4249:4287` only as an explicitly experimental
+compatibility identity. It is not an official project allocation. The project
+does not claim or substitute any third-party USB identity. Do not change the
+firmware to `1209:A6E1` unless and until the pid.codes request is accepted.
 
 ## Build from source
 
@@ -91,6 +106,17 @@ compiles both architectures, but it does not publish the unsigned artifact.
 ./script/test.sh
 swift run AgentMicroHIDProbe 90
 ```
+
+Before preparing a source-only Developer Preview, run the complete local
+release preflight:
+
+```sh
+./script/release_preflight.sh
+```
+
+It tests the Swift app and vendored Rust helper, creates a local staging app
+from source, and checks that no binary release artifact is tracked. It does not
+create a commit, tag, GitHub Release, upload, or installation.
 
 The live hardware test is opt-in:
 
@@ -140,9 +166,10 @@ are documented in the separate firmware repository:
 
 <https://github.com/Krypt0ph0ne/agent-micro-firmware>
 
-The original factory application firmware could not be read back. Installing
-custom firmware therefore does not currently include a guaranteed return to
-the exact factory state.
+Installing the custom firmware permanently replaces the manufacturer
+application. The original application could not be read back, and the project
+does not provide a factory image or a path back to the factory software.
+Bootloader recovery can install another trusted Agent Micro build only.
 
 ## Contributing and security
 

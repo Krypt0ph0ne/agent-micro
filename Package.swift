@@ -17,7 +17,7 @@ let package = Package(
                 "References", "Tests", "Tools", "script", "LICENSES", "Examples",
                 "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "CONTRIBUTING.md",
                 "CODE_OF_CONDUCT.md", "SECURITY.md", "PRIVACY.md", "TRADEMARKS.md",
-                "ASSETS.md",
+                "ASSETS.md", "DEVELOPER_PREVIEW.md",
                 ".github", ".codex", "dist", "DesignQA", "design-qa.md",
                 "Support/ch57x-keyboard-tool"
             ],

@@ -45,6 +45,8 @@ jobs:
           test -f LICENSE
           test -f THIRD_PARTY_NOTICES.md
           test -f ASSETS.md
+          test -f DEVELOPER_PREVIEW.md
           git diff --check
-          ! git ls-files | grep -E '(^|/)(\\.env|.*\\.p12|.*\\.mobileprovision|Profiles\\.json)$'
+          ! git ls-files | grep -Ei '(\.app/|\.(dmg|pkg|zip|bin|hex|ihx)$)'
+          ! git ls-files | grep -E '(^|/)(\.env|.*\.p12|.*\.mobileprovision|Profiles\.json)$'
           ! git grep -IEn '(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY)'
