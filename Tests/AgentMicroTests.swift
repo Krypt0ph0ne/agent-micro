@@ -1659,10 +1659,20 @@ final class AgentMicroTests: XCTestCase {
         ))
 
         feedback.showAgentStatuses([.key1: .idle], profile: profile)
-        try? await Task.sleep(for: .milliseconds(65))
-        let idleFrames = batches.flatMap { $0 }.filter {
+        // The host animator runs on MainActor. A loaded XCTest runner may
+        // delay one or more 20 ms ticks, so wait for the observable condition
+        // with a bounded timeout instead of relying on one scheduler slice.
+        var idleFrames = batches.flatMap { $0 }.filter {
             $0[4] == HardwareControl.key1.firmwareControlIndex
                 && $0[6...8] == [255, 255, 255]
+        }
+        for _ in 0..<40 {
+            if idleFrames.count >= 3 { break }
+            try? await Task.sleep(for: .milliseconds(25))
+            idleFrames = batches.flatMap { $0 }.filter {
+                $0[4] == HardwareControl.key1.firmwareControlIndex
+                    && $0[6...8] == [255, 255, 255]
+            }
         }
         XCTAssertGreaterThanOrEqual(idleFrames.count, 3)
         XCTAssertTrue(idleFrames.allSatisfy {
