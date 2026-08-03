@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// First-run flow, gated by `AgentMicro.hasCompletedOnboarding` in `AgentMicroApp`.
+/// First-run flow, gated by `AgentMicro.completedOnboardingVersion` in
+/// `AgentMicroApp`.
 /// Offers a one-tap "Schnellstart" (today's permission-only walkthrough) or a
 /// guided, step-by-step setup that also configures the agent selection and
 /// the dictation source — everything that used to only be discoverable

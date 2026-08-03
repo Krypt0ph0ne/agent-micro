@@ -156,6 +156,7 @@ final class AgentMicroTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { removeDefaultsSuite(suiteName, defaults: defaults) }
         defaults.set("de", forKey: "CodexPad.appLanguage")
+        defaults.set(true, forKey: "CodexPad.hasCompletedOnboarding")
 
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentMicroMigration-\(UUID().uuidString)", isDirectory: true)
@@ -171,6 +172,7 @@ final class AgentMicroTests: XCTestCase {
         )
 
         XCTAssertEqual(defaults.string(forKey: "AgentMicro.appLanguage"), "de")
+        XCTAssertNil(defaults.object(forKey: "AgentMicro.hasCompletedOnboarding"))
         XCTAssertTrue(
             FileManager.default.fileExists(
                 atPath: root
