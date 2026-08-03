@@ -15,6 +15,14 @@ struct EncoderAssignmentSection: View {
         Binding(get: { automation.isEnabled }, set: { automation.isEnabled = $0 })
     }
 
+    /// The service flips this flag during hardware reconciliation. Include the
+    /// device's already-known firmware capability so the UI never presents a
+    /// legacy Input Monitoring requirement during that short startup window.
+    private var usesDirectPadProtocol: Bool {
+        automation.usesPhysicalEncoderEvents
+            || appState.device.currentDevice?.isCodexPadFirmware == true
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -54,7 +62,7 @@ struct EncoderAssignmentSection: View {
             )
 
             HStack(spacing: 8) {
-                if !automation.usesPhysicalEncoderEvents {
+                if !usesDirectPadProtocol {
                     PermissionStatus(
                         title: "Input Monitoring",
                         isGranted: automation.hasInputMonitoringPermission
@@ -76,7 +84,7 @@ struct EncoderAssignmentSection: View {
             .controlSize(.small)
             .disabled(!automation.isEnabled)
 
-            if !automation.hasAccessibilityPermission || (!automation.usesPhysicalEncoderEvents && !automation.hasInputMonitoringPermission) {
+            if !automation.hasAccessibilityPermission || (!usesDirectPadProtocol && !automation.hasInputMonitoringPermission) {
                 Button("Berechtigungen anfordern") { automation.requestPermissions() }
                     .controlSize(.small)
             }
@@ -95,7 +103,7 @@ struct EncoderAssignmentSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if !automation.usesPhysicalEncoderEvents {
+            if !usesDirectPadProtocol {
                 Label(
                     AppLanguage.text(
                         "Legacy-Keyboard-HID · Input Monitoring nötig",
@@ -128,7 +136,7 @@ struct EncoderAssignmentSection: View {
     }
 
     private var infoMessage: String {
-        let transport = automation.usesPhysicalEncoderEvents
+        let transport = usesDirectPadProtocol
             ? AppLanguage.text(
                 "Das direkte Pad-Protokoll liefert diese Ereignisse direkt.",
                 "The direct pad protocol delivers these events directly."
