@@ -51,6 +51,26 @@ Visually identical pads can contain different controllers or pinouts. Never
 flash a device based on appearance alone. Check the factory VID/PID and follow
 the firmware repository's preflight procedure.
 
+### Other boards are not supported
+
+Support means one board. Treat every other device as incompatible until someone
+proves otherwise on that specific hardware.
+
+**Guaranteed not to work.** Any pad with a different number of controls — more
+or fewer keys, no encoder, a second encoder — cannot run this firmware. The
+control count, the pin map, and the six-LED chain are compile-time constants, so
+a mismatch is not a degraded experience, it is a non-functional device.
+
+**Not expected to work.** A pad with the same six-key, one-encoder layout may
+still differ in controller, pin assignment, LED order, or SW2 wiring. If such a
+board happens to be wired identically, that is luck, not compatibility. Nothing
+about the enclosure, product name, or listing predicts what is on the PCB.
+
+Other hardware would need the firmware **ported** to it: the pin and LED maps in
+the firmware repository's `HARDWARE_NOTES.md` describe what has to be
+re-measured and changed. That is development work, not a configuration step, and
+this project cannot verify the result for you.
+
 | USB identity | Support |
 | --- | --- |
 | `1189:8890` | Verified factory CH57x configuration path |

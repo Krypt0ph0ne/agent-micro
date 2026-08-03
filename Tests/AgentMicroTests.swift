@@ -3,6 +3,21 @@ import Carbon.HIToolbox
 import XCTest
 @testable import AgentMicro
 
+/// Removes a temporary `UserDefaults` suite completely.
+///
+/// `removePersistentDomain(forName:)` only empties the domain; `cfprefsd` still
+/// leaves an empty `~/Library/Preferences/<suite>.plist` behind. Every test run
+/// creates a fresh UUID-named suite, so without this the developer's Preferences
+/// directory accumulates one stray file per suite per run, forever.
+func removeDefaultsSuite(_ suiteName: String, defaults: UserDefaults) {
+    defaults.removePersistentDomain(forName: suiteName)
+    defaults.removeSuite(named: suiteName)
+    let plist = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Preferences/\(suiteName).plist")
+    try? FileManager.default.removeItem(at: plist)
+}
+
 final class AgentMicroTests: XCTestCase {
     func testPrivacySettingsDeepLinksTargetTheExpectedTCCPanes() {
         XCTAssertEqual(
@@ -103,7 +118,7 @@ final class AgentMicroTests: XCTestCase {
     func testAgentMicroMigratesLegacyPreferencesAndApplicationSupport() throws {
         let suiteName = "AgentMicroTests.migration.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeDefaultsSuite(suiteName, defaults: defaults) }
         defaults.set("de", forKey: "CodexPad.appLanguage")
 
         let root = FileManager.default.temporaryDirectory
@@ -2083,7 +2098,7 @@ final class AgentMicroTests: XCTestCase {
     func testTriggerRegistryPersistsOfferedTriggersAcrossProfiles() {
         let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeDefaultsSuite(suiteName, defaults: defaults) }
 
         let codex = ProfileFactory.codex(catalog: CodexActionCatalog())
         let claude = ProfileFactory.claude(catalog: CodexActionCatalog(resourceName: "ClaudeActions", app: .claude))
@@ -2101,7 +2116,7 @@ final class AgentMicroTests: XCTestCase {
     func testTriggerRegistryAdvancesPastEveryPreviouslyOfferedCandidate() {
         let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeDefaultsSuite(suiteName, defaults: defaults) }
 
         let profiles = [ProfileFactory.codex(catalog: CodexActionCatalog())]
         CodexTriggerRegistry.reserve("cmd-ctrl-opt-shift-a", defaults: defaults)
@@ -2120,7 +2135,7 @@ final class AgentMicroTests: XCTestCase {
     func testTriggerRegistryRemembersAnActionAcrossPadControls() {
         let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeDefaultsSuite(suiteName, defaults: defaults) }
 
         CodexTriggerRegistry.remember(
             "cmd-ctrl-opt-shift-f7",
@@ -2140,7 +2155,7 @@ final class AgentMicroTests: XCTestCase {
     func testTriggerRegistryConfirmsOnlyAfterSuccessfulSetup() {
         let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeDefaultsSuite(suiteName, defaults: defaults) }
 
         CodexTriggerRegistry.remember(
             "cmd-ctrl-opt-shift-f8",
@@ -2165,7 +2180,7 @@ final class AgentMicroTests: XCTestCase {
     func testTriggerRegistryRestoresConfirmedActionAfterRestart() throws {
         let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeDefaultsSuite(suiteName, defaults: defaults) }
 
         let definition = try XCTUnwrap(CodexActionCatalog().action(id: "toggle-pet"))
         CodexTriggerRegistry.markConfirmed(
@@ -2184,7 +2199,7 @@ final class AgentMicroTests: XCTestCase {
     func testTriggerRegistryImportsExistingBindingsFromInactiveLayers() {
         let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeDefaultsSuite(suiteName, defaults: defaults) }
 
         var profile = ProfileFactory.codex(catalog: CodexActionCatalog())
         var inactiveLayer = profile.layers[0]
@@ -2208,7 +2223,7 @@ final class AgentMicroTests: XCTestCase {
     func testTriggerRegistrySkipsTriggersUsedInAnotherProfile() {
         let suiteName = "CodexPadTests.triggerRegistry.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeDefaultsSuite(suiteName, defaults: defaults) }
 
         let codex = ProfileFactory.codex(catalog: CodexActionCatalog())
         var claude = ProfileFactory.claude(catalog: CodexActionCatalog(resourceName: "ClaudeActions", app: .claude))
