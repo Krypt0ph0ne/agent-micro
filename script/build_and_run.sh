@@ -92,9 +92,14 @@ cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$APP_ICON" "$APP_RESOURCES/AgentMicroIcon.icns"
 cp "$HELPER_DESTINATION" "$APP_RESOURCES/ch57x-keyboard-tool"
 cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCES/"
-if [[ -d "$RESOURCE_BUNDLE/en.lproj" ]]; then
-  cp -R "$RESOURCE_BUNDLE/en.lproj" "$APP_RESOURCES/"
+# SwiftUI resolves Text("…") against the main bundle, so the English strings
+# table has to sit next to the binary and not only inside the SPM resource
+# bundle. Fail loudly: silently skipping this ships a German-only app.
+if [[ ! -d "$RESOURCE_BUNDLE/en.lproj" ]]; then
+  echo "Englische Lokalisierung fehlt: $RESOURCE_BUNDLE/en.lproj" >&2
+  exit 1
 fi
+cp -R "$RESOURCE_BUNDLE/en.lproj" "$APP_RESOURCES/"
 chmod +x "$APP_BINARY" "$APP_RESOURCES/ch57x-keyboard-tool"
 
 cat >"$INFO_PLIST" <<PLIST

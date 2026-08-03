@@ -120,6 +120,11 @@ struct ControlInspectorView: View {
             profile: appState.profiles.selectedProfile,
             keyboardLayout: appState.profiles.keyboardLayout
         )
-        testMessage = result?.succeeded == true ? "Geräteausdruck ist valide." : "Validierung fehlgeschlagen – Details in Diagnose."
+        testMessage = result?.succeeded == true
+            ? AppLanguage.text("Geräteausdruck ist valide.", "Device expression is valid.")
+            : AppLanguage.text(
+                "Validierung fehlgeschlagen – Details in Diagnose.",
+                "Validation failed – see Diagnostics for details."
+            )
     }
 }

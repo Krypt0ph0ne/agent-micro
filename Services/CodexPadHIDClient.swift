@@ -7,7 +7,10 @@ struct CodexPadHIDClient {
 
     func send(_ packets: [[UInt8]]) -> ProcessResult {
         guard packets.allSatisfy({ $0.count == CodexPadPacketEncoder.packetSize }) else {
-            return failure("Interner Fehler: HID-Paket ist nicht 32 Byte lang.")
+            return failure(AppLanguage.text(
+                "Interner Fehler: HID-Paket ist nicht 32 Byte lang.",
+                "Internal error: the HID packet is not 32 bytes long."
+            ))
         }
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -20,16 +23,31 @@ struct CodexPadHIDClient {
         IOHIDManagerSetDeviceMatching(manager, matching as CFDictionary)
         let managerResult = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard managerResult == kIOReturnSuccess else {
-            return failure(String(format: "Raw-HID-Manager konnte nicht geöffnet werden: 0x%08X", managerResult))
+            return failure(String(
+                format: AppLanguage.text(
+                    "Raw-HID-Manager konnte nicht geöffnet werden: 0x%08X",
+                    "Could not open the raw HID manager: 0x%08X"
+                ),
+                managerResult
+            ))
         }
         defer { IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone)) }
 
         guard let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>, let device = devices.first else {
-            return failure("Agent Micro Raw-HID-Interface FF60:0061 wurde nicht gefunden.")
+            return failure(AppLanguage.text(
+                "Agent Micro Raw-HID-Interface FF60:0061 wurde nicht gefunden.",
+                "The Agent Micro raw HID interface FF60:0061 was not found."
+            ))
         }
         let openResult = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
         guard openResult == kIOReturnSuccess else {
-            return failure(String(format: "Agent Micro Raw-HID konnte nicht geöffnet werden: 0x%08X", openResult))
+            return failure(String(
+                format: AppLanguage.text(
+                    "Agent Micro Raw-HID konnte nicht geöffnet werden: 0x%08X",
+                    "Could not open Agent Micro raw HID: 0x%08X"
+                ),
+                openResult
+            ))
         }
         defer { IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone)) }
 
@@ -39,12 +57,21 @@ struct CodexPadHIDClient {
                 IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, 0, buffer.baseAddress!, buffer.count)
             }
             guard result == kIOReturnSuccess else {
-                return failure(String(format: "HID-Ausgabereport fehlgeschlagen: 0x%08X", result))
+                return failure(String(
+                    format: AppLanguage.text(
+                        "HID-Ausgabereport fehlgeschlagen: 0x%08X",
+                        "HID output report failed: 0x%08X"
+                    ),
+                    result
+                ))
             }
         }
         return ProcessResult(
             exitCode: 0,
-            stdout: "\(packets.count) Agent-Micro-HID-Paket(e) erfolgreich übertragen.",
+            stdout: AppLanguage.text(
+                "\(packets.count) Agent-Micro-HID-Paket(e) erfolgreich übertragen.",
+                "\(packets.count) Agent Micro HID packet(s) transferred successfully."
+            ),
             stderr: "",
             timedOut: false,
             launchError: nil

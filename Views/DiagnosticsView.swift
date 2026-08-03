@@ -156,7 +156,7 @@ private struct CodexPadProtocolCard: View {
                 LabeledContent("Gedrückte Controls", value: String(format: "0x%03X", firmware.pressedMask))
             }
             if let event = appState.padEvents.events.first {
-                let source = event.origin == .hardware ? "Hardware" : "Diagnose"
+                let source = event.origin == .hardware ? "Hardware" : AppLanguage.text("Diagnose", "Diagnostics")
                 LabeledContent("Letztes Ereignis", value: "\(source) · Control \(event.control + 1) · \(String(describing: event.phase)) · #\(event.sequence)")
             }
         }
@@ -239,10 +239,10 @@ private struct DeviceDiagnosticsCard: View {
                 LabeledContent("Name", value: device.name)
                 LabeledContent("Vendor / Product", value: "\(device.vendorIDHex) / \(device.productIDHex)")
                 LabeledContent("Location ID", value: device.locationID)
-                LabeledContent("Hersteller", value: device.manufacturer ?? "nicht bereitgestellt")
-                LabeledContent("Produktstring", value: device.productName ?? "nicht bereitgestellt")
-                LabeledContent("Seriennummer", value: device.serialNumber ?? "nicht bereitgestellt")
-                LabeledContent("Status", value: device.support == .supported ? "Upload verifiziert" : device.support == .related ? "CH57x erkannt, Upload gesperrt" : "Nicht CH57x")
+                LabeledContent("Hersteller", value: device.manufacturer ?? AppLanguage.text("nicht bereitgestellt", "not provided"))
+                LabeledContent("Produktstring", value: device.productName ?? AppLanguage.text("nicht bereitgestellt", "not provided"))
+                LabeledContent("Seriennummer", value: device.serialNumber ?? AppLanguage.text("nicht bereitgestellt", "not provided"))
+                LabeledContent("Status", value: device.support == .supported ? AppLanguage.text("Upload verifiziert", "Transfer verified") : device.support == .related ? AppLanguage.text("CH57x erkannt, Upload gesperrt", "CH57x detected, transfer blocked") : AppLanguage.text("Nicht CH57x", "Not CH57x"))
                 if !device.interfaces.isEmpty {
                     Divider()
                     Text("USB-Interfaces").font(.subheadline.weight(.medium))
@@ -277,7 +277,7 @@ private struct InputMonitorCard: View {
                 Label("Eingabe-Testmonitor", systemImage: "waveform.path.ecg")
                     .font(.headline)
                 Spacer()
-                Button(monitor.isMonitoring ? "Stoppen" : "Starten") {
+                Button(monitor.isMonitoring ? AppLanguage.text("Stoppen", "Stop") : AppLanguage.text("Starten", "Start")) {
                     monitor.isMonitoring ? monitor.stop() : monitor.start()
                 }
                 .disabled(!appState.device.state.isSupportedConnection && !monitor.isMonitoring)

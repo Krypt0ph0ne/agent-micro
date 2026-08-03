@@ -20,7 +20,10 @@ struct CodexCatalogView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Actions")
                     .font(.largeTitle.weight(.semibold))
-                Text("Versionierbarer Katalog: \(appState.activeCatalog.document.verifiedAgainst). Direkte Shortcuts werden auf das aktuell gewählte Pad-Control geschrieben; Deep Links bleiben transparent als lokale Listener-Aktionen gekennzeichnet.")
+                Text(AppLanguage.text(
+                    "Versionierbarer Katalog: \(appState.activeCatalog.document.verifiedAgainst). Direkte Shortcuts werden auf das aktuell gewählte Pad-Control geschrieben; Deep Links bleiben transparent als lokale Listener-Aktionen gekennzeichnet.",
+                    "Versioned catalog: \(appState.activeCatalog.document.verifiedAgainst). Direct shortcuts are written to the currently selected pad control; deep links remain transparently marked as local listener actions."
+                ))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -39,7 +42,10 @@ struct CodexCatalogView: View {
                             Button(control.title) { selectedControl = control }
                         }
                     } label: {
-                        Label("Ziel: \(selectedControl.title)", systemImage: selectedControl.icon)
+                        Label(
+                            AppLanguage.text("Ziel: \(selectedControl.title)", "Target: \(selectedControl.title)"),
+                            systemImage: selectedControl.icon
+                        )
                     }
                 }
                 .padding(12)
@@ -123,19 +129,31 @@ private struct ActionCatalogCard: View {
 
     private var buttonTitle: String {
         switch action.execution {
-        case .deepLink: "Zuweisen*"
-        case .configurableShortcut: action.isDirectlyAssignable ? "Zuweisen*" : "In Codex belegen"
-        default: "Zuweisen"
+        case .deepLink: AppLanguage.text("Zuweisen*", "Assign*")
+        case .configurableShortcut:
+            action.isDirectlyAssignable
+                ? AppLanguage.text("Zuweisen*", "Assign*")
+                : AppLanguage.text("In Codex belegen", "Bind in Codex")
+        default: AppLanguage.text("Zuweisen", "Assign")
         }
     }
 
     private var helpText: String {
         switch action.execution {
-        case .deepLink: "*Deep Links benötigen einen lokalen Listener und sind nicht direkt uploadbar."
+        case .deepLink: AppLanguage.text(
+            "*Deep Links benötigen einen lokalen Listener und sind nicht direkt uploadbar.",
+            "*Deep links require a local listener and cannot be transferred to the device directly."
+        )
         case .configurableShortcut:
             action.isDirectlyAssignable
-                ? "*Der Pad-Trigger muss in Codex unter Settings > Keyboard Shortcuts einmalig derselben Aktion zugewiesen werden. Der zweite Tastendruck schließt den geöffneten Bereich."
-                : "Für diese reale Codex-Aktion ist in 26.715.21425 keine Standardtaste eingebunden. Lege sie zuerst unter Settings > Keyboard Shortcuts fest und verwende anschließend denselben freien Shortcut im Pad."
+                ? AppLanguage.text(
+                    "*Der Pad-Trigger muss in Codex unter Settings > Keyboard Shortcuts einmalig derselben Aktion zugewiesen werden. Der zweite Tastendruck schließt den geöffneten Bereich.",
+                    "*The pad trigger has to be bound to the same action once in Codex under Settings > Keyboard Shortcuts. The second key press closes the opened area."
+                )
+                : AppLanguage.text(
+                    "Für diese reale Codex-Aktion ist in 26.715.21425 keine Standardtaste eingebunden. Lege sie zuerst unter Settings > Keyboard Shortcuts fest und verwende anschließend denselben freien Shortcut im Pad.",
+                    "This real Codex action has no default shortcut in 26.715.21425. Set one under Settings > Keyboard Shortcuts first, then use the same free shortcut on the pad."
+                )
         default: ""
         }
     }

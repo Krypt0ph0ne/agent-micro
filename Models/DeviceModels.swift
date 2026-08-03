@@ -67,7 +67,10 @@ struct USBInterface: Codable, Hashable, Identifiable {
     var endpoints: Int
 
     var summary: String {
-        "Interface \(number) · Klasse \(interfaceClass)/\(subclass)/\(protocolCode) · \(endpoints) Endpoint\(endpoints == 1 ? "" : "s")"
+        AppLanguage.text(
+            "Interface \(number) · Klasse \(interfaceClass)/\(subclass)/\(protocolCode) · \(endpoints) Endpoint\(endpoints == 1 ? "" : "s")",
+            "Interface \(number) · class \(interfaceClass)/\(subclass)/\(protocolCode) · \(endpoints) endpoint\(endpoints == 1 ? "" : "s")"
+        )
     }
 }
 

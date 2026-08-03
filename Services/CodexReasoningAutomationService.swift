@@ -10,19 +10,19 @@ enum CodexEncoderCommand {
 
     var title: String {
         switch self {
-        case .decreaseEffort: "Aufwand verringern"
-        case .openPicker: "Model Picker öffnen"
-        case .closePicker: "Model Picker schließen"
-        case .increaseEffort: "Aufwand erhöhen"
+        case .decreaseEffort: AppLanguage.text("Aufwand verringern", "Decrease effort")
+        case .openPicker: AppLanguage.text("Model Picker öffnen", "Open Model Picker")
+        case .closePicker: AppLanguage.text("Model Picker schließen", "Close Model Picker")
+        case .increaseEffort: AppLanguage.text("Aufwand erhöhen", "Increase effort")
         }
     }
 
     var detail: String {
         switch self {
-        case .decreaseEffort: "Direkter Codex-Shortcut F18"
-        case .openPicker: "Picker öffnen"
-        case .closePicker: "Picker schließen (Esc)"
-        case .increaseEffort: "Direkter Codex-Shortcut F19"
+        case .decreaseEffort: AppLanguage.text("Direkter Codex-Shortcut F18", "Direct Codex shortcut F18")
+        case .openPicker: AppLanguage.text("Picker öffnen", "Open picker")
+        case .closePicker: AppLanguage.text("Picker schließen (Esc)", "Close picker (Esc)")
+        case .increaseEffort: AppLanguage.text("Direkter Codex-Shortcut F19", "Direct Codex shortcut F19")
         }
     }
 
@@ -101,8 +101,8 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     }
 
     private let permissionMonitor: PermissionMonitor
-    private(set) var status = "Deaktiviert"
-    private(set) var lastInput = "Noch kein Drehrad-Signal empfangen"
+    private(set) var status = AppLanguage.text("Deaktiviert", "Disabled")
+    private(set) var lastInput = AppLanguage.text("Noch kein Drehrad-Signal empfangen", "No dial signal received yet")
     var hasAccessibilityPermission: Bool { permissionMonitor.hasAccessibilityPermission }
     var hasInputMonitoringPermission: Bool { permissionMonitor.hasInputMonitoringPermission }
     var isEnabled: Bool {
@@ -131,7 +131,10 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         }
         updateMonitoring()
         if !hasAccessibilityPermission || (!usesPhysicalEncoderEvents && !hasInputMonitoringPermission) {
-            status = "Berechtigungen fehlen noch. In den Systemeinstellungen Agent Micro aktivieren und danach zur App zurückkehren."
+            status = AppLanguage.text(
+                "Berechtigungen fehlen noch. In den Systemeinstellungen Agent Micro aktivieren und danach zur App zurückkehren.",
+                "Permissions are still missing. Enable Agent Micro in System Settings, then come back to the app."
+            )
         }
     }
 
@@ -147,7 +150,7 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     func perform(_ command: CodexEncoderCommand) -> Bool {
         guard let codex = readyCodexApplication() else { return false }
         codex.activate(options: [.activateAllWindows])
-        status = "Ausführen: \(command.title)"
+        status = AppLanguage.text("Ausführen: \(command.title)", "Running: \(command.title)")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             if let keyCode = command.directShortcutKeyCode {
@@ -157,11 +160,11 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
             }
             switch command {
             case .openPicker:
-                self?.status = "Picker offen: erneut drücken zum Schließen."
+                self?.status = AppLanguage.text("Picker offen: erneut drücken zum Schließen.", "Picker open: press again to close.")
             case .closePicker:
-                self?.status = "Picker geschlossen."
+                self?.status = AppLanguage.text("Picker geschlossen.", "Picker closed.")
             default:
-                self?.status = "Fertig: \(command.title)"
+                self?.status = AppLanguage.text("Fertig: \(command.title)", "Done: \(command.title)")
             }
         }
         return true
@@ -249,7 +252,10 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         guard let codex = readyCodexApplication() else { return }
         codex.activate(options: [.activateAllWindows])
         isModelListOpen = true
-        status = "Modellliste offen: drehen wählt, loslassen übernimmt."
+        status = AppLanguage.text(
+            "Modellliste offen: drehen wählt, loslassen übernimmt.",
+            "Model list open: turn to choose, release to confirm."
+        )
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             Self.openModelPickerShortcut()
             let upArrow = UInt16(kVK_UpArrow)
@@ -275,11 +281,11 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         isModelListOpen = false
         guard let codex = readyCodexApplication() else { return }
         codex.activate(options: [.activateAllWindows])
-        status = "Modell übernehmen …"
+        status = AppLanguage.text("Modell übernehmen …", "Applying model…")
         Self.postKey(UInt16(kVK_Return))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
             Self.postKey(UInt16(kVK_Escape))
-            self?.status = "Übernommen."
+            self?.status = AppLanguage.text("Übernommen.", "Applied.")
         }
     }
 
@@ -292,7 +298,9 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         guard encoderHoldFired, isModelListOpen else { return }
         guard readyCodexApplication() != nil else { return }
         let keyCode = step == .next ? UInt16(kVK_DownArrow) : UInt16(kVK_UpArrow)
-        status = step == .next ? "Nächstes Modell" : "Vorheriges Modell"
+        status = step == .next
+            ? AppLanguage.text("Nächstes Modell", "Next model")
+            : AppLanguage.text("Vorheriges Modell", "Previous model")
         Self.postKey(keyCode)
     }
 
@@ -325,16 +333,16 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
 
         if openDismissibleArea == area {
             openDismissibleArea = nil
-            status = "Schließen: \(area.title)"
+            status = AppLanguage.text("Schließen: \(area.title)", "Closing: \(area.title)")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
                 Self.postKey(UInt16(kVK_Escape))
-                self?.status = "\(area.title) geschlossen."
+                self?.status = AppLanguage.text("\(area.title) geschlossen.", "\(area.title) closed.")
             }
             return
         }
 
         openDismissibleArea = area
-        status = "Öffnen: \(area.title)"
+        status = AppLanguage.text("Öffnen: \(area.title)", "Opening: \(area.title)")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             switch area {
             case .modelPicker:
@@ -344,7 +352,10 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
             case .sideChat:
                 break
             }
-            self?.status = "\(area.title) offen: erneut drücken zum Schließen."
+            self?.status = AppLanguage.text(
+                "\(area.title) offen: erneut drücken zum Schließen.",
+                "\(area.title) open: press again to close."
+            )
         }
     }
 
@@ -355,15 +366,18 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
 
     private func readyCodexApplication() -> NSRunningApplication? {
         guard isEnabled else {
-            status = "Encoder-Steuerung ist deaktiviert."
+            status = AppLanguage.text("Encoder-Steuerung ist deaktiviert.", "Dial control is disabled.")
             return nil
         }
         guard hasAccessibilityPermission else {
-            status = "Bedienungshilfen fehlen. Bitte unten Berechtigungen anfordern."
+            status = AppLanguage.text(
+                "Bedienungshilfen fehlen. Bitte unten Berechtigungen anfordern.",
+                "Accessibility permission is missing. Request permissions below."
+            )
             return nil
         }
         guard let codex = codexApplication else {
-            status = "Codex läuft nicht."
+            status = AppLanguage.text("Codex läuft nicht.", "Codex is not running.")
             return nil
         }
         return codex
@@ -374,12 +388,15 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         openDismissibleArea = nil
         resetModelPickerNavigation()
         guard isEnabled else {
-            status = "Deaktiviert"
+            status = AppLanguage.text("Deaktiviert", "Disabled")
             return
         }
 
         guard hasInputMonitoringPermission || usesPhysicalEncoderEvents else {
-            status = "Input Monitoring fehlt – macOS blockiert das Drehrad. Bitte Agent Micro unten freigeben."
+            status = AppLanguage.text(
+                "Input Monitoring fehlt – macOS blockiert das Drehrad. Bitte Agent Micro unten freigeben.",
+                "Input Monitoring is missing — macOS is blocking the dial. Allow Agent Micro below."
+            )
             return
         }
 
@@ -388,11 +405,17 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         // interface: macOS can fail to register it in Input Monitoring after
         // a reconnect, even though the vendor channel remains healthy.
         guard !usesPhysicalEncoderEvents else {
-            status = "Bereit: Drehrad läuft über das direkte Pad-Protokoll. Nur Bedienungshilfen werden benötigt."
+            status = AppLanguage.text(
+                "Bereit: Drehrad läuft über das direkte Pad-Protokoll. Nur Bedienungshilfen werden benötigt.",
+                "Ready: the dial runs over the direct pad protocol. Only Accessibility is required."
+            )
             return
         }
 
-        status = "Bereit: Drehen/Drücken = Aufwand & Modellwahl · Halten (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + drehen = Modell wechseln."
+        status = AppLanguage.text(
+            "Bereit: Drehen/Drücken = Aufwand & Modellwahl · Halten (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + drehen = Modell wechseln.",
+            "Ready: turn/press = effort & model selection · hold (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + turn = switch model."
+        )
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let keyboardIdentity: (Int, Int) -> [String: Any] = { vendorID, productID in
@@ -409,7 +432,10 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard result == kIOReturnSuccess else {
-            status = "Drehrad konnte nicht geöffnet werden (\(result))."
+            status = AppLanguage.text(
+                "Drehrad konnte nicht geöffnet werden (\(result)).",
+                "Could not open the dial (\(result))."
+            )
             IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
             return
         }
@@ -458,7 +484,9 @@ final class CodexReasoningAutomationService: EncoderAutomationService {
     }
 
     private func recordInput(usage: Int, value: Int) {
-        lastInput = HIDInputEvent.functionKeyName(usage).map { "Empfangen: \($0)" } ?? String(format: "Empfangen: 0x%02X", usage)
+        lastInput = HIDInputEvent.functionKeyName(usage)
+            .map { AppLanguage.text("Empfangen: \($0)", "Received: \($0)") }
+            ?? String(format: AppLanguage.text("Empfangen: 0x%02X", "Received: 0x%02X"), usage)
         logger.info("HID input usage=\(usage, privacy: .public) value=\(value, privacy: .public)")
     }
 

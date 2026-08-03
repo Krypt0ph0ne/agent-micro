@@ -55,7 +55,7 @@ final class HIDInputMonitor {
     private var manager: IOHIDManager?
     private let permissionMonitor: PermissionMonitor
     private(set) var isMonitoring = false
-    private(set) var status = "Nicht gestartet"
+    private(set) var status = AppLanguage.text("Nicht gestartet", "Not started")
     private(set) var events: [HIDInputEvent] = []
 
     var hasInputMonitoringPermission: Bool { permissionMonitor.hasInputMonitoringPermission }
@@ -81,7 +81,10 @@ final class HIDInputMonitor {
 
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard result == kIOReturnSuccess else {
-            status = "HID-Monitor konnte nicht geöffnet werden (IOReturn \(result)). Aktiviere bei Bedarf Input Monitoring für Agent Micro."
+            status = AppLanguage.text(
+                "HID-Monitor konnte nicht geöffnet werden (IOReturn \(result)). Aktiviere bei Bedarf Input Monitoring für Agent Micro.",
+                "Could not open the HID monitor (IOReturn \(result)). Enable Input Monitoring for Agent Micro if needed."
+            )
             IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
             return
         }
@@ -89,8 +92,14 @@ final class HIDInputMonitor {
         self.manager = manager
         isMonitoring = true
         status = hasInputMonitoringPermission
-            ? "Lauscht auf physische Tastendrücke des CH57x-Keyboards."
-            : "Lauscht auf physische Tastendrücke. Falls keine Ereignisse eintreffen, Input Monitoring für Agent Micro erlauben."
+            ? AppLanguage.text(
+                "Lauscht auf physische Tastendrücke des CH57x-Keyboards.",
+                "Listening for physical key presses from the CH57x keyboard."
+            )
+            : AppLanguage.text(
+                "Lauscht auf physische Tastendrücke. Falls keine Ereignisse eintreffen, Input Monitoring für Agent Micro erlauben.",
+                "Listening for physical key presses. If no events arrive, allow Input Monitoring for Agent Micro."
+            )
     }
 
     func stop() {
@@ -99,7 +108,7 @@ final class HIDInputMonitor {
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = nil
         isMonitoring = false
-        status = "Gestoppt"
+        status = AppLanguage.text("Gestoppt", "Stopped")
     }
 
     func clear() { events.removeAll() }

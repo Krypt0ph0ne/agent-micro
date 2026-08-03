@@ -4,6 +4,42 @@ import XCTest
 @testable import AgentMicro
 
 final class AgentMicroTests: XCTestCase {
+    /// Guards the English localization end to end: the strings table has to be
+    /// reachable from the resource bundle, and the action catalogue — whose
+    /// JSON stays German on disk — has to be translated on read. Both have
+    /// silently regressed before, leaving German text in the English UI.
+    func testEnglishLocalizationResolvesForTableAndActionCatalog() {
+        let previous = UserDefaults.standard.string(forKey: AppLanguage.defaultsKey)
+        defer { UserDefaults.standard.set(previous, forKey: AppLanguage.defaultsKey) }
+        AppLanguage.current = .english
+
+        XCTAssertEqual(AppLanguage.localized("Abbrechen"), "Cancel")
+        XCTAssertEqual(AppLanguage.localized("Gerät"), "Device")
+        // Unknown keys must fall back to the German source, never to an empty
+        // string, so an untranslated label still renders.
+        XCTAssertEqual(AppLanguage.localized("Kein Eintrag in der Tabelle"), "Kein Eintrag in der Tabelle")
+
+        for (catalog, name) in [
+            (CodexActionCatalog(), "CodexActions"),
+            (CodexActionCatalog(resourceName: "ClaudeActions", app: .claude), "ClaudeActions")
+        ] {
+            XCTAssertFalse(catalog.actions.isEmpty, "\(name) failed to load")
+            for action in catalog.actions {
+                for (field, value) in [
+                    ("title", action.title),
+                    ("description", action.description),
+                    ("category", action.category),
+                    ("availabilityNote", action.availabilityNote ?? "")
+                ] {
+                    XCTAssertFalse(
+                        value.contains(where: { "äöüÄÖÜß".contains($0) }),
+                        "\(name).\(action.id).\(field) is still German in English: \(value)"
+                    )
+                }
+            }
+        }
+    }
+
     func testPrivacySettingsDeepLinksTargetTheExpectedTCCPanes() {
         XCTAssertEqual(
             SystemPrivacySettingsPane.accessibility.url.absoluteString,
@@ -514,7 +550,9 @@ final class AgentMicroTests: XCTestCase {
         XCTAssertEqual(catalog.keyboardAction(id: "open-side-chat")?.deviceMacro, "f15")
         XCTAssertEqual(catalog.action(id: "open-skills")?.execution, .deepLink)
         XCTAssertEqual(catalog.action(id: "reasoning-decrease")?.execution, .configurableShortcut)
-        XCTAssertTrue(catalog.categories.contains("Terminal und Panels"))
+        // `categories` is translated on read, so compare against the same
+        // lookup rather than the German source — CI runs in English.
+        XCTAssertTrue(catalog.categories.contains(AppLanguage.localized("Terminal und Panels")))
     }
 
     func testCH57xConfigurationGeneration() throws {

@@ -37,4 +37,25 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     static func text(_ german: String, _ english: String) -> String {
         current.text(german, english)
     }
+
+    /// Looks a German source string up in the selected language's
+    /// `Localizable.strings`, the same table SwiftUI's `Text("…")` reads.
+    ///
+    /// Needed wherever a translation has to be produced as a plain `String` at
+    /// runtime — catalog data decoded from JSON, `NSMenu` titles, values fed
+    /// into `Text(verbatim:)` — because those never pass through
+    /// `LocalizedStringKey`. Falls back to the German source when no entry
+    /// exists, so an untranslated string still renders.
+    static func localized(_ german: String) -> String {
+        current.localized(german)
+    }
+
+    func localized(_ german: String) -> String {
+        guard self != .german else { return german }
+        guard
+            let path = Bundle.module.path(forResource: rawValue, ofType: "lproj"),
+            let bundle = Bundle(path: path)
+        else { return german }
+        return bundle.localizedString(forKey: german, value: german, table: nil)
+    }
 }

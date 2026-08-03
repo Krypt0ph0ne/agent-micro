@@ -27,7 +27,7 @@ struct AgentStatusTrace: Identifiable, Hashable {
 final class DiagnosticsStore {
     private(set) var entries: [DiagnosticEntry] = []
     private(set) var statusTraces: [AgentStatusTrace] = []
-    private(set) var rawIORegistry: String = "Noch nicht erfasst."
+    private(set) var rawIORegistry: String = AppLanguage.text("Noch nicht erfasst.", "Not captured yet.")
 
     func append(_ level: DiagnosticEntry.Level, _ title: String, detail: String = "") {
         entries.insert(DiagnosticEntry(level: level, title: title, detail: detail), at: 0)
