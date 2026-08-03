@@ -41,7 +41,10 @@ struct DeviceDetector {
             device: nil,
             candidates: candidates,
             rawIORegistry: result.stdout,
-            error: "Kein unterstütztes Agent-Micro-Gerät gefunden. Sichtbare USB-Kennungen: \(summary.isEmpty ? "keine" : summary)."
+            error: AppLanguage.text(
+                "Kein unterstütztes Agent-Micro-Gerät gefunden. Sichtbare USB-Kennungen: \(summary.isEmpty ? "keine" : summary).",
+                "No supported Agent Micro device found. Visible USB identifiers: \(summary.isEmpty ? "none" : summary)."
+            )
         )
     }
 
@@ -50,7 +53,7 @@ struct DeviceDetector {
         var seen = Set<String>()
         return sections.compactMap { section in
             guard let vendorID = integer(named: "idVendor", in: section), let productID = integer(named: "idProduct", in: section) else { return nil }
-            let locationID = string(named: "locationID", in: section) ?? "unbekannt"
+            let locationID = string(named: "locationID", in: section) ?? AppLanguage.text("unbekannt", "unknown")
             let identity = "\(vendorID)-\(productID)-\(locationID)"
             guard seen.insert(identity).inserted else { return nil }
             return makeDevice(vendorID: vendorID, productID: productID, locationID: locationID, section: section)
@@ -81,27 +84,39 @@ struct DeviceDetector {
         if vendorID == 0x4249 && productID == 0x4287 {
             support = .supported
             capabilities = .codexPadCH552
-            summary = "Eigene CH552-Agent-Micro-Firmware erkannt. Sechs Tasten, Encoder und sechs einzeln steuerbare RGB-LEDs sind firmwarebestätigt."
+            summary = AppLanguage.text(
+                "Eigene CH552-Agent-Micro-Firmware erkannt. Sechs Tasten, Encoder und sechs einzeln steuerbare RGB-LEDs sind firmwarebestätigt.",
+                "Custom CH552 Agent Micro firmware detected. Six keys, the dial, and six individually controllable RGB LEDs are firmware-confirmed."
+            )
         } else if vendorID == 0x1189 && productID == 0x8890 {
             support = .supported
             capabilities = .ch57x8890
-            summary = "CH57x-2 erkannt. Das Boot-HID-Keyboard und das separate Konfigurationsinterface werden vom MIT-Helper für 0x1189:0x8890 unterstützt."
+            summary = AppLanguage.text(
+                "CH57x-2 erkannt. Das Boot-HID-Keyboard und das separate Konfigurationsinterface werden vom MIT-Helper für 0x1189:0x8890 unterstützt.",
+                "CH57x-2 detected. The boot HID keyboard and the separate configuration interface are supported by the MIT helper for 0x1189:0x8890."
+            )
         } else if vendorID == 0x1189 && [0x8840, 0x8842].contains(productID) {
             support = .related
             capabilities = .unsupported
-            summary = "CH57x-Variante erkannt. Der gebündelte Helper kennt diese Kennung, Agent Micro verifiziert Uploads jedoch derzeit nur für das getestete 3×2-Modell 0x8890."
+            summary = AppLanguage.text(
+                "CH57x-Variante erkannt. Der gebündelte Helper kennt diese Kennung, Agent Micro verifiziert Uploads jedoch derzeit nur für das getestete 3×2-Modell 0x8890.",
+                "CH57x variant detected. The bundled helper knows this identifier, but Agent Micro currently verifies transfers only for the tested 3×2 model 0x8890."
+            )
         } else if vendorID == 0x1189 {
             support = .related
             capabilities = .unsupported
-            summary = "CH57x-verwandtes USB-Gerät erkannt, aber seine Protokollvariante ist nicht verifiziert. Diagnose kann die Kennung auswählen; Upload bleibt gesperrt."
+            summary = AppLanguage.text(
+                "CH57x-verwandtes USB-Gerät erkannt, aber seine Protokollvariante ist nicht verifiziert. Diagnose kann die Kennung auswählen; Upload bleibt gesperrt.",
+                "A CH57x-related USB device was detected, but its protocol variant is unverified. Diagnostics can select the identifier; transfer stays blocked."
+            )
         } else {
             support = .unsupported
             capabilities = .unsupported
-            summary = "Nicht als CH57x erkannt."
+            summary = AppLanguage.text("Nicht als CH57x erkannt.", "Not recognized as a CH57x.")
         }
 
         return ConnectedDevice(
-            name: string(named: "USB Product Name", in: section) ?? string(named: "kUSBProductString", in: section) ?? ([0x1189, 0x4249].contains(vendorID) ? "Agent Micro" : "USB-Gerät"),
+            name: string(named: "USB Product Name", in: section) ?? string(named: "kUSBProductString", in: section) ?? ([0x1189, 0x4249].contains(vendorID) ? "Agent Micro" : AppLanguage.text("USB-Gerät", "USB device")),
             vendorID: vendorID,
             productID: productID,
             locationID: locationID,

@@ -29,8 +29,11 @@ struct DeviceEditorView: View {
                 Text("Bedienelement am Pad auswählen")
                 Spacer(minLength: 4)
                 ContextInfoButton(
-                    title: "Direkt am Pad bearbeiten",
-                    message: "Klicke eine Taste oder einen Bereich des Drehrads an. Die passende Belegung oder Lichteinstellung erscheint darunter."
+                    title: AppLanguage.text("Direkt am Pad bearbeiten", "Edit directly on the pad"),
+                    message: AppLanguage.text(
+                        "Klicke eine Taste oder einen Bereich des Drehrads an. Die passende Belegung oder Lichteinstellung erscheint darunter.",
+                        "Click a key or a zone of the dial. Its assignment or lighting settings appear below."
+                    )
                 )
             }
             .font(.caption)

@@ -111,14 +111,17 @@ final class ClaudeAccessibilityInspector {
         let pid = claude.processIdentifier
 
         guard let popUp = ClaudeAccessibilityControls.effortPopUp(in: application) else {
-            summary = ["Aufwand-Auswahl nicht gefunden"]
+            summary = [AppLanguage.text("Aufwand-Auswahl nicht gefunden", "Effort control not found")]
             status = AppLanguage.text(
                 "Fehlgeschlagen: Claudes Aufwand-Auswahl wurde nicht gefunden.",
                 "Failed: Claude's effort control was not found."
             )
             return
         }
-        steps.append("Steuerelement: \(ClaudeAccessibilityControls.title(of: popUp))")
+        steps.append(AppLanguage.text(
+            "Steuerelement: \(ClaudeAccessibilityControls.title(of: popUp))",
+            "Control: \(ClaudeAccessibilityControls.title(of: popUp))"
+        ))
 
         claude.activate(options: [.activateAllWindows])
         try? await Task.sleep(nanoseconds: 300_000_000)
@@ -127,9 +130,12 @@ final class ClaudeAccessibilityInspector {
             ClaudeAccessibilityControls.postKey(kVK_Space, to: pid)
         }
         let opened = await waitUntil(timeout: 1.0) { ClaudeAccessibilityControls.isExpanded(popUp) }
-        steps.append("Öffnen: \(opened ? "AXExpanded=1" : "FEHLGESCHLAGEN")")
+        steps.append(AppLanguage.text(
+            "Öffnen: \(opened ? "AXExpanded=1" : "FEHLGESCHLAGEN")",
+            "Open: \(opened ? "AXExpanded=1" : "FAILED")"
+        ))
         guard opened, let slider = ClaudeAccessibilityControls.effortSlider(in: application) else {
-            summary = steps + ["Regler nicht erreichbar"]
+            summary = steps + [AppLanguage.text("Regler nicht erreichbar", "Slider not reachable")]
             status = AppLanguage.text(
                 "Fehlgeschlagen: Aufwandmenü ließ sich nicht öffnen.",
                 "Failed: the effort menu did not open."
@@ -139,21 +145,27 @@ final class ClaudeAccessibilityInspector {
         }
 
         let original = ClaudeAccessibilityControls.stringValue(of: slider)
-        steps.append("Startwert: \(original)")
+        steps.append(AppLanguage.text("Startwert: \(original)", "Initial value: \(original)"))
 
         let up = await step(slider, increment: true, from: original, pid: pid)
-        steps.append("Schritt hoch: \(up.description)")
+        steps.append(AppLanguage.text("Schritt hoch: \(up.description)", "Step up: \(up.description)"))
 
         let afterUp = ClaudeAccessibilityControls.stringValue(of: slider)
         let down = await step(slider, increment: false, from: afterUp, pid: pid)
-        steps.append("Schritt zurück: \(down.description)")
+        steps.append(AppLanguage.text("Schritt zurück: \(down.description)", "Step back: \(down.description)"))
 
         let restored = ClaudeAccessibilityControls.stringValue(of: slider)
-        steps.append("Endwert: \(restored)\(restored == original ? " (wiederhergestellt)" : " (ABWEICHEND)")")
+        steps.append(AppLanguage.text(
+            "Endwert: \(restored)\(restored == original ? " (wiederhergestellt)" : " (ABWEICHEND)")",
+            "Final value: \(restored)\(restored == original ? " (restored)" : " (DIVERGED)")"
+        ))
 
         await closeEffortPopUp(popUp, pid: pid)
         let collapsed = !ClaudeAccessibilityControls.isExpanded(popUp)
-        steps.append("Schließen: \(collapsed ? "AXExpanded=0" : "FEHLGESCHLAGEN")")
+        steps.append(AppLanguage.text(
+            "Schließen: \(collapsed ? "AXExpanded=0" : "FEHLGESCHLAGEN")",
+            "Close: \(collapsed ? "AXExpanded=0" : "FAILED")"
+        ))
 
         summary = steps
         let changed = up.changed || down.changed
@@ -191,10 +203,16 @@ final class ClaudeAccessibilityInspector {
         if let value = await waitForValue(of: slider, changedFrom: previous) {
             return StepResult(
                 changed: true,
-                description: "\(previous) → \(value) via Pfeiltaste (\(action) akzeptiert=\(accepted), aber wirkungslos)"
+                description: AppLanguage.text(
+                    "\(previous) → \(value) via Pfeiltaste (\(action) akzeptiert=\(accepted), aber wirkungslos)",
+                    "\(previous) → \(value) via arrow key (\(action) accepted=\(accepted), but had no effect)"
+                )
             )
         }
-        return StepResult(changed: false, description: "\(previous) unverändert (Ende der Skala oder blockiert)")
+        return StepResult(changed: false, description: AppLanguage.text(
+            "\(previous) unverändert (Ende der Skala oder blockiert)",
+            "\(previous) unchanged (end of the scale or blocked)"
+        ))
     }
 
     private func waitForValue(of slider: AXUIElement, changedFrom previous: String) async -> String? {
@@ -264,7 +282,7 @@ final class ClaudeAccessibilityInspector {
                 rowMatches: rowMatches,
                 report: &report
             )
-            probed.append("\(label): \(opened ?? "kein Weg gefunden")")
+            probed.append("\(label): \(opened ?? AppLanguage.text("kein Weg gefunden", "no way found"))")
         }
 
         summary = ["Claude \(Self.claudeVersion(for: claude) ?? "?")"] + probed
@@ -470,7 +488,10 @@ final class ClaudeAccessibilityInspector {
             self.status = "\(status) → \(url.path)"
             logger.info("Claude AX dump written to \(url.path, privacy: .public)")
         } catch {
-            self.status = "\(status) (Datei konnte nicht geschrieben werden: \(error.localizedDescription))"
+            self.status = AppLanguage.text(
+                "\(status) (Datei konnte nicht geschrieben werden: \(error.localizedDescription))",
+                "\(status) (the file could not be written: \(error.localizedDescription))"
+            )
             logger.error("Claude AX dump could not be written: \(error.localizedDescription, privacy: .public)")
         }
     }

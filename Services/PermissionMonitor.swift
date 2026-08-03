@@ -107,14 +107,20 @@ final class PermissionMonitor {
         let inputMonitoring = CGPreflightListenEventAccess()
         if hasAccessibilityPermission, !accessibility {
             notifyRevoked(
-                title: "Bedienungshilfen entzogen",
-                body: "Agent Micro kann keine Tastenkombinationen mehr senden. Bitte in Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen wieder erlauben."
+                title: AppLanguage.text("Bedienungshilfen entzogen", "Accessibility permission revoked"),
+                body: AppLanguage.text(
+                    "Agent Micro kann keine Tastenkombinationen mehr senden. Bitte in Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen wieder erlauben.",
+                    "Agent Micro can no longer send keyboard shortcuts. Re-enable it in System Settings → Privacy & Security → Accessibility."
+                )
             )
         }
         if hasInputMonitoringPermission, !inputMonitoring {
             notifyRevoked(
-                title: "Input Monitoring entzogen",
-                body: "Legacy-Keyboard-HID und der passive Diagnosemonitor können keine Eingaben mehr sehen. Das direkte Agent-Micro-Pad-Protokoll bleibt davon unberührt."
+                title: AppLanguage.text("Input Monitoring entzogen", "Input Monitoring revoked"),
+                body: AppLanguage.text(
+                    "Legacy-Keyboard-HID und der passive Diagnosemonitor können keine Eingaben mehr sehen. Das direkte Agent-Micro-Pad-Protokoll bleibt davon unberührt.",
+                    "Legacy keyboard HID and the passive diagnostics monitor can no longer see input. The direct Agent Micro pad protocol is unaffected."
+                )
             )
         }
         hasAccessibilityPermission = accessibility

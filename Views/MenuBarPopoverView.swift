@@ -132,12 +132,20 @@ struct MenuBarPopoverView: View {
 
     private func upload() {
         guard appState.profiles.hasUnsyncedChanges else {
-            showFeedback(message: "Aktuelles Setup bereits übertragen", succeeded: true)
+            showFeedback(
+                message: AppLanguage.text("Aktuelles Setup bereits übertragen", "Current setup already transferred"),
+                succeeded: true
+            )
             return
         }
 
         let result = appState.transferCurrentConfiguration()
-        showFeedback(message: result?.succeeded == true ? "Übertragen" : "Fehlgeschlagen", succeeded: result?.succeeded == true)
+        showFeedback(
+            message: result?.succeeded == true
+                ? AppLanguage.text("Übertragen", "Transferred")
+                : AppLanguage.text("Fehlgeschlagen", "Failed"),
+            succeeded: result?.succeeded == true
+        )
     }
 
     private func showFeedback(message: String, succeeded: Bool) {
@@ -231,10 +239,13 @@ private struct MenuBarSelectedControlPanel: View {
                     .fill(statusColor)
                     .frame(width: 8, height: 8)
             }
-            Text(action.kind.isAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.displayLabel)
+            let keyLabel = action.kind.isAgent
+                ? (assignment?.threadTitle ?? AppLanguage.text("Kein Agent zugeordnet", "No agent assigned"))
+                : action.displayLabel
+            Text(keyLabel)
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
-                .help(action.kind.isAgent ? (assignment?.threadTitle ?? "Kein Agent zugeordnet") : action.displayLabel)
+                .help(keyLabel)
             if action.kind.isAgent, assignment != nil,
                appState.activeAgentThreads.liveStatusAvailability == .sessionListOnly {
                 Text(appState.activeAgentThreads.liveStatusAvailability.title)
@@ -260,10 +271,11 @@ private struct MenuBarSelectedControlPanel: View {
             Image(systemName: binding.holdAction?.icon ?? "hand.raised")
                 .foregroundStyle(.tint)
                 .frame(width: 20)
-            Text("Halten: \(binding.holdAction?.displayLabel ?? "–")")
+            let holdLabel = binding.holdAction?.displayLabel ?? "–"
+            Text(AppLanguage.text("Halten: \(holdLabel)", "Hold: \(holdLabel)"))
                 .font(.callout)
                 .lineLimit(1)
-                .help("Halten: \(binding.holdAction?.displayLabel ?? "–")")
+                .help(AppLanguage.text("Halten: \(holdLabel)", "Hold: \(holdLabel)"))
             Spacer(minLength: 4)
             Button("Belegen") { isPresentingHoldActionSheet = true }
             .controlSize(.small)
@@ -400,10 +412,13 @@ private struct MenuBarSelectedControlPanel: View {
             Image(systemName: "dial.medium")
                 .foregroundStyle(.tint)
                 .frame(width: 20)
-            Text(automation.isEnabled ? "Drehrad · Reasoning-Gesten aktiv" : "Drehrad · Deaktiviert")
+            let encoderLabel = automation.isEnabled
+                ? AppLanguage.text("Drehrad · Reasoning-Gesten aktiv", "Dial · Reasoning gestures active")
+                : AppLanguage.text("Drehrad · Deaktiviert", "Dial · Disabled")
+            Text(encoderLabel)
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
-                .help(automation.isEnabled ? "Drehrad · Reasoning-Gesten aktiv" : "Drehrad · Deaktiviert")
+                .help(encoderLabel)
             Spacer(minLength: 4)
             Toggle("", isOn: isEnabled)
                 .labelsHidden()

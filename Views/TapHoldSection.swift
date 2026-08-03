@@ -52,7 +52,10 @@ struct TapHoldSection: View {
                     .foregroundStyle(.tint)
                 Text("Halten")
                     .font(.subheadline.weight(.semibold))
-                ContextInfoButton(title: "Aktion beim Halten", message: infoMessage)
+                ContextInfoButton(
+                    title: AppLanguage.text("Aktion beim Halten", "Action on hold"),
+                    message: infoMessage
+                )
                 Spacer()
                 Toggle("", isOn: tapHoldEnabled)
                     .labelsHidden()
@@ -91,14 +94,14 @@ struct TapHoldSection: View {
 
             row(
                 icon: "arrow.up.forward.app",
-                title: "Tippen",
-                value: "Zugewiesenen Chat öffnen",
+                title: AppLanguage.text("Tippen", "Tap"),
+                value: AppLanguage.text("Zugewiesenen Chat öffnen", "Open the assigned chat"),
                 macro: ""
             )
             row(
                 icon: "arrow.triangle.2.circlepath",
-                title: "Halten",
-                value: "Chat neu zuweisen",
+                title: AppLanguage.text("Halten", "Hold"),
+                value: AppLanguage.text("Chat neu zuweisen", "Reassign the chat"),
                 macro: "\(CodexQuickAssignService.holdThresholdMilliseconds) ms"
             )
 
@@ -121,7 +124,7 @@ struct TapHoldSection: View {
                     .foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Halten").font(.caption2).foregroundStyle(.secondary)
-                    Text(binding.holdAction?.displayLabel ?? "Aktion wählen")
+                    Text(binding.holdAction?.displayLabel ?? AppLanguage.text("Aktion wählen", "Choose action"))
                         .font(.body.weight(.medium))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -237,6 +240,9 @@ struct TapHoldSection: View {
     }
 
     private var infoMessage: String {
-        "Halten löst zusätzlich zur normalen Tastenaktion eine eigene Aktion aus. Agent Micro misst die Druckdauer und sendet die passende Tastenkombination selbst. Das benötigt die eigene CH552-Firmware (sie meldet die Druckflanken) und die Bedienungshilfen-Berechtigung. Nach dem Ändern einmal „Übertragen“ klicken."
+        AppLanguage.text(
+            "Halten löst zusätzlich zur normalen Tastenaktion eine eigene Aktion aus. Agent Micro misst die Druckdauer und sendet die passende Tastenkombination selbst. Das benötigt die eigene CH552-Firmware (sie meldet die Druckflanken) und die Bedienungshilfen-Berechtigung. Nach dem Ändern einmal „Übertragen“ klicken.",
+            "Holding triggers its own action in addition to the regular key action. Agent Micro measures the press duration and sends the matching shortcut itself. This requires the custom CH552 firmware (it reports the press edges) and Accessibility permission. After a change, click Transfer once."
+        )
     }
 }

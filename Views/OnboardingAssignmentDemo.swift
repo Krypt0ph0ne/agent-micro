@@ -65,7 +65,11 @@ struct OnboardingAssignmentDemo: View {
         let color: Color
     }
 
-    private static let sampleThreads: [SampleThread] = [
+    /// Computed rather than a `static let`: a stored static is initialised
+    /// lazily exactly once, which would freeze these titles at whatever
+    /// language was active on first access and leave them behind after a
+    /// language switch.
+    private static var sampleThreads: [SampleThread] { [
         SampleThread(
             title: AppLanguage.text("Login-Flow refactoren", "Refactor login flow"),
             detail: AppLanguage.text("Web App · Läuft", "Web App · Running"),
@@ -86,7 +90,7 @@ struct OnboardingAssignmentDemo: View {
             detail: AppLanguage.text("Website · Erfolgreich", "Website · Completed"),
             color: Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255)
         )
-    ]
+    ] }
 
     /// The default `threadAssigned` reaction colour, so the demo flash matches
     /// what the hardware actually does on a confirmed assignment.

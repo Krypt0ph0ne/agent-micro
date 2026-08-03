@@ -117,7 +117,9 @@ struct EditorModeSwitch<Selection: Hashable>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(option.title)
-        .accessibilityValue(isSelected ? "Ausgewählt" : "Nicht ausgewählt")
+        .accessibilityValue(isSelected
+            ? AppLanguage.text("Ausgewählt", "Selected")
+            : AppLanguage.text("Nicht ausgewählt", "Not selected"))
         .accessibilityHint("Wechselt zum ausgewählten Bereich")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -166,7 +168,9 @@ struct EditorToggleRail: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
-        .accessibilityValue(isOn ? "Aktiviert" : "Deaktiviert")
+        .accessibilityValue(isOn
+            ? AppLanguage.text("Aktiviert", "On")
+            : AppLanguage.text("Deaktiviert", "Off"))
         .accessibilityHint("Schaltet Grundlicht ein oder aus")
     }
 

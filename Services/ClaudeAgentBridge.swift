@@ -89,7 +89,9 @@ struct ClaudeDesktopSession: Decodable, Sendable {
             // Claude Desktop keeps the session even before it has generated a
             // sidebar title. Make that explicit instead of exposing a UUID as
             // if it were the title; it is unrelated to whether a PR merged.
-            title: cleanTitle.isEmpty ? "Claude-Sitzung ohne Titel · \(shortID)" : cleanTitle,
+            title: cleanTitle.isEmpty
+                ? AppLanguage.text("Claude-Sitzung ohne Titel · \(shortID)", "Untitled Claude session · \(shortID)")
+                : cleanTitle,
             preview: [project, shortID].compactMap { $0 }.joined(separator: " · "),
             cwd: projectPath,
             parentThreadID: nil,
@@ -267,7 +269,10 @@ final class ClaudeAgentBridge: AgentBridge {
     private func handlePollResult(_ result: Result<ClaudeSessionSnapshot, ClaudeBridgeError>) {
         switch result {
         case .success(let snapshot):
-            connectionState = .connected(serverVersion: "Claude Desktop · \(snapshot.threads.count) Sitzungen")
+            connectionState = .connected(serverVersion: AppLanguage.text(
+                "Claude Desktop · \(snapshot.threads.count) Sitzungen",
+                "Claude Desktop · \(snapshot.threads.count) sessions"
+            ))
             lastError = nil
             cliToDesktopID = snapshot.cliToDesktopID
             onThreads?(snapshot.threads)
@@ -346,7 +351,7 @@ final class ClaudeAgentBridge: AgentBridge {
 
     private nonisolated static func runAgentsJSON() async -> Result<[ClaudeAgentSession], ClaudeBridgeError> {
         guard let executable = claudeExecutable() else {
-            return .failure(ClaudeBridgeError(message: "Claude CLI wurde nicht gefunden. Installiere oder starte die Claude-App."))
+            return .failure(ClaudeBridgeError(message: AppLanguage.text("Claude CLI wurde nicht gefunden. Installiere oder starte die Claude-App.", "Claude CLI not found. Install or launch the Claude app.")))
         }
         let process = Process()
         process.executableURL = executable
@@ -357,15 +362,15 @@ final class ClaudeAgentBridge: AgentBridge {
         do {
             try process.run()
         } catch {
-            return .failure(ClaudeBridgeError(message: "Claude CLI konnte nicht gestartet werden: \(error.localizedDescription)"))
+            return .failure(ClaudeBridgeError(message: AppLanguage.text("Claude CLI konnte nicht gestartet werden: \(error.localizedDescription)", "Could not start the Claude CLI: \(error.localizedDescription)")))
         }
         let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            return .failure(ClaudeBridgeError(message: "`claude agents --json` endete mit Code \(process.terminationStatus)."))
+            return .failure(ClaudeBridgeError(message: AppLanguage.text("`claude agents --json` endete mit Code \(process.terminationStatus).", "`claude agents --json` exited with code \(process.terminationStatus).")))
         }
         guard let sessions = try? JSONDecoder().decode([ClaudeAgentSession].self, from: data) else {
-            return .failure(ClaudeBridgeError(message: "`claude agents --json` lieferte keine gültige Antwort."))
+            return .failure(ClaudeBridgeError(message: AppLanguage.text("`claude agents --json` lieferte keine gültige Antwort.", "`claude agents --json` did not return a valid response.")))
         }
         return .success(sessions)
     }
@@ -490,7 +495,7 @@ final class ClaudeAgentBridge: AgentBridge {
         let data = try Data(contentsOf: url)
         guard !data.isEmpty else { return [:] }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClaudeBridgeError(message: "~/.claude/settings.json enthält kein gültiges JSON-Objekt.")
+            throw ClaudeBridgeError(message: AppLanguage.text("~/.claude/settings.json enthält kein gültiges JSON-Objekt.", "~/.claude/settings.json does not contain a valid JSON object."))
         }
         return object
     }

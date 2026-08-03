@@ -46,8 +46,14 @@ struct ActionSelectionSheet: View {
                 Button("Abbrechen") { dismiss() }
             }
             Text(context == .tap
-                 ? "Der Katalog gilt für \(appName). Fehlende App-Aktionen kannst du direkt in der jeweiligen Zeile einrichten."
-                 : "Der Katalog gilt für \(appName). Halten verwendet einen eigenen, lokal ausgeführten Slot.")
+                 ? AppLanguage.text(
+                    "Der Katalog gilt für \(appName). Fehlende App-Aktionen kannst du direkt in der jeweiligen Zeile einrichten.",
+                    "The catalog applies to \(appName). You can set up missing app actions directly in their row."
+                 )
+                 : AppLanguage.text(
+                    "Der Katalog gilt für \(appName). Halten verwendet einen eigenen, lokal ausgeführten Slot.",
+                    "The catalog applies to \(appName). Hold uses its own slot, executed locally."
+                 ))
                 .font(.caption).foregroundStyle(.secondary)
 
             specialActions
@@ -117,7 +123,10 @@ struct ActionSelectionSheet: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            ContextInfoButton(title: action.title, message: action.description)
+            ContextInfoButton(
+                title: action.title,
+                message: action.description
+            )
 
             if action.execution == .configurableShortcut {
                 if let configured = configuredAction(for: action) {

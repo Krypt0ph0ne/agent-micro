@@ -178,7 +178,9 @@ struct MainWindowView: View {
             keyboardLayout: appState.profiles.keyboardLayout
         )
         showFeedback(
-            message: result?.succeeded == true ? "Konfiguration gültig" : "Validierung fehlgeschlagen",
+            message: result?.succeeded == true
+                ? AppLanguage.text("Konfiguration gültig", "Configuration valid")
+                : AppLanguage.text("Validierung fehlgeschlagen", "Validation failed"),
             detail: detail(for: result),
             succeeded: result?.succeeded == true
         )
@@ -187,19 +189,27 @@ struct MainWindowView: View {
     private func upload() {
         guard appState.profiles.hasUnsyncedChanges else {
             showFeedback(
-                message: "Aktuelles Setup bereits übertragen",
-                detail: "Auf dem Pad ist bereits die ausgewählte Profil- und Layer-Konfiguration aktiv.",
+                message: AppLanguage.text("Aktuelles Setup bereits übertragen", "Current setup already transferred"),
+                detail: AppLanguage.text(
+                    "Auf dem Pad ist bereits die ausgewählte Profil- und Layer-Konfiguration aktiv.",
+                    "The selected profile and layer configuration is already active on the pad."
+                ),
                 succeeded: true
             )
             return
         }
 
         let transfer = appState.transferCurrentConfiguration()
+        let profileName = transfer?.profileName ?? AppLanguage.text("Profil", "Profile")
+        let layerName = transfer?.layerName ?? AppLanguage.text("Layer", "Layer")
         showFeedback(
             message: transfer?.succeeded == true
-                ? "\(transfer?.profileName ?? "Profil") · \(transfer?.layerName ?? "Layer") übertragen"
-                : "Upload fehlgeschlagen",
-            detail: transfer?.detail ?? "Die Übertragung konnte nicht gestartet werden. Prüfe die Pad-Verbindung und versuche es erneut.",
+                ? AppLanguage.text("\(profileName) · \(layerName) übertragen", "\(profileName) · \(layerName) transferred")
+                : AppLanguage.text("Upload fehlgeschlagen", "Upload failed"),
+            detail: transfer?.detail ?? AppLanguage.text(
+                "Die Übertragung konnte nicht gestartet werden. Prüfe die Pad-Verbindung und versuche es erneut.",
+                "The transfer could not be started. Check the pad connection and try again."
+            ),
             succeeded: transfer?.succeeded == true
         )
     }
@@ -220,9 +230,16 @@ struct MainWindowView: View {
     }
 
     private func detail(for result: ProcessResult?) -> String {
-        guard let result else { return "Die lokale Vorprüfung hat einen Konfigurationsfehler gemeldet. Details stehen in Diagnose." }
+        guard let result else {
+            return AppLanguage.text(
+                "Die lokale Vorprüfung hat einen Konfigurationsfehler gemeldet. Details stehen in Diagnose.",
+                "The local pre-check reported a configuration error. Details are in Diagnostics."
+            )
+        }
         let parts = [result.launchError, result.stdout.nilIfEmpty, result.stderr.nilIfEmpty].compactMap { $0 }
-        return parts.isEmpty ? "Befehl ohne zusätzliche Ausgabe beendet." : parts.joined(separator: "\n")
+        return parts.isEmpty
+            ? AppLanguage.text("Befehl ohne zusätzliche Ausgabe beendet.", "Command finished without additional output.")
+            : parts.joined(separator: "\n")
     }
 }
 
@@ -244,6 +261,8 @@ struct ConnectionStatus: View {
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
         }
-        .help(help ?? (connected ? "Verbunden" : "Nicht verbunden"))
+        .help(help ?? (connected
+            ? AppLanguage.text("Verbunden", "Connected")
+            : AppLanguage.text("Nicht verbunden", "Not connected")))
     }
 }

@@ -40,7 +40,10 @@ struct ControlAssignmentPanel: View {
                     .foregroundStyle(.tint)
                 Text(control.shortTitle)
                     .font(.headline)
-                ContextInfoButton(title: "Bedienelement belegen", message: infoMessage)
+                ContextInfoButton(
+                    title: AppLanguage.text("Bedienelement belegen", "Assign control"),
+                    message: infoMessage
+                )
                 Spacer()
                 Menu {
                     ForEach(HardwareControl.allCases) { item in
@@ -135,9 +138,15 @@ struct ControlAssignmentPanel: View {
                 Image(systemName: "wand.and.stars")
                     .foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("In Codex zuweisen: \(CodexTriggerPool.displayLabel(for: macro))")
+                    Text(AppLanguage.text(
+                        "In Codex zuweisen: \(CodexTriggerPool.displayLabel(for: macro))",
+                        "Bind in Codex: \(CodexTriggerPool.displayLabel(for: macro))"
+                    ))
                         .font(.caption.weight(.semibold))
-                    Text("Codex › Settings › Keyboard Shortcuts › „\(definition.title)“. Danach übertragen.")
+                    Text(AppLanguage.text(
+                        "Codex › Settings › Keyboard Shortcuts › „\(definition.title)“. Danach übertragen.",
+                        "Codex › Settings › Keyboard Shortcuts › “\(definition.title)”. Then transfer."
+                    ))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -152,7 +161,10 @@ struct ControlAssignmentPanel: View {
     }
 
     private var infoMessage: String {
-        "Wähle oben eine Taste und danach eine Aktion. Agent-Tasten werden direkt am Pad zugewiesen: Taste halten, mit dem Drehrad einen Chat wählen und loslassen. Der Live-Status steuert die LED. Änderungen müssen einmal auf das Pad übertragen werden."
+        AppLanguage.text(
+            "Wähle oben eine Taste und danach eine Aktion. Agent-Tasten werden direkt am Pad zugewiesen: Taste halten, mit dem Drehrad einen Chat wählen und loslassen. Der Live-Status steuert die LED. Änderungen müssen einmal auf das Pad übertragen werden.",
+            "Pick a key above, then an action. Agent keys are assigned directly on the pad: hold the key, choose a chat with the dial, and release. The live status drives the LED. Changes have to be transferred to the pad once."
+        )
     }
 
 }

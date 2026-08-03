@@ -159,7 +159,7 @@ struct KeyControlView: View {
         Button(action: select) {
             VStack(alignment: .leading, spacing: compact ? 2 : 3) {
                 HStack(spacing: 3) {
-                    Text(control.title.replacingOccurrences(of: "Taste ", with: ""))
+                    Text(control.title.replacingOccurrences(of: AppLanguage.text("Taste ", "Key "), with: ""))
                         .font(.system(size: compact ? 8 : 9, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.5))
                     Spacer(minLength: 0)
@@ -221,7 +221,7 @@ struct KeyControlView: View {
 
     private var resolvedLabel: String {
         guard action.kind.isAgent else { return action.displayLabel }
-        return displayLabel ?? "Kein Chat zugeordnet"
+        return displayLabel ?? AppLanguage.text("Kein Chat zugeordnet", "No chat assigned")
     }
 
     private var keyBackground: LinearGradient {
