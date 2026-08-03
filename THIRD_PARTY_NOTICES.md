@@ -13,6 +13,11 @@ commit `aff33824af889022eb130db4c01c4c0bbaa8ab89` (retrieved
 or executing an opaque helper. The vendored source includes local support for
 the verified `0x1189:0x8890` device path.
 
+The vendored copy intentionally diverges from that upstream commit in
+`Cargo.toml` and `Cargo.lock` only, to carry security updates upstream has not
+released: `rustix` 0.36.16, `unsafe-libyaml` 0.2.10, `time` 0.3.47, and
+`serde_with` 3.21.0. No Rust source file is modified.
+
 License: MIT License, Copyright 2023 Mikhail Trishchenkov. The full license
 text is retained at `References/ch57x-keyboard-tool/LICENSE`.
 
