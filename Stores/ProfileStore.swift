@@ -298,7 +298,7 @@ final class ProfileStore {
         guard let source = profile.layers.first(where: { $0.id == layerID }) else { return }
         var copy = source
         copy.id = UUID()
-        copy.name = uniqueLayerName("\(source.name) Kopie", in: profile)
+        copy.name = uniqueLayerName(AppLanguage.text("\(source.name) Kopie", "\(source.name) copy"), in: profile)
         profile.layers.append(copy)
         profile.activeLayerID = copy.id
         profile.updatedAt = .now
@@ -402,7 +402,7 @@ final class ProfileStore {
     func newProfile() {
         let profile = ProfileFactory.safe()
         var renamed = profile
-        renamed.name = uniqueName("Neues Profil")
+        renamed.name = uniqueName(AppLanguage.text("Neues Profil", "New profile"))
         profiles.append(renamed)
         selectedProfileID = renamed.id
         commitChange()
@@ -411,7 +411,7 @@ final class ProfileStore {
     func duplicateSelected() {
         var duplicate = selectedProfile
         duplicate.id = UUID()
-        duplicate.name = uniqueName("\(selectedProfile.name) Kopie")
+        duplicate.name = uniqueName(AppLanguage.text("\(selectedProfile.name) Kopie", "\(selectedProfile.name) copy"))
         duplicate.createdAt = .now
         duplicate.updatedAt = .now
         duplicate.isBuiltIn = false
@@ -422,7 +422,9 @@ final class ProfileStore {
 
     func renameSelected(to name: String) {
         var profile = selectedProfile
-        profile.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Unbenanntes Profil" : name
+        profile.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? AppLanguage.text("Unbenanntes Profil", "Untitled profile")
+            : name
         replace(profile)
     }
 
@@ -526,12 +528,18 @@ final class ProfileStore {
 
         backupRawFile(data, persistenceURL: url, reason: "corrupt")
         guard let recovered = ProfileFileCodec.decodeLeniently(data) else {
-            warning = "Profiles.json war beschädigt und konnte nicht gelesen werden. Eine Sicherung liegt neben der Datei, die Belegung wurde auf Werkseinstellungen zurückgesetzt."
+            warning = AppLanguage.text(
+                "Profiles.json war beschädigt und konnte nicht gelesen werden. Eine Sicherung liegt neben der Datei, die Belegung wurde auf Werkseinstellungen zurückgesetzt.",
+                "Profiles.json was corrupt and could not be read. A backup was saved next to the file and the mapping has been reset to factory defaults."
+            )
             logger.error("Profiles.json fully unreadable, resetting to defaults")
             return nil
         }
         if recovered.droppedCount > 0 {
-            warning = "\(recovered.droppedCount) Profil(e) in Profiles.json waren beschädigt und wurden übersprungen. Die übrigen \(recovered.profiles.count) wurden wiederhergestellt; eine Sicherung liegt neben der Datei."
+            warning = AppLanguage.text(
+                "\(recovered.droppedCount) Profil(e) in Profiles.json waren beschädigt und wurden übersprungen. Die übrigen \(recovered.profiles.count) wurden wiederhergestellt; eine Sicherung liegt neben der Datei.",
+                "\(recovered.droppedCount) profile(s) in Profiles.json were corrupt and have been skipped. The remaining \(recovered.profiles.count) were recovered; a backup was saved next to the file."
+            )
             logger.error("Recovered \(recovered.profiles.count) profile(s), dropped \(recovered.droppedCount)")
         }
         return recovered.profiles

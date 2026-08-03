@@ -835,7 +835,13 @@ enum ProfileFactory {
                     action: KeyboardAction(kind: .singleKey, label: key.uppercased(), icon: "keyboard", deviceMacro: key)
                 )
             }
-        return MacropadProfile(name: "Sichere F13–F21-Belegung", controls: controls)
+        // Generated fresh on each call and never matched against (only
+        // "Codex", "Claude" and "Codex · Reasoning triggers" are looked up by
+        // name), so this one is safe to localize at creation time.
+        return MacropadProfile(
+            name: AppLanguage.text("Sichere F13–F21-Belegung", "Safe F13–F21 mapping"),
+            controls: controls
+        )
     }
 
     static func macOS() -> MacropadProfile {

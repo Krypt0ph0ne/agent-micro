@@ -70,11 +70,35 @@ struct CodexActionCatalog {
         self.document = document
     }
 
-    var actions: [CodexActionDefinition] { document.actions }
+    /// The catalog JSON ships its user-facing text in German (see
+    /// `Resources/CodexActions.json` and `Resources/ClaudeActions.json`). This
+    /// is the single place that text is translated: every read path —
+    /// `actions`, `categories`, `action(id:)` and the `KeyboardAction`s derived
+    /// from them — goes through here, so anything that groups, sorts or
+    /// filters by `category` keeps comparing like with like.
+    ///
+    /// Only the four display fields are touched; `id`, `icon`, `shortcut`,
+    /// `deviceMacro`, `deepLink`, `modifiers`, `execution` and `compatibleWith`
+    /// stay exactly as decoded. Translating on read rather than once at decode
+    /// time means switching the app language takes effect immediately, without
+    /// rebuilding the catalog.
+    private static func localized(_ action: CodexActionDefinition) -> CodexActionDefinition {
+        var localized = action
+        localized.title = AppLanguage.localized(action.title)
+        localized.description = AppLanguage.localized(action.description)
+        localized.category = AppLanguage.localized(action.category)
+        localized.availabilityNote = action.availabilityNote.map(AppLanguage.localized)
+        // Most shortcuts are pure key symbols, but a few spell out a gesture
+        // ("⌘F17 halten"), so they need the same treatment.
+        localized.shortcut = action.shortcut.map(AppLanguage.localized)
+        return localized
+    }
+
+    var actions: [CodexActionDefinition] { document.actions.map(Self.localized) }
     var categories: [String] { Array(Set(actions.map(\.category))).sorted() }
 
     func action(id: String) -> CodexActionDefinition? {
-        actions.first(where: { $0.id == id })
+        document.actions.first(where: { $0.id == id }).map(Self.localized)
     }
 
     func keyboardAction(id: String) -> KeyboardAction? {

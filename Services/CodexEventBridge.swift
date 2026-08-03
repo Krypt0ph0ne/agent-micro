@@ -167,7 +167,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         lastError = nil
 
         guard let executable = Self.codexExecutable() else {
-            fail("Codex CLI wurde nicht gefunden. Installiere oder starte die Codex-App.")
+            fail(AppLanguage.text("Codex CLI wurde nicht gefunden. Installiere oder starte die Codex-App.", "Codex CLI not found. Install or launch the Codex app."))
             return
         }
 
@@ -215,7 +215,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
             statusReadsInFlight.removeAll()
             sendInitialize()
         } catch {
-            fail("Codex App Server konnte nicht gestartet werden: \(error.localizedDescription)")
+            fail(AppLanguage.text("Codex App Server konnte nicht gestartet werden: \(error.localizedDescription)", "Could not start the Codex app server: \(error.localizedDescription)"))
         }
     }
 
@@ -316,7 +316,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         do {
             try input?.write(contentsOf: data)
         } catch {
-            fail("Schreiben zum Codex App Server fehlgeschlagen: \(error.localizedDescription)")
+            fail(AppLanguage.text("Schreiben zum Codex App Server fehlgeschlagen: \(error.localizedDescription)", "Writing to the Codex app server failed: \(error.localizedDescription)"))
         }
     }
 
@@ -341,7 +341,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
                 case .recent: recentThreadListInFlight = false
                 }
             }
-            let detail = error["message"] as? String ?? "Unbekannter App-Server-Fehler"
+            let detail = error["message"] as? String ?? AppLanguage.text("Unbekannter App-Server-Fehler", "Unknown app server error")
             lastError = detail
             logger.error("App-server request failed: \(detail, privacy: .public)")
             return
@@ -443,7 +443,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
             }
             if pendingElicitations[threadID]?.isEmpty != false { onStatus?(threadID, .running, .event) }
         case "error":
-            lastError = params["message"] as? String ?? "Codex App Server meldet einen Fehler."
+            lastError = params["message"] as? String ?? AppLanguage.text("Codex App Server meldet einen Fehler.", "The Codex app server reported an error.")
         default:
             break
         }
@@ -545,7 +545,7 @@ final class CodexEventBridge: @unchecked Sendable, AgentBridge {
         process = nil
         input = nil
         guard !isStopping else { return }
-        scheduleReconnect(reason: "Codex App Server wurde beendet (Code \(code)).")
+        scheduleReconnect(reason: AppLanguage.text("Codex App Server wurde beendet (Code \(code)).", "The Codex app server exited (code \(code))."))
     }
 
     private func fail(_ message: String) {

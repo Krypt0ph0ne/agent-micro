@@ -8,11 +8,20 @@ enum CodexPadPacketError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unsupportedAction(let control, let value):
-            "\(control.title) wird von der CH552-Firmware noch nicht direkt unterstützt: \(value)"
+            AppLanguage.text(
+                "\(control.title) wird von der CH552-Firmware noch nicht direkt unterstützt: \(value)",
+                "\(control.title) is not yet supported directly by the CH552 firmware: \(value)"
+            )
         case .invalidMacro(let control, let value):
-            "Ungültiger Geräteausdruck für \(control.title): \(value)"
+            AppLanguage.text(
+                "Ungültiger Geräteausdruck für \(control.title): \(value)",
+                "Invalid device expression for \(control.title): \(value)"
+            )
         case .tooManySteps(let control):
-            "\(control.title) enthält mehr als fünf Tastenschritte."
+            AppLanguage.text(
+                "\(control.title) enthält mehr als fünf Tastenschritte.",
+                "\(control.title) contains more than five key steps."
+            )
         }
     }
 }

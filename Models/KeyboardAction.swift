@@ -160,8 +160,11 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
 
     /// Labels for built-in actions are stored in profiles for backwards
     /// compatibility, but must follow the current app language at display
-    /// time. Custom action labels deliberately remain exactly as the user
-    /// entered them.
+    /// time. The stored `label` is therefore never rewritten — every kind that
+    /// can be reconstructed from other fields is rebuilt here, and anything
+    /// else (catalog titles, the factory `macOS` profile's German labels, the
+    /// `Pet anzeigen` migration) is looked up in the strings table. A label the
+    /// user typed themselves has no entry there and passes through untouched.
     var displayLabel: String {
         return switch kind {
         case .disabled:
@@ -173,7 +176,7 @@ struct KeyboardAction: Codable, Hashable, Identifiable {
         case .textSubmission:
             submittedText.map { AppLanguage.text("„\($0)“ absenden", "Submit “\($0)”") } ?? label
         default:
-            label
+            AppLanguage.localized(label)
         }
     }
 

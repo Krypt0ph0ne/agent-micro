@@ -45,7 +45,7 @@ final class CodexPadEventService: @unchecked Sendable {
     private var diagnosticSequence: UInt8 = 0
     private(set) var firmwareStatus: CodexPadFirmwareStatus?
     private(set) var events: [CodexPadPhysicalEvent] = []
-    private(set) var status = "Noch nicht verbunden"
+    private(set) var status = AppLanguage.text("Noch nicht verbunden", "Not connected yet")
     var onPhysicalEvent: ((CodexPadPhysicalEvent) -> Void)?
     var onFirmwareStatus: ((CodexPadFirmwareStatus) -> Void)?
     /// Rate-limits `reconnectDevice()`: a genuinely absent device (mid USB
@@ -73,7 +73,7 @@ final class CodexPadEventService: @unchecked Sendable {
               let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>,
               let device = devices.first,
               IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess else {
-            status = "Raw HID konnte nicht geöffnet werden"
+            status = AppLanguage.text("Raw HID konnte nicht geöffnet werden", "Could not open raw HID")
             return
         }
         let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: CodexPadPacketEncoder.packetSize)
@@ -82,7 +82,7 @@ final class CodexPadEventService: @unchecked Sendable {
         self.manager = manager
         self.device = device
         self.reportBuffer = buffer
-        status = "Protokoll v2 verbunden"
+        status = AppLanguage.text("Protokoll v2 verbunden", "Protocol v2 connected")
         requestStatus()
         // Physical key edges arrive as their own unsolicited reports, so this
         // poll only refreshes the firmware/pressed-mask fallback. 150 ms keeps
@@ -104,7 +104,7 @@ final class CodexPadEventService: @unchecked Sendable {
         reportBuffer = nil; device = nil; manager = nil
         firmwareStatus = nil
         lastLoggedPressedMask = nil
-        status = "Noch nicht verbunden"
+        status = AppLanguage.text("Noch nicht verbunden", "Not connected yet")
     }
 
     func requestStatus() {
@@ -209,7 +209,10 @@ final class CodexPadEventService: @unchecked Sendable {
             // CPU. Only a real change is propagated.
             guard newStatus != firmwareStatus else { return }
             firmwareStatus = newStatus
-            status = "Firmware \(newStatus.version) · Protokoll v\(bytes[2])"
+            status = AppLanguage.text(
+                "Firmware \(newStatus.version) · Protokoll v\(bytes[2])",
+                "Firmware \(newStatus.version) · protocol v\(bytes[2])"
+            )
             if lastLoggedPressedMask != newStatus.pressedMask {
                 lastLoggedPressedMask = newStatus.pressedMask
                 logger.info("Pressed mask changed: 0x\(String(newStatus.pressedMask, radix: 16), privacy: .public)")

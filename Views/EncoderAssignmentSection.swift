@@ -22,7 +22,10 @@ struct EncoderAssignmentSection: View {
                     .foregroundStyle(.tint)
                 Text("Drehrad")
                     .font(.headline)
-                ContextInfoButton(title: "Drehrad-Gesten", message: infoMessage)
+                ContextInfoButton(
+                    title: AppLanguage.text("Drehrad-Gesten", "Dial gestures"),
+                    message: infoMessage
+                )
                 Spacer()
                 Toggle("", isOn: isEnabled)
                     .labelsHidden()
@@ -32,20 +35,31 @@ struct EncoderAssignmentSection: View {
 
             row(
                 icon: "slider.horizontal.3",
-                gesture: "Normal drücken / drehen",
-                value: "Aufwand ± · Modellwahl öffnen/schließen"
+                gesture: AppLanguage.text("Normal drücken / drehen", "Normal press / turn"),
+                value: AppLanguage.text(
+                    "Aufwand ± · Modellwahl öffnen/schließen",
+                    "Effort ± · open/close model selection"
+                )
             )
             row(
                 icon: "cube",
-                gesture: "Halten (>\(ClaudeReasoningAutomationService.modelListHoldThresholdMilliseconds) ms) + drehen",
-                value: "Modell wechseln, Loslassen übernimmt"
+                gesture: AppLanguage.text(
+                    "Halten (>\(ClaudeReasoningAutomationService.modelListHoldThresholdMilliseconds) ms) + drehen",
+                    "Hold (>\(ClaudeReasoningAutomationService.modelListHoldThresholdMilliseconds) ms) + turn"
+                ),
+                value: AppLanguage.text(
+                    "Modell wechseln, Loslassen übernimmt",
+                    "Switch model, release applies it"
+                )
             )
 
             HStack(spacing: 8) {
                 PermissionStatus(
                     title: "Input Monitoring",
                     isGranted: automation.usesPhysicalEncoderEvents || automation.hasInputMonitoringPermission,
-                    grantedTitle: automation.usesPhysicalEncoderEvents ? "Nicht nötig" : "Erteilt"
+                    grantedTitle: automation.usesPhysicalEncoderEvents
+                        ? AppLanguage.text("Nicht nötig", "Not needed")
+                        : AppLanguage.text("Erteilt", "Granted")
                 )
                 PermissionStatus(title: "Accessibility", isGranted: automation.hasAccessibilityPermission)
             }
@@ -131,14 +145,14 @@ struct EncoderAssignmentSection: View {
 struct PermissionStatus: View {
     let title: String
     let isGranted: Bool
-    var grantedTitle = "Erteilt"
+    var grantedTitle = AppLanguage.text("Erteilt", "Granted")
 
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
-            Text(isGranted ? grantedTitle : "Fehlt")
+            Text(isGranted ? grantedTitle : AppLanguage.text("Fehlt", "Missing"))
                 .foregroundStyle(isGranted ? Color.green : Color.orange)
         }
         .font(.caption)

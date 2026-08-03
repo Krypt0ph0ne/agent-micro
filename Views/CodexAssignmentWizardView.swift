@@ -66,14 +66,20 @@ struct CodexAssignmentWizardView: View {
             HStack(spacing: 8) {
                 Image(systemName: "wand.and.stars")
                     .foregroundStyle(.tint)
-                Text("\(appName)-Aktion einrichten")
+                Text(AppLanguage.text("\(appName)-Aktion einrichten", "Set up \(appName) action"))
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Label("\(control.shortTitle)\(slot == .hold ? " · Halten" : "")", systemImage: control.icon)
+                Label(
+                    "\(control.shortTitle)\(slot == .hold ? AppLanguage.text(" · Halten", " · Hold") : "")",
+                    systemImage: control.icon
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text("Diese Aktionen haben in \(appName) keine Standardtaste. Der Assistent vergibt einen eindeutigen Trigger, den das Pad direkt sendet – du weist ihn danach einmalig in \(appName) zu.")
+            Text(AppLanguage.text(
+                "Diese Aktionen haben in \(appName) keine Standardtaste. Der Assistent vergibt einen eindeutigen Trigger, den das Pad direkt sendet – du weist ihn danach einmalig in \(appName) zu.",
+                "These actions have no default shortcut in \(appName). The assistant assigns a unique trigger that the pad sends directly – you then bind it once in \(appName)."
+            ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -204,8 +210,14 @@ struct CodexAssignmentWizardView: View {
                         } else {
                             let detail = result?.detail.trimmingCharacters(in: .whitespacesAndNewlines)
                             setupError = detail?.isEmpty == false
-                                ? "Die Taste konnte nicht übertragen werden: \(detail!)"
-                                : "Die Taste konnte nicht auf das Pad übertragen werden. Prüfe die Verbindung und versuche es erneut."
+                                ? AppLanguage.text(
+                                    "Die Taste konnte nicht übertragen werden: \(detail!)",
+                                    "The key could not be transferred: \(detail!)"
+                                )
+                                : AppLanguage.text(
+                                    "Die Taste konnte nicht auf das Pad übertragen werden. Prüfe die Verbindung und versuche es erneut.",
+                                    "The key could not be transferred to the pad. Check the connection and try again."
+                                )
                         }
                     }
                     .keyboardShortcut(.defaultAction)
@@ -244,7 +256,10 @@ struct CodexAssignmentWizardView: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(CodexTriggerPool.candidates.count) Kandidaten: A–Z, 0–9 und F1–F12.")
+                Text(AppLanguage.text(
+                    "\(CodexTriggerPool.candidates.count) Kandidaten: A–Z, 0–9 und F1–F12.",
+                    "\(CodexTriggerPool.candidates.count) candidates: A–Z, 0–9 and F1–F12."
+                ))
                 Text("Codex veröffentlicht seine belegten Shortcuts nicht. Ist einer dort schon belegt, markiere ihn hier; Agent Micro schlägt ihn danach nie wieder vor.")
                 if !knownTriggers.isEmpty {
                     Text("Für frühere Einrichtungen: Auswählen › Bereits eingerichtet und den bereits in Codex verwendeten Trigger einmal übernehmen.")
@@ -261,9 +276,9 @@ struct CodexAssignmentWizardView: View {
 
     private var triggerPicker: some View {
         Menu {
-            triggerMenu("Buchstaben", candidates: CodexTriggerPool.letterCandidates)
-            triggerMenu("Zahlen", candidates: CodexTriggerPool.numberCandidates)
-            triggerMenu("F-Tasten", candidates: CodexTriggerPool.functionKeyCandidates)
+            triggerMenu(AppLanguage.text("Buchstaben", "Letters"), candidates: CodexTriggerPool.letterCandidates)
+            triggerMenu(AppLanguage.text("Zahlen", "Numbers"), candidates: CodexTriggerPool.numberCandidates)
+            triggerMenu(AppLanguage.text("F-Tasten", "Function keys"), candidates: CodexTriggerPool.functionKeyCandidates)
             if !knownTriggers.isEmpty {
                 Divider()
                 Menu("Bereits eingerichtet") {
@@ -324,20 +339,68 @@ struct CodexAssignmentWizardView: View {
 
     private func instructions(for action: CodexActionDefinition) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(appName == "Codex" ? "Schnelleinrichtung" : "So in \(appName) zuweisen")
+            Text(appName == "Codex"
+                ? AppLanguage.text("Schnelleinrichtung", "Quick setup")
+                : AppLanguage.text("So in \(appName) zuweisen", "How to bind it in \(appName)"))
                 .font(.caption.weight(.semibold))
             if appName == "Codex" {
-                step(1, "Klicke unten auf ", trailing: "„Übertragen“, damit \(control.shortTitle) den Trigger sendet.")
-                step(2, "Öffne in Codex ", trailing: "Settings › Keyboard Shortcuts und suche „\(action.title)“.")
-                step(3, "Klicke beim Treffer auf ", trailing: "„+“ und drücke einmal die physische \(control.shortTitle).")
-                Text("Verwende dabei \(CodexTriggerPool.displayLabel(for: trigger)). Agent Micro öffnet keine Codex-Ansicht mehr automatisch.")
+                step(
+                    1,
+                    AppLanguage.text("Klicke unten auf ", "Click "),
+                    trailing: AppLanguage.text(
+                        "„Übertragen“, damit \(control.shortTitle) den Trigger sendet.",
+                        "“Transfer” below so \(control.shortTitle) sends the trigger."
+                    )
+                )
+                step(
+                    2,
+                    AppLanguage.text("Öffne in Codex ", "In Codex, open "),
+                    trailing: AppLanguage.text(
+                        "Settings › Keyboard Shortcuts und suche „\(action.title)“.",
+                        "Settings › Keyboard Shortcuts and search for “\(action.title)”."
+                    )
+                )
+                step(
+                    3,
+                    AppLanguage.text("Klicke beim Treffer auf ", "On the matching row, click "),
+                    trailing: AppLanguage.text(
+                        "„+“ und drücke einmal die physische \(control.shortTitle).",
+                        "“+” and press the physical \(control.shortTitle) once."
+                    )
+                )
+                Text(AppLanguage.text(
+                    "Verwende dabei \(CodexTriggerPool.displayLabel(for: trigger)). Agent Micro öffnet keine Codex-Ansicht mehr automatisch.",
+                    "Use \(CodexTriggerPool.displayLabel(for: trigger)) for this. Agent Micro no longer opens any Codex view automatically."
+                ))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tint)
             } else {
-                step(1, "Öffne in Claude ", trailing: "die Datei ~/.claude/keybindings.json.")
-                step(2, "Trage die Aktions-ID ein: ", trailing: "„\(action.codexCommandID ?? action.id)“.")
-                step(3, "Binde sie an ", trailing: CodexTriggerPool.displayLabel(for: trigger) + ".")
-                step(4, "Danach in Agent Micro ", trailing: "Übertragen klicken.")
+                step(
+                    1,
+                    AppLanguage.text("Öffne in Claude ", "In Claude, open "),
+                    trailing: AppLanguage.text(
+                        "die Datei ~/.claude/keybindings.json.",
+                        "the file ~/.claude/keybindings.json."
+                    )
+                )
+                step(
+                    2,
+                    AppLanguage.text("Trage die Aktions-ID ein: ", "Enter the action ID: "),
+                    trailing: AppLanguage.text(
+                        "„\(action.codexCommandID ?? action.id)“.",
+                        "“\(action.codexCommandID ?? action.id)”."
+                    )
+                )
+                step(
+                    3,
+                    AppLanguage.text("Binde sie an ", "Bind it to "),
+                    trailing: CodexTriggerPool.displayLabel(for: trigger) + "."
+                )
+                step(
+                    4,
+                    AppLanguage.text("Danach in Agent Micro ", "Then, in Agent Micro, "),
+                    trailing: AppLanguage.text("Übertragen klicken.", "click Transfer.")
+                )
             }
         }
         .padding(12)

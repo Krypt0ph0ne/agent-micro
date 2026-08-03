@@ -43,7 +43,10 @@ struct CH57xProcessClient {
                 stdout: "",
                 stderr: "",
                 timedOut: false,
-                launchError: "CH57x-Helper nicht gefunden: \(helperURL.path). Führe script/build_and_run.sh aus."
+                launchError: AppLanguage.text(
+                    "CH57x-Helper nicht gefunden: \(helperURL.path). Führe script/build_and_run.sh aus.",
+                    "CH57x helper not found: \(helperURL.path). Run script/build_and_run.sh."
+                )
             )
         }
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("codexpad-\(UUID().uuidString).yaml")

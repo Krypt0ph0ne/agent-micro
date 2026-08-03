@@ -48,7 +48,7 @@ struct CodexAgentAssignmentView: View {
                 .padding(.top, 4)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(assignment?.threadTitle ?? "Noch kein Chat zugeordnet")
+                Text(assignment?.threadTitle ?? AppLanguage.text("Noch kein Chat zugeordnet", "No chat assigned yet"))
                     .font(.subheadline.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -97,8 +97,11 @@ struct CodexAgentAssignmentView: View {
                 .help("Taste halten, mit dem Drehrad einen Chat wählen und zum Zuweisen loslassen.")
             Spacer(minLength: 4)
             ContextInfoButton(
-                title: "Chat direkt am Pad zuweisen",
-                message: "Halte die Agent-Taste etwa \(CodexQuickAssignService.holdThresholdMilliseconds) ms gedrückt. Drehe weiter gedrückt am Drehrad durch die letzten Chats und lasse die Taste beim gewünschten Chat los. Kurzes Tippen öffnet den bereits zugewiesenen Chat."
+                title: AppLanguage.text("Chat direkt am Pad zuweisen", "Assign a chat directly on the pad"),
+                message: AppLanguage.text(
+                    "Halte die Agent-Taste etwa \(CodexQuickAssignService.holdThresholdMilliseconds) ms gedrückt. Drehe weiter gedrückt am Drehrad durch die letzten Chats und lasse die Taste beim gewünschten Chat los. Kurzes Tippen öffnet den bereits zugewiesenen Chat.",
+                    "Hold the agent key for about \(CodexQuickAssignService.holdThresholdMilliseconds) ms. Keep holding it while turning the dial through the most recent chats, then release on the chat you want. A short tap opens the chat that is already assigned."
+                )
             )
         }
         .font(.caption.weight(.medium))

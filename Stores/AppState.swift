@@ -448,7 +448,14 @@ final class AppState {
             if previousID != nil {
                 padEvents.refresh(enabled: false)
                 keyboardState.refresh(enabled: false)
-                diagnostics.append(.warning, "Agent Micro getrennt", detail: "Eingabe- und LED-Dienste wurden angehalten.")
+                diagnostics.append(
+                    .warning,
+                    AppLanguage.text("Agent Micro getrennt", "Agent Micro disconnected"),
+                    detail: AppLanguage.text(
+                        "Eingabe- und LED-Dienste wurden angehalten.",
+                        "Input and LED services have been stopped."
+                    )
+                )
             }
             observedDeviceID = nil
             return
@@ -476,16 +483,26 @@ final class AppState {
         keyboardState.refresh(enabled: customFirmware)
         let transfer = transferCurrentConfiguration()
         if transfer?.succeeded == true {
+            let profileName = transfer?.profileName ?? AppLanguage.text("Profil", "Profile")
+            let layerName = transfer?.layerName ?? "Layer"
             diagnostics.append(
                 .success,
-                previousID == nil ? "Agent Micro initialisiert" : "Agent Micro neu initialisiert",
-                detail: "\(transfer?.profileName ?? "Profil") · \(transfer?.layerName ?? "Layer") · Eingaben und Live-LEDs aktiv"
+                previousID == nil
+                    ? AppLanguage.text("Agent Micro initialisiert", "Agent Micro initialized")
+                    : AppLanguage.text("Agent Micro neu initialisiert", "Agent Micro reinitialized"),
+                detail: AppLanguage.text(
+                    "\(profileName) · \(layerName) · Eingaben und Live-LEDs aktiv",
+                    "\(profileName) · \(layerName) · input and live LEDs active"
+                )
             )
         } else if reportDiagnostics {
             diagnostics.append(
                 .error,
-                "Agent Micro Initialisierung unvollständig",
-                detail: "Das Gerät wurde erkannt, aber das aktive Profil konnte nicht bestätigt werden. Mit „Gerät erneut suchen“ oder „Übertragen“ kann der Versuch bewusst wiederholt werden."
+                AppLanguage.text("Agent Micro Initialisierung unvollständig", "Agent Micro setup incomplete"),
+                detail: AppLanguage.text(
+                    "Das Gerät wurde erkannt, aber das aktive Profil konnte nicht bestätigt werden. Mit „Gerät erneut suchen“ oder „Übertragen“ kann der Versuch bewusst wiederholt werden.",
+                    "The device was detected, but the active profile could not be confirmed. Use “Scan for device again” or “Transfer” to retry deliberately."
+                )
             )
         }
     }
