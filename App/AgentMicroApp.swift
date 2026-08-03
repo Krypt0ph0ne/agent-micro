@@ -57,14 +57,21 @@ private struct LanguageAwareView<Content: View>: View {
 /// through the first-run permission walkthrough at least once.
 private struct RootView: View {
     let appState: AppState
-    @AppStorage("AgentMicro.hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    /// The guide is versioned instead of using the old boolean flag. App
+    /// bundles can be replaced without removing UserDefaults, and the former
+    /// CodexPad migration could otherwise make a new Agent Micro install look
+    /// as if its guide had already been completed.
+    private static let currentOnboardingVersion = 2
+    @AppStorage("AgentMicro.completedOnboardingVersion") private var completedOnboardingVersion = 0
 
     var body: some View {
-        if hasCompletedOnboarding {
+        if completedOnboardingVersion >= Self.currentOnboardingVersion {
             MainWindowView(appState: appState)
                 .frame(width: 410, height: 620)
         } else {
-            OnboardingView(appState: appState) { hasCompletedOnboarding = true }
+            OnboardingView(appState: appState) {
+                completedOnboardingVersion = Self.currentOnboardingVersion
+            }
         }
     }
 }
