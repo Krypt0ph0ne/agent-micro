@@ -8,11 +8,20 @@ enum CH57xConfigurationError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unsupportedDeferredAction(let control):
-            "\(control.title) nutzt eine lokale/deeplink-basierte Aktion. Sie benötigt einen späteren F13–F21-Listener und kann nicht direkt auf das Gerät geladen werden."
+            AppLanguage.text(
+                "\(control.title) nutzt eine lokale/deeplink-basierte Aktion. Sie benötigt einen späteren F13–F21-Listener und kann nicht direkt auf das Gerät geladen werden.",
+                "\(control.title) uses a local or deep-link action. It requires a later F13–F21 listener and cannot be transferred to the device directly."
+            )
         case .invalidExpression(let control, let expression):
-            "Ungültiger Ausdruck für \(control.title): \(expression)"
+            AppLanguage.text(
+                "Ungültiger Ausdruck für \(control.title): \(expression)",
+                "Invalid expression for \(control.title): \(expression)"
+            )
         case .sequenceTooLong(let control):
-            "\(control.title) enthält mehr als fünf Tastenkombinationen; 0x8890 unterstützt höchstens fünf."
+            AppLanguage.text(
+                "\(control.title) enthält mehr als fünf Tastenkombinationen; 0x8890 unterstützt höchstens fünf.",
+                "\(control.title) contains more than five key combinations; the 0x8890 supports at most five."
+            )
         }
     }
 }

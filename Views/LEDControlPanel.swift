@@ -15,14 +15,17 @@ private enum LEDScope: Hashable {
 
     var title: String {
         switch self {
-        case .all: "Alle"
-        case .key(let control): control.shortTitle.replacingOccurrences(of: "Taste ", with: "")
+        case .all: AppLanguage.text("Alle", "All")
+        case .key(let control): control.shortTitle.replacingOccurrences(
+            of: AppLanguage.text("Taste ", "Key "),
+            with: ""
+        )
         }
     }
 
     var detailTitle: String {
         switch self {
-        case .all: "Alle Tasten"
+        case .all: AppLanguage.text("Alle Tasten", "All keys")
         case .key(let control): control.shortTitle
         }
     }
@@ -57,8 +60,11 @@ struct LEDControlPanel: View {
                 Text("Licht")
                     .font(.headline)
                 ContextInfoButton(
-                    title: "So funktioniert das Licht",
-                    message: "Zwei Ebenen: Das Grundlicht zeigt, wie deine Tasten im Ruhezustand aussehen. Reaktionen legen sich bei Ereignissen (Diktat, Senden, Agent-Status) automatisch darüber und kehren danach zum Grundlicht zurück."
+                    title: AppLanguage.text("So funktioniert das Licht", "How lighting works"),
+                    message: AppLanguage.text(
+                        "Zwei Ebenen: Das Grundlicht zeigt, wie deine Tasten im Ruhezustand aussehen. Reaktionen legen sich bei Ereignissen (Diktat, Senden, Agent-Status) automatisch darüber und kehren danach zum Grundlicht zurück.",
+                        "Two layers: base lighting shows how your keys look while idle. Reactions automatically override it on events (dictation, submit, agent status) and return to the base lighting afterwards."
+                    )
                 )
                 Spacer()
             }
@@ -253,7 +259,7 @@ struct LEDControlPanel: View {
                 }
                 .buttonStyle(.plain)
                 .help(preset.name)
-                .accessibilityLabel("Idle-Farbe \(preset.name)")
+                .accessibilityLabel(AppLanguage.text("Idle-Farbe \(preset.name)", "Idle color \(preset.name)"))
             }
         }
     }
@@ -285,7 +291,10 @@ struct LEDControlPanel: View {
                         .frame(width: 38, alignment: .trailing)
                 }
             }
-            Text("Pulsiert zwischen \(minPercent) % und \(maxPercent) %. Bei 0 % übernimmt die Firmware den Puls.")
+            Text(AppLanguage.text(
+                "Pulsiert zwischen \(minPercent) % und \(maxPercent) %. Bei 0 % übernimmt die Firmware den Puls.",
+                "Pulses between \(minPercent) % and \(maxPercent) %. At 0 % the firmware takes over the pulse."
+            ))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -392,12 +401,18 @@ struct LEDControlPanel: View {
         appState.refreshAgentLEDs()
     }
 
-    private static let presets: [(name: String, color: Color, rgb: (UInt8, UInt8, UInt8))] = [
-        ("Rot", .red, (255, 0, 0)), ("Orange", .orange, (255, 96, 0)),
-        ("Gelb", .yellow, (255, 255, 0)), ("Grün", .green, (0, 255, 0)),
-        ("Cyan", .cyan, (0, 255, 255)), ("Blau", .blue, (0, 0, 255)),
-        ("Pink", .pink, (255, 0, 255)), ("Weiß", .white, (255, 255, 255))
-    ]
+    private static var presets: [(name: String, color: Color, rgb: (UInt8, UInt8, UInt8))] {
+        [
+            (AppLanguage.text("Rot", "Red"), .red, (255, 0, 0)),
+            (AppLanguage.text("Orange", "Orange"), .orange, (255, 96, 0)),
+            (AppLanguage.text("Gelb", "Yellow"), .yellow, (255, 255, 0)),
+            (AppLanguage.text("Grün", "Green"), .green, (0, 255, 0)),
+            (AppLanguage.text("Cyan", "Cyan"), .cyan, (0, 255, 255)),
+            (AppLanguage.text("Blau", "Blue"), .blue, (0, 0, 255)),
+            (AppLanguage.text("Pink", "Pink"), .pink, (255, 0, 255)),
+            (AppLanguage.text("Weiß", "White"), .white, (255, 255, 255))
+        ]
+    }
 }
 
 private struct LEDReactionEditor: View {
@@ -508,7 +523,10 @@ private struct LEDReactionEditor: View {
                     }
                     if layer.confirmationEffect != .steady && layer.confirmationEffect != .off {
                         Stepper(
-                            "Wiederholungen: \(layer.confirmationRepeatCount)",
+                            AppLanguage.text(
+                                "Wiederholungen: \(layer.confirmationRepeatCount)",
+                                "Repeats: \(layer.confirmationRepeatCount)"
+                            ),
                             value: layerRepeatBinding(layer.id),
                             in: 1...8
                         )
@@ -611,7 +629,7 @@ private struct LEDReactionEditor: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Reaktion testen")
-                .accessibilityLabel("\(event.title) testen")
+                .accessibilityLabel(AppLanguage.text("\(event.title) testen", "Test \(event.title)"))
                 ColorPicker("Farbe", selection: reactionColorBinding(event), supportsOpacity: false)
                     .labelsHidden()
                 Picker("Effekt", selection: reactionEffectBinding(event)) {
@@ -634,7 +652,7 @@ private struct LEDReactionEditor: View {
                 }
                 .buttonStyle(.borderless)
                 .help(isExpanded ? "Optionen schließen" : "Helligkeit und Dauer einstellen")
-                .accessibilityLabel("Optionen für \(event.title)")
+                .accessibilityLabel(AppLanguage.text("Optionen für \(event.title)", "Options for \(event.title)"))
             }
 
             if isExpanded {
@@ -667,7 +685,10 @@ private struct LEDReactionEditor: View {
                             .frame(width: 38, alignment: .trailing)
                     }
                 }
-                Text("Pulsiert zwischen \(Int(reaction.minBrightness) * 100 / 255) % und \(Int(reaction.brightness) * 100 / 255) %. Bei 0 % übernimmt die Firmware den Puls.")
+                Text(AppLanguage.text(
+                    "Pulsiert zwischen \(Int(reaction.minBrightness) * 100 / 255) % und \(Int(reaction.brightness) * 100 / 255) %. Bei 0 % übernimmt die Firmware den Puls.",
+                    "Pulses between \(Int(reaction.minBrightness) * 100 / 255) % and \(Int(reaction.brightness) * 100 / 255) %. At 0 % the firmware takes over the pulse."
+                ))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

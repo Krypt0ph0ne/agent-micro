@@ -30,10 +30,10 @@ struct ProcessResult: Sendable, Hashable {
 
     var failureDescription: String {
         if let launchError { return launchError }
-        if timedOut { return "Zeitüberschreitung" }
-        if exitCode != 0 { return "Exit-Code \(exitCode)" }
+        if timedOut { return AppLanguage.text("Zeitüberschreitung", "Timed out") }
+        if exitCode != 0 { return AppLanguage.text("Exit-Code \(exitCode)", "Exit code \(exitCode)") }
         if !stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return stderr }
-        return "Unbekannter Prozessfehler"
+        return AppLanguage.text("Unbekannter Prozessfehler", "Unknown process error")
     }
 }
 

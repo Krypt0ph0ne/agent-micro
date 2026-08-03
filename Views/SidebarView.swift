@@ -6,8 +6,8 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .pad: "Codex-Drehrad"
-        case .diagnostics: "Diagnose"
+        case .pad: AppLanguage.text("Codex-Drehrad", "Codex dial")
+        case .diagnostics: AppLanguage.text("Diagnose", "Diagnostics")
         }
     }
     var icon: String {

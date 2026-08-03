@@ -48,7 +48,7 @@ struct CodexThreadDescriptor: Identifiable, Codable, Hashable, Sendable {
         if !title.isEmpty { return title }
         if !preview.isEmpty { return preview }
         let shortID = String(id.prefix(8))
-        return isSubagent ? "Subagent · \(shortID)" : "Sitzung · \(shortID)"
+        return isSubagent ? "Subagent · \(shortID)" : AppLanguage.text("Sitzung · \(shortID)", "Session · \(shortID)")
     }
 
     var projectName: String? {

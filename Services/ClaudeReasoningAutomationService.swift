@@ -66,8 +66,8 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private var isModelMenuOpen = false
 
     private let permissionMonitor: PermissionMonitor
-    private(set) var status = "Deaktiviert"
-    private(set) var lastInput = "Noch kein Drehrad-Signal empfangen"
+    private(set) var status = AppLanguage.text("Deaktiviert", "Disabled")
+    private(set) var lastInput = AppLanguage.text("Noch kein Drehrad-Signal empfangen", "No dial signal received yet")
     var hasAccessibilityPermission: Bool { permissionMonitor.hasAccessibilityPermission }
     var hasInputMonitoringPermission: Bool { permissionMonitor.hasInputMonitoringPermission }
     var isEnabled: Bool {
@@ -92,7 +92,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         }
         updateMonitoring()
         if !hasAccessibilityPermission || (!usesPhysicalEncoderEvents && !hasInputMonitoringPermission) {
-            status = "Berechtigungen fehlen noch. In den Systemeinstellungen Agent Micro aktivieren und danach zur App zurückkehren."
+            status = AppLanguage.text(
+                "Berechtigungen fehlen noch. In den Systemeinstellungen Agent Micro aktivieren und danach zur App zurückkehren.",
+                "Permissions are still missing. Enable Agent Micro in System Settings, then come back to the app."
+            )
         }
     }
 
@@ -110,18 +113,24 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     func handlePhysicalEvent(_ event: CodexPadPhysicalEvent) {
         guard let control = HardwareControl(reportedControlIndex: event.control),
               HardwareControl.encoderActions.contains(control) else { return }
-        let source = event.origin == .hardware ? "Hardware" : "Diagnose"
+        let source = event.origin == .hardware ? "Hardware" : AppLanguage.text("Diagnose", "Diagnostics")
         lastInput = "\(source): \(control.title) · \(String(describing: event.phase)) · #\(event.sequence)"
         logger.info(
             "Physical encoder received origin=\(event.origin.rawValue, privacy: .public) control=\(control.rawValue, privacy: .public) phase=\(event.phase.rawValue, privacy: .public)"
         )
         guard isActiveProfile() else {
-            status = "Drehrad ignoriert: Claude-Profil ist nicht aktiv."
+            status = AppLanguage.text(
+                "Drehrad ignoriert: Claude-Profil ist nicht aktiv.",
+                "Dial ignored: the Claude profile is not active."
+            )
             logger.error("Physical encoder rejected: inactive Claude profile")
             return
         }
         guard !isExternallySuspended() else {
-            status = "Drehrad wartet: Thread-Auswahl ist noch aktiv."
+            status = AppLanguage.text(
+                "Drehrad wartet: Thread-Auswahl ist noch aktiv.",
+                "Dial waiting: thread selection is still active."
+            )
             logger.error("Physical encoder rejected: thread picker is active")
             return
         }
@@ -151,7 +160,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         if encoderHoldFired {
             driveModelMenuHighlight(step)
         } else if isEncoderPressed {
-            status = "Drehrad wird gehalten – nach \(Self.modelListHoldThresholdMilliseconds) ms Modelle auswählen."
+            status = AppLanguage.text(
+                "Drehrad wird gehalten – nach \(Self.modelListHoldThresholdMilliseconds) ms Modelle auswählen.",
+                "Dial held — choose models after \(Self.modelListHoldThresholdMilliseconds) ms."
+            )
         } else {
             stepEffort(step)
         }
@@ -164,7 +176,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         encoderHoldFired = false
         guard !isSequenceInFlight else {
             suppressCurrentEncoderPress = true
-            status = "Drehrad-Druck wartet: eine Aufwandänderung läuft noch."
+            status = AppLanguage.text(
+                "Drehrad-Druck wartet: eine Aufwandänderung läuft noch.",
+                "Dial press waiting: an effort change is still running."
+            )
             return
         }
         encoderHoldTimer = Timer.scheduledTimer(withTimeInterval: Self.modelListHoldThresholdSeconds, repeats: false) { [weak self] _ in
@@ -176,7 +191,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func fireEncoderHold() {
         guard !suppressCurrentEncoderPress, isEncoderPressed else { return }
         guard isActiveProfile(), !isExternallySuspended() else {
-            status = "Modellwahl abgebrochen: Profil oder Thread-Auswahl hat sich geändert."
+            status = AppLanguage.text(
+                "Modellwahl abgebrochen: Profil oder Thread-Auswahl hat sich geändert.",
+                "Model selection cancelled: the profile or thread selection changed."
+            )
             return
         }
         guard !isSequenceInFlight else { return }
@@ -210,11 +228,17 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     /// re-reading the slider's own value afterwards.
     private func stepEffort(_ direction: CodexModelListStep) {
         guard !isModelMenuOpen else {
-            status = "Drehschritt ignoriert: das Modellmenü ist noch offen."
+            status = AppLanguage.text(
+                "Drehschritt ignoriert: das Modellmenü ist noch offen.",
+                "Dial step ignored: the model menu is still open."
+            )
             return
         }
         guard !isSequenceInFlight else {
-            status = "Drehschritt ignoriert: Claude verarbeitet noch die vorherige Geste."
+            status = AppLanguage.text(
+                "Drehschritt ignoriert: Claude verarbeitet noch die vorherige Geste.",
+                "Dial step ignored: Claude is still processing the previous gesture."
+            )
             return
         }
         run { await self.performEffortStep(direction) }
@@ -223,7 +247,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func performEffortStep(_ direction: CodexModelListStep) async {
         guard let context = await openEffortPopover() else { return }
         guard let slider = ClaudeAccessibilityControls.effortSlider(in: context.application) else {
-            status = "Claudes Aufwand-Regler wurde im geöffneten Menü nicht gefunden."
+            status = AppLanguage.text(
+                "Claudes Aufwand-Regler wurde im geöffneten Menü nicht gefunden.",
+                "Claude's effort slider was not found in the open menu."
+            )
             await closeEffortPopover(context)
             return
         }
@@ -236,10 +263,19 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             let current = ClaudeAccessibilityControls.stringValue(of: slider)
             if current == previous, !current.isEmpty {
                 status = direction == .next
-                    ? "Claude-Aufwand ist bereits maximal (\(current))."
-                    : "Claude-Aufwand ist bereits minimal (\(current))."
+                    ? AppLanguage.text(
+                        "Claude-Aufwand ist bereits maximal (\(current)).",
+                        "Claude's effort is already at maximum (\(current))."
+                    )
+                    : AppLanguage.text(
+                        "Claude-Aufwand ist bereits minimal (\(current)).",
+                        "Claude's effort is already at minimum (\(current))."
+                    )
             } else {
-                status = "Claude-Aufwand ließ sich nicht ändern (\(previous.isEmpty ? "kein Wert lesbar" : previous))."
+                status = AppLanguage.text(
+                    "Claude-Aufwand ließ sich nicht ändern (\(previous.isEmpty ? "kein Wert lesbar" : previous)).",
+                    "Claude's effort could not be changed (\(previous.isEmpty ? "no readable value" : previous))."
+                )
                 await closeEffortPopover(context)
                 return
             }
@@ -247,7 +283,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             return
         }
 
-        status = "Claude-Aufwand: \(updated)"
+        status = AppLanguage.text("Claude-Aufwand: \(updated)", "Claude effort: \(updated)")
         logger.info("Claude effort changed \(previous, privacy: .public) → \(updated, privacy: .public)")
         scheduleIdleClose(context)
     }
@@ -281,11 +317,17 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
 
     func toggleEffortMenu() {
         guard !isModelMenuOpen else {
-            status = "Menü wartet: das Modellmenü ist noch offen."
+            status = AppLanguage.text(
+                "Menü wartet: das Modellmenü ist noch offen.",
+                "Menu waiting: the model menu is still open."
+            )
             return
         }
         guard !isSequenceInFlight else {
-            status = "Menü wartet: Claude verarbeitet noch die vorherige Geste."
+            status = AppLanguage.text(
+                "Menü wartet: Claude verarbeitet noch die vorherige Geste.",
+                "Menu waiting: Claude is still processing the previous gesture."
+            )
             return
         }
         run {
@@ -296,7 +338,9 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             guard let context = await self.openEffortPopover() else { return }
             let value = ClaudeAccessibilityControls.effortSlider(in: context.application)
                 .map(ClaudeAccessibilityControls.stringValue(of:)) ?? ""
-            self.status = value.isEmpty ? "Aufwandmenü geöffnet." : "Aufwandmenü offen · \(value)"
+            self.status = value.isEmpty
+                ? AppLanguage.text("Aufwandmenü geöffnet.", "Effort menu opened.")
+                : AppLanguage.text("Aufwandmenü offen · \(value)", "Effort menu open · \(value)")
             self.scheduleIdleClose(context)
         }
     }
@@ -306,20 +350,29 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func openModelMenu() async {
         guard let context = currentContext() else { return }
         guard let popUp = resolveModelPopUp(in: context.application) else {
-            status = "Claudes Modellauswahl wurde nicht gefunden."
+            status = AppLanguage.text(
+                "Claudes Modellauswahl wurde nicht gefunden.",
+                "Claude's model selector was not found."
+            )
             return
         }
         await cancelIdleClose()
         if isEffortPopoverOpen { await closeEffortPopover(context) }
 
         guard await open(popUp, context: context) else {
-            status = "Claudes Modellmenü ließ sich nicht öffnen."
+            status = AppLanguage.text(
+                "Claudes Modellmenü ließ sich nicht öffnen.",
+                "Claude's model menu did not open."
+            )
             isModelMenuOpen = false
             return
         }
         isModelMenuOpen = true
         let current = ClaudeAccessibilityControls.title(of: popUp)
-        status = "Modellmenü offen (\(current)): drehen wählt, loslassen übernimmt."
+        status = AppLanguage.text(
+            "Modellmenü offen (\(current)): drehen wählt, loslassen übernimmt.",
+            "Model menu open (\(current)): turn to choose, release to confirm."
+        )
     }
 
     /// Only acts while the model menu is verified open. Arrow keys go to
@@ -329,11 +382,16 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         guard isModelMenuOpen, let context = currentContext() else { return }
         guard let popUp = cachedModelPopUp, ClaudeAccessibilityControls.isExpanded(popUp) else {
             isModelMenuOpen = false
-            status = "Modellmenü ist nicht mehr offen – Auswahl abgebrochen."
+            status = AppLanguage.text(
+                "Modellmenü ist nicht mehr offen – Auswahl abgebrochen.",
+                "The model menu is no longer open — selection cancelled."
+            )
             return
         }
         ClaudeAccessibilityControls.postKey(step == .next ? kVK_DownArrow : kVK_UpArrow, to: context.pid)
-        status = step == .next ? "Nächstes Modell" : "Vorheriges Modell"
+        status = step == .next
+            ? AppLanguage.text("Nächstes Modell", "Next model")
+            : AppLanguage.text("Vorheriges Modell", "Previous model")
     }
 
     private func confirmModelSelection() async {
@@ -350,11 +408,16 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         isModelMenuOpen = false
         guard collapsed else {
             await forceClose(context)
-            status = "Modellauswahl ließ sich nicht bestätigen – Menü wurde geschlossen."
+            status = AppLanguage.text(
+                "Modellauswahl ließ sich nicht bestätigen – Menü wurde geschlossen.",
+                "The model selection could not be confirmed — the menu was closed."
+            )
             return
         }
         let current = ClaudeAccessibilityControls.title(of: popUp)
-        status = current == previous ? "Modell unverändert: \(current)" : "Modell: \(current)"
+        status = current == previous
+            ? AppLanguage.text("Modell unverändert: \(current)", "Model unchanged: \(current)")
+            : AppLanguage.text("Modell: \(current)", "Model: \(current)")
         logger.info("Claude model \(previous, privacy: .public) → \(current, privacy: .public)")
     }
 
@@ -378,13 +441,19 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     private func openEffortPopover() async -> Context? {
         guard let context = currentContext() else { return nil }
         guard let popUp = resolveEffortPopUp(in: context.application) else {
-            status = "Claudes Aufwand-Auswahl wurde nicht gefunden."
+            status = AppLanguage.text(
+                "Claudes Aufwand-Auswahl wurde nicht gefunden.",
+                "Claude's effort control was not found."
+            )
             isEffortPopoverOpen = false
             return nil
         }
         await cancelIdleClose()
         guard await open(popUp, context: context) else {
-            status = "Claudes Aufwandmenü ließ sich nicht öffnen."
+            status = AppLanguage.text(
+                "Claudes Aufwandmenü ließ sich nicht öffnen.",
+                "Claude's effort menu did not open."
+            )
             isEffortPopoverOpen = false
             return nil
         }
@@ -527,15 +596,21 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
 
     private func readyClaudeApplication() -> NSRunningApplication? {
         guard isEnabled else {
-            status = "Encoder-Steuerung ist deaktiviert."
+            status = AppLanguage.text("Encoder-Steuerung ist deaktiviert.", "Dial control is disabled.")
             return nil
         }
         guard hasAccessibilityPermission else {
-            status = "Bedienungshilfen fehlen. Bitte unten Berechtigungen anfordern."
+            status = AppLanguage.text(
+                "Bedienungshilfen fehlen. Bitte unten Berechtigungen anfordern.",
+                "Accessibility permission is missing. Request permissions below."
+            )
             return nil
         }
         guard isActiveProfile(), !isExternallySuspended() else {
-            status = "Claude-Automation pausiert: Profil oder Thread-Auswahl hat sich geändert."
+            status = AppLanguage.text(
+                "Claude-Automation pausiert: Profil oder Thread-Auswahl hat sich geändert.",
+                "Claude automation paused: the profile or thread selection changed."
+            )
             return nil
         }
         guard let claude = claudeApplication else {
@@ -544,7 +619,7 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
             // longer holds, so drop it rather than risk sending keys into a
             // menu that isn't there.
             resetState()
-            status = "Claude läuft nicht."
+            status = AppLanguage.text("Claude läuft nicht.", "Claude is not running.")
             return nil
         }
         return claude
@@ -569,26 +644,38 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         stopMonitoring()
         resetState()
         guard isEnabled else {
-            status = "Deaktiviert"
+            status = AppLanguage.text("Deaktiviert", "Disabled")
             return
         }
 
         guard hasAccessibilityPermission else {
-            status = "Bedienungshilfen fehlen – Agent Micro darf Claude nicht steuern."
+            status = AppLanguage.text(
+                "Bedienungshilfen fehlen – Agent Micro darf Claude nicht steuern.",
+                "Accessibility permission is missing — Agent Micro may not control Claude."
+            )
             return
         }
 
         guard hasInputMonitoringPermission || usesPhysicalEncoderEvents else {
-            status = "Input Monitoring fehlt – macOS blockiert das Drehrad. Bitte Agent Micro unten freigeben."
+            status = AppLanguage.text(
+                "Input Monitoring fehlt – macOS blockiert das Drehrad. Bitte Agent Micro unten freigeben.",
+                "Input Monitoring is missing — macOS is blocking the dial. Allow Agent Micro below."
+            )
             return
         }
 
         guard !usesPhysicalEncoderEvents else {
-            status = "Bereit: Drehrad läuft über das direkte Pad-Protokoll. Nur Bedienungshilfen werden benötigt."
+            status = AppLanguage.text(
+                "Bereit: Drehrad läuft über das direkte Pad-Protokoll. Nur Bedienungshilfen werden benötigt.",
+                "Ready: the dial runs over the direct pad protocol. Only Accessibility is required."
+            )
             return
         }
 
-        status = "Bereit: Drehen = Reasoning-Aufwand · Halten (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + drehen = Modell wechseln."
+        status = AppLanguage.text(
+            "Bereit: Drehen = Reasoning-Aufwand · Halten (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + drehen = Modell wechseln.",
+            "Ready: turn = reasoning effort · hold (>\(Int(Self.modelListHoldThresholdSeconds * 1000)) ms) + turn = switch model."
+        )
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let keyboardIdentity: (Int, Int) -> [String: Any] = { vendorID, productID in
@@ -605,7 +692,10 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard result == kIOReturnSuccess else {
-            status = "Drehrad konnte nicht geöffnet werden (\(result))."
+            status = AppLanguage.text(
+                "Drehrad konnte nicht geöffnet werden (\(result)).",
+                "Could not open the dial (\(result))."
+            )
             IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
             return
         }
@@ -640,7 +730,9 @@ final class ClaudeReasoningAutomationService: EncoderAutomationService {
     }
 
     private func recordInput(usage: Int, value: Int) {
-        lastInput = HIDInputEvent.functionKeyName(usage).map { "Empfangen: \($0)" } ?? String(format: "Empfangen: 0x%02X", usage)
+        lastInput = HIDInputEvent.functionKeyName(usage)
+            .map { AppLanguage.text("Empfangen: \($0)", "Received: \($0)") }
+            ?? String(format: AppLanguage.text("Empfangen: 0x%02X", "Received: 0x%02X"), usage)
         logger.info("HID input usage=\(usage, privacy: .public) value=\(value, privacy: .public)")
     }
 

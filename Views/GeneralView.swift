@@ -35,14 +35,14 @@ struct GeneralView: View {
             Section("Import & Export") {
                 HStack {
                     Button("Aktuelles Profil exportieren") {
-                        do { resultText = "Exportiert: \(try appState.profiles.exportSelectedProfile().path)" }
+                        do { resultText = AppLanguage.text("Exportiert", "Exported") + ": \(try appState.profiles.exportSelectedProfile().path)" }
                         catch is CancellationError { }
-                        catch { resultText = "Export fehlgeschlagen: \(error.localizedDescription)" }
+                        catch { resultText = AppLanguage.text("Export fehlgeschlagen", "Export failed") + ": \(error.localizedDescription)" }
                     }
                     Button("Profil importieren") {
-                        do { try appState.profiles.importProfile(); resultText = "Profil importiert." }
+                        do { try appState.profiles.importProfile(); resultText = AppLanguage.text("Profil importiert.", "Profile imported.") }
                         catch is CancellationError { }
-                        catch { resultText = "Import fehlgeschlagen: \(error.localizedDescription)" }
+                        catch { resultText = AppLanguage.text("Import fehlgeschlagen", "Import failed") + ": \(error.localizedDescription)" }
                     }
                 }
                 if let resultText { Text(resultText).font(.caption).foregroundStyle(.secondary) }
@@ -89,7 +89,13 @@ struct GeneralView: View {
     private func setLEDMode(_ mode: Int) {
         let result = appState.device.setLEDMode(mode)
         ledTestMessage = result?.succeeded == true
-            ? "LED-Pattern \(mode) wurde auf dem Pad gesetzt."
-            : "LED-Pattern \(mode) konnte nicht gesetzt werden – Details stehen in Diagnose."
+            ? AppLanguage.text(
+                "LED-Pattern \(mode) wurde auf dem Pad gesetzt.",
+                "LED pattern \(mode) was set on the pad."
+            )
+            : AppLanguage.text(
+                "LED-Pattern \(mode) konnte nicht gesetzt werden – Details stehen in Diagnose.",
+                "LED pattern \(mode) could not be set — see Diagnostics for details."
+            )
     }
 }

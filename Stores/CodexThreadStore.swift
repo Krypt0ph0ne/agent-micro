@@ -49,8 +49,14 @@ final class CodexThreadStore {
     var liveStatusAvailability: AgentLiveStatusAvailability { bridge.liveStatusAvailability }
     var sessionNavigationSummary: String {
         automationApp == .claude
-            ? "Claude-Sitzungen werden über ihre Bridge-Sitzungs-ID (`session_…`) in der bestehenden Desktop-Unterhaltung geöffnet. Ältere Sitzungen ohne diese ID lassen sich nicht direkt anspringen; ein Tastendruck holt dann nur Claude nach vorn."
-            : "Codex öffnet den zugewiesenen Thread per Deep Link."
+            ? AppLanguage.text(
+                "Claude-Sitzungen werden über ihre Bridge-Sitzungs-ID (`session_…`) in der bestehenden Desktop-Unterhaltung geöffnet. Ältere Sitzungen ohne diese ID lassen sich nicht direkt anspringen; ein Tastendruck holt dann nur Claude nach vorn.",
+                "Claude sessions open in the existing desktop conversation via their bridge session ID (`session_…`). Older sessions without that ID cannot be jumped to directly; a key press then only brings Claude to the front."
+            )
+            : AppLanguage.text(
+                "Codex öffnet den zugewiesenen Thread per Deep Link.",
+                "Codex opens the assigned thread via deep link."
+            )
     }
 
     func start() {
