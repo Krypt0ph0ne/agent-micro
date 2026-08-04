@@ -37,13 +37,13 @@ struct OnboardingPermissionsStep: View {
                     detail: AppLanguage.text("Damit Agent Micro Tastenkombinationen an Codex/Claude senden kann.", "Allows Agent Micro to send keyboard shortcuts to Codex and Claude."),
                     isGranted: monitor.hasAccessibilityPermission
                 )
-                permissionRow(
-                    title: "Input Monitoring",
-                    detail: usesPhysicalInputProtocol
-                        ? AppLanguage.text("Für dieses Pad nicht nötig – Eingaben kommen über das direkte Geräteprotokoll.", "Not needed for this pad — input arrives through the direct device protocol.")
-                        : AppLanguage.text("Damit Agent Micro die Tasten und das Drehrad überhaupt empfängt.", "Allows Agent Micro to receive keys and dial input."),
-                    isGranted: usesPhysicalInputProtocol || monitor.hasInputMonitoringPermission
-                )
+                if !usesPhysicalInputProtocol {
+                    permissionRow(
+                        title: "Input Monitoring",
+                        detail: AppLanguage.text("Damit Agent Micro die Tasten und das Drehrad überhaupt empfängt.", "Allows Agent Micro to receive keys and dial input."),
+                        isGranted: monitor.hasInputMonitoringPermission
+                    )
+                }
                 if !bothGranted {
                     Button(AppLanguage.text("Berechtigungen anfordern", "Request permissions")) {
                         if usesPhysicalInputProtocol {

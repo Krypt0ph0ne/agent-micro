@@ -3,11 +3,13 @@ import Foundation
 /// One-time compatibility bridge from the pre-open-source CodexPad identity.
 /// The migration copies preferences only when the new key is absent and moves
 /// the Application Support directory only when doing so cannot overwrite data.
+/// The onboarding completion flag is deliberately not copied: Agent Micro's
+/// guide is a new flow, so a completed CodexPad guide must not hide it on the
+/// first Agent Micro launch.
 enum AgentMicroDataMigration {
     private static let migrationKey = "AgentMicro.didMigrateCodexPadDataV1"
 
     private static let preferenceSuffixes = [
-        "hasCompletedOnboarding",
         "appLanguage",
         "selectedProfileID",
         "keyboardLayout",

@@ -15,6 +15,14 @@ struct EncoderAssignmentSection: View {
         Binding(get: { automation.isEnabled }, set: { automation.isEnabled = $0 })
     }
 
+    /// The service flips this flag during hardware reconciliation. Include the
+    /// device's already-known firmware capability so the UI never presents a
+    /// legacy Input Monitoring requirement during that short startup window.
+    private var usesDirectPadProtocol: Bool {
+        automation.usesPhysicalEncoderEvents
+            || appState.device.currentDevice?.isCodexPadFirmware == true
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -54,13 +62,12 @@ struct EncoderAssignmentSection: View {
             )
 
             HStack(spacing: 8) {
-                PermissionStatus(
-                    title: "Input Monitoring",
-                    isGranted: automation.usesPhysicalEncoderEvents || automation.hasInputMonitoringPermission,
-                    grantedTitle: automation.usesPhysicalEncoderEvents
-                        ? AppLanguage.text("Nicht nötig", "Not needed")
-                        : AppLanguage.text("Erteilt", "Granted")
-                )
+                if !usesDirectPadProtocol {
+                    PermissionStatus(
+                        title: "Input Monitoring",
+                        isGranted: automation.hasInputMonitoringPermission
+                    )
+                }
                 PermissionStatus(title: "Accessibility", isGranted: automation.hasAccessibilityPermission)
             }
 
@@ -77,7 +84,7 @@ struct EncoderAssignmentSection: View {
             .controlSize(.small)
             .disabled(!automation.isEnabled)
 
-            if !automation.hasAccessibilityPermission || (!automation.usesPhysicalEncoderEvents && !automation.hasInputMonitoringPermission) {
+            if !automation.hasAccessibilityPermission || (!usesDirectPadProtocol && !automation.hasInputMonitoringPermission) {
                 Button("Berechtigungen anfordern") { automation.requestPermissions() }
                     .controlSize(.small)
             }
@@ -96,14 +103,17 @@ struct EncoderAssignmentSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Label(
-                automation.usesPhysicalEncoderEvents
-                    ? AppLanguage.text("Direktes Pad-Protokoll · Input Monitoring nicht nötig", "Direct pad protocol · Input Monitoring not needed")
-                    : AppLanguage.text("Legacy-Keyboard-HID · Input Monitoring nötig", "Legacy keyboard HID · Input Monitoring required"),
-                systemImage: "cable.connector"
-            )
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            if !usesDirectPadProtocol {
+                Label(
+                    AppLanguage.text(
+                        "Legacy-Keyboard-HID · Input Monitoring nötig",
+                        "Legacy keyboard HID · Input Monitoring required"
+                    ),
+                    systemImage: "cable.connector"
+                )
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -126,10 +136,10 @@ struct EncoderAssignmentSection: View {
     }
 
     private var infoMessage: String {
-        let transport = automation.usesPhysicalEncoderEvents
+        let transport = usesDirectPadProtocol
             ? AppLanguage.text(
-                "Das direkte Pad-Protokoll liefert diese Ereignisse ohne Input Monitoring.",
-                "The direct pad protocol delivers these events without Input Monitoring."
+                "Das direkte Pad-Protokoll liefert diese Ereignisse direkt.",
+                "The direct pad protocol delivers these events directly."
             )
             : AppLanguage.text(
                 "Legacy-CH57x-Geräte liefern F22/F23/F24 über Keyboard-HID und benötigen dafür Input Monitoring.",
